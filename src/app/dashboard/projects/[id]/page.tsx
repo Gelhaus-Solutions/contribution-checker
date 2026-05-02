@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { requireProjectRole } from "@/lib/authz";
 import {
@@ -65,19 +66,21 @@ export default async function ProjectOverview({
           ) : (
             <ul className="divide-y divide-border">
               {recent.map((a) => (
-                <li
-                  key={a.id}
-                  className="flex items-center justify-between gap-3 px-6 py-3 text-sm"
-                >
-                  <span className="font-medium">{a.user.ghLogin ?? "(unknown)"}</span>
-                  <div className="flex items-center gap-3">
-                    <span className="text-xs text-muted-foreground">
-                      {a.createdAt.toISOString().slice(0, 10)}
-                    </span>
-                    <Badge variant={STATUS_VARIANT[a.status] ?? "secondary"}>
-                      {a.status}
-                    </Badge>
-                  </div>
+                <li key={a.id}>
+                  <Link
+                    href={`/dashboard/projects/${id}/applications/${a.id}`}
+                    className="flex items-center justify-between gap-3 px-6 py-3 text-sm transition-colors hover:bg-muted/60"
+                  >
+                    <span className="font-medium">{a.user.ghLogin ?? "(unknown)"}</span>
+                    <div className="flex items-center gap-3">
+                      <span className="text-xs text-muted-foreground">
+                        {a.createdAt.toISOString().slice(0, 10)}
+                      </span>
+                      <Badge variant={STATUS_VARIANT[a.status] ?? "secondary"}>
+                        {a.status}
+                      </Badge>
+                    </div>
+                  </Link>
                 </li>
               ))}
             </ul>
