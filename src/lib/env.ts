@@ -41,16 +41,24 @@ const schema = z.object({
   LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace"]).default("info"),
 });
 
+// During `next build`, Next.js executes server modules to collect page data
+// even though no request is being served. Skip strict validation in that
+// phase — env will be validated again on first real request, and any missing
+// values will surface there with the same error.
+const isBuildPhase = process.env.NEXT_PHASE === "phase-production-build";
+
 const parsed = schema.safeParse(process.env);
 
-if (!parsed.success) {
+if (!parsed.success && !isBuildPhase) {
   const issues = parsed.error.issues
     .map((i) => `  ${i.path.join(".")}: ${i.message}`)
     .join("\n");
   throw new Error(`Invalid environment variables:\n${issues}`);
 }
 
-const raw = parsed.data;
+const raw = parsed.success
+  ? parsed.data
+  : (schema.partial().parse(process.env) as z.infer<typeof schema>);
 
 // Single-App mode: use the GitHub App's OAuth client credentials for sign-in
 // when no separate OAuth App is configured.
