@@ -23,7 +23,6 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   ...authConfig,
   adapter: PrismaAdapter(prisma),
   callbacks: {
-    ...authConfig.callbacks,
     async session({ session, user }) {
       const u = await prisma.user.findUnique({
         where: { id: user.id },

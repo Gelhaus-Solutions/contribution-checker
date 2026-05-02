@@ -10,7 +10,7 @@ const schema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
 
   DATABASE_URL: z.string().min(1),
-  PUBLIC_BASE_URL: z.string().url(),
+  PUBLIC_BASE_URL: z.string().url().default("http://localhost:3000"),
 
   AUTH_SECRET: z.string().min(16),
   AUTH_URL: z.string().url().optional(),

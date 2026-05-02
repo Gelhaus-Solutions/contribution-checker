@@ -21,18 +21,7 @@ export const authConfig = {
       },
     }),
   ],
-  callbacks: {
-    authorized({ auth, request }) {
-      const { pathname } = request.nextUrl;
-      // /admin/setup is intentionally public so operators can read the
-      // webhook + callback URLs before sign-in is configured.
-      if (pathname === "/admin/setup" || pathname.startsWith("/admin/setup/")) {
-        return true;
-      }
-      const isProtected =
-        pathname.startsWith("/dashboard") || pathname.startsWith("/admin");
-      if (!isProtected) return true;
-      return !!auth?.user;
-    },
-  },
+  // No `authorized` middleware callback: we use database-backed sessions,
+  // which can't be looked up in the edge runtime. Each protected server page
+  // calls `requireSession()` itself.
 } satisfies NextAuthConfig;
