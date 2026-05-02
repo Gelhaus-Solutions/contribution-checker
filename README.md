@@ -126,6 +126,39 @@ Subscribed events: `pull_request`, `installation`, `installation_repositories`.
 - **PRs aren't being closed** — confirm the repo is linked under the project's Repos tab (not just installed in the GitHub App). The webhook ignores PRs from repos that aren't linked.
 - **Collaborators are seeing their PRs blocked** — toggle off the "Auto-bypass repository collaborators" option on the project settings page if you want to gate collaborators too, or leave it on if you want them to skip the gate. The check is cached for 5 minutes.
 
+## GitHub Actions CI (no App)
+
+For repos where you can't install the GitHub App (no org admin rights, restrictive enterprise policies, etc.), the project supports a parallel ingestion path: drop two workflows into the repo and the gating runs from inside Actions, using the workflow's built-in `GITHUB_TOKEN` to take action on PRs.
+
+### How auth works
+
+Workflows authenticate using GitHub Actions' built-in [OIDC token](https://docs.github.com/en/actions/deployment/security-hardening-your-deployments/about-security-hardening-with-openid-connect). Each request to the contribution-checker endpoints carries a short-lived JWT minted by GitHub (`token.actions.githubusercontent.com`). The server verifies the token's signature against GitHub's JWKS and trusts the `repository` and `aud` (audience) claims:
+
+- `aud` must equal `${PUBLIC_BASE_URL}/p/<projectSlug>` — binds the token to a specific project on this instance.
+- `repository` must match a `Repo` row registered under that project (by `owner/name`).
+
+There are no shared secrets to configure or rotate. A leaked token is useless after ~6 minutes and cannot be minted from outside the registered repo.
+
+### Setup
+
+1. In the dashboard, go to the project's **Repos** tab and add the repo by name (`owner/name`).
+2. Copy the two YAML files shown on the page into `.github/workflows/` on the repo's default branch:
+   - `contribution-check-gate.yml` — runs on every PR (`pull_request_target`) and gates open/reopen.
+   - `contribution-check-reconcile.yml` — runs every 10 minutes; reopens PRs whose authors have since been approved.
+3. Push. The next PR is gated automatically.
+
+The workflow YAMLs come pre-filled with `${PUBLIC_BASE_URL}` and the project slug.
+
+### Limitations vs the GitHub App
+
+- **Reopen latency**: up to 10 minutes (the reconcile cron interval). The App reopens immediately on approval.
+- **Collaborator auto-bypass**: not available in CI mode. List collaborators explicitly in the project's bypass handles, or extend the workflow to compute `isCollaborator` via `gh api /repos/{}/collaborators/{}` and include it in the `check-pr` request body.
+- **PR labels**: the workflow needs `issues: write` permission (already in the YAML). Labels are created lazily by GitHub on first use.
+
+### Security note on `pull_request_target`
+
+The gate workflow uses `pull_request_target` so it has access to the OIDC token even for PRs from forks. We do **not** `actions/checkout` the PR head SHA — only the base branch's workflow file is executed. This avoids the standard `pull_request_target` injection vector.
+
 ## How a PR is gated
 
 ```

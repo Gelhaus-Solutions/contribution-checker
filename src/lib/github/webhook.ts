@@ -2,6 +2,7 @@ import { prisma } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { env } from "@/lib/env";
 import { decideForPR } from "@/lib/applications/decide-pr";
+import { buildDecisionMessage } from "@/lib/applications/decision-message";
 import { enqueueProjectWebhook } from "@/lib/notifications/webhooks";
 import {
   closePullRequest,
@@ -169,21 +170,13 @@ export async function handlePullRequestEvent(payload: WebhookPayload) {
   }
 
   // PENDING or DENIED → close + comment + label
-  let body: string;
-  if (decision.status === "PENDING") {
-    body =
-      `Hi @${author.login}! Thanks for the PR. ` +
-      `Contributions to **${project.name}** are gated behind a short application. ` +
-      `Please apply at ${applyUrl} and we'll reopen this PR once you're approved.`;
-  } else {
-    body =
-      `Hi @${author.login}, your application for **${project.name}** was previously declined` +
-      (decision.reason ? `: ${decision.reason}` : "") +
-      `. ` +
-      (decision.cooldownUntil
-        ? `You may re-apply on ${decision.cooldownUntil.toISOString().slice(0, 10)}.`
-        : `Please contact a project admin if you believe this is in error.`);
-  }
+  const body =
+    buildDecisionMessage({
+      decision,
+      projectName: project.name,
+      applyUrl,
+      ghLogin: author.login,
+    }) ?? "";
 
   try {
     await closePullRequest(ref, prNumber, body);
