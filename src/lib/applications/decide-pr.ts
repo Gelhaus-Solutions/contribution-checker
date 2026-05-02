@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { isCollaborator } from "@/lib/github/collaborators";
@@ -47,33 +48,44 @@ function parseBypass(json: string): string[] {
   }
 }
 
+export type RepoForDecision = Prisma.RepoGetPayload<{
+  include: {
+    project: {
+      select: {
+        id: true;
+        cooldownDays: true;
+        bypassHandles: true;
+        bypassCollabs: true;
+      };
+    };
+  };
+}>;
+
+export const decisionRepoInclude = {
+  project: {
+    select: {
+      id: true,
+      cooldownDays: true,
+      bypassHandles: true,
+      bypassCollabs: true,
+    },
+  },
+} as const satisfies Prisma.RepoInclude;
+
 /**
- * Pure-ish decision function: given a (linked) repo and PR author,
- * return what should happen to the PR. Side-effects (commenting,
- * labeling, closing) are the caller's job.
+ * Pure-ish decision function operating on a loaded Repo row. Used directly
+ * by the CI flow (where the repo has no GH App installation) and by the
+ * `decideForPR` wrapper used by the App webhook.
  */
-export async function decideForPR(args: {
-  ghRepoId: number;
+export async function decideForRepo(args: {
+  repo: RepoForDecision;
   prAuthorGhLogin: string;
   prAuthorGhId: number;
+  // CI workflows can compute their own collaborator check via GITHUB_TOKEN
+  // and pass the result here, replacing the App-side Octokit call.
+  isCollaboratorHint?: boolean;
 }): Promise<PrDecision & { repoId?: string; projectId?: string }> {
-  const repo = await prisma.repo.findUnique({
-    where: { ghRepoId: args.ghRepoId },
-    include: {
-      project: {
-        select: {
-          id: true,
-          cooldownDays: true,
-          bypassHandles: true,
-          bypassCollabs: true,
-        },
-      },
-    },
-  });
-
-  if (!repo) {
-    return { status: "IGNORED", reason: "repo not linked" };
-  }
+  const { repo } = args;
   if (!repo.active) {
     return { status: "IGNORED", reason: "repo inactive (uninstalled)" };
   }
@@ -87,7 +99,6 @@ export async function decideForPR(args: {
       },
     },
   });
-  // Capture ghId opportunistically the first time we see this login.
   if (manual && manual.ghId === null) {
     await prisma.manualDecision
       .update({
@@ -151,6 +162,13 @@ export async function decideForPR(args: {
         "collaborator check failed; falling through"
       );
     }
+  } else if (repo.project.bypassCollabs && args.isCollaboratorHint) {
+    return {
+      status: "BYPASSED",
+      reason: "collaborator",
+      repoId: repo.id,
+      projectId: repo.projectId,
+    };
   }
 
   // 3) Look up applicant
@@ -210,11 +228,31 @@ export async function decideForPR(args: {
         projectId: repo.projectId,
       };
     }
-    // Cooldown expired — treat as if no decision was made.
     return { status: "PENDING", repoId: repo.id, projectId: repo.projectId };
   }
 
-  // SUBMITTED or REVOKED → pending. PR will be closed and applicant pointed
-  // at the apply page.
+  // SUBMITTED or REVOKED → pending.
   return { status: "PENDING", repoId: repo.id, projectId: repo.projectId };
+}
+
+/**
+ * Webhook entry point: load the Repo by GitHub repo id, then delegate.
+ */
+export async function decideForPR(args: {
+  ghRepoId: number;
+  prAuthorGhLogin: string;
+  prAuthorGhId: number;
+}): Promise<PrDecision & { repoId?: string; projectId?: string }> {
+  const repo = await prisma.repo.findUnique({
+    where: { ghRepoId: args.ghRepoId },
+    include: decisionRepoInclude,
+  });
+  if (!repo) {
+    return { status: "IGNORED", reason: "repo not linked" };
+  }
+  return decideForRepo({
+    repo,
+    prAuthorGhLogin: args.prAuthorGhLogin,
+    prAuthorGhId: args.prAuthorGhId,
+  });
 }

@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
 import { requireProjectRole } from "@/lib/authz";
 import { env } from "@/lib/env";
+import { notFound } from "next/navigation";
 import {
   Card,
   CardContent,
@@ -14,6 +15,113 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { addRepoByName, removeRepo } from "./actions";
 
+function ciGateYaml(baseUrl: string, slug: string): string {
+  return `name: Contribution check (gate)
+on:
+  pull_request_target:
+    types: [opened, reopened, ready_for_review]
+
+permissions:
+  id-token: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    env:
+      CC_BASE: ${baseUrl}
+      CC_PROJECT: ${slug}
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const audience = \`\${process.env.CC_BASE}/p/\${process.env.CC_PROJECT}\`;
+            const jwt = await core.getIDToken(audience);
+            const pr = context.payload.pull_request;
+            const r = await fetch(\`\${process.env.CC_BASE}/api/ci/check-pr\`, {
+              method: "POST",
+              headers: { authorization: \`Bearer \${jwt}\`, "content-type": "application/json" },
+              body: JSON.stringify({
+                projectSlug: process.env.CC_PROJECT,
+                action: context.payload.action,
+                pull_request: {
+                  number: pr.number,
+                  node_id: pr.node_id,
+                  user: { login: pr.user.login, id: pr.user.id, type: pr.user.type },
+                },
+              }),
+            });
+            if (!r.ok) { core.setFailed(\`check-pr \${r.status}\`); return; }
+            const d = await r.json();
+            if (d.decision === "block" && d.closePr) {
+              await github.rest.pulls.update({ ...context.repo, pull_number: pr.number, state: "closed" });
+              if (d.body) await github.rest.issues.createComment({
+                ...context.repo, issue_number: pr.number, body: d.body });
+            }
+            if (d.labels) {
+              for (const l of d.labels.remove ?? [])
+                await github.rest.issues.removeLabel({ ...context.repo, issue_number: pr.number, name: l }).catch(() => {});
+              if (d.labels.add?.length)
+                await github.rest.issues.addLabels({ ...context.repo, issue_number: pr.number, labels: d.labels.add });
+            }
+`;
+}
+
+function ciReconcileYaml(baseUrl: string, slug: string): string {
+  return `name: Contribution check (reconcile)
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    env:
+      CC_BASE: ${baseUrl}
+      CC_PROJECT: ${slug}
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const audience = \`\${process.env.CC_BASE}/p/\${process.env.CC_PROJECT}\`;
+            const jwt = async () => core.getIDToken(audience);
+            const list = await fetch(\`\${process.env.CC_BASE}/api/ci/reconcile\`, {
+              method: "POST",
+              headers: { authorization: \`Bearer \${await jwt()}\`, "content-type": "application/json" },
+              body: JSON.stringify({ projectSlug: process.env.CC_PROJECT }),
+            }).then(r => r.json());
+            const confirmed = [];
+            for (const it of list.reopens ?? []) {
+              try {
+                await github.rest.pulls.update({ ...context.repo, pull_number: it.prNumber, state: "open" });
+                if (it.body) await github.rest.issues.createComment({
+                  ...context.repo, issue_number: it.prNumber, body: it.body });
+                if (it.labels) {
+                  for (const l of it.labels.remove ?? [])
+                    await github.rest.issues.removeLabel({ ...context.repo, issue_number: it.prNumber, name: l }).catch(() => {});
+                  if (it.labels.add?.length)
+                    await github.rest.issues.addLabels({ ...context.repo, issue_number: it.prNumber, labels: it.labels.add });
+                }
+                confirmed.push({ prCheckId: it.prCheckId, newStatus: "APPROVED" });
+              } catch (e) { core.warning(\`reopen \${it.prNumber}: \${e.message}\`); }
+            }
+            if (confirmed.length) {
+              await fetch(\`\${process.env.CC_BASE}/api/ci/reconcile/confirm\`, {
+                method: "POST",
+                headers: { authorization: \`Bearer \${await jwt()}\`, "content-type": "application/json" },
+                body: JSON.stringify({ projectSlug: process.env.CC_PROJECT, confirmed }),
+              });
+            }
+`;
+}
+
 export default async function ProjectRepos({
   params,
 }: {
@@ -22,14 +130,23 @@ export default async function ProjectRepos({
   const { id } = await params;
   await requireProjectRole(id, "ADMIN");
 
+  const project = await prisma.project.findUnique({
+    where: { id },
+    select: { slug: true, name: true },
+  });
+  if (!project) notFound();
+
   const repos = await prisma.repo.findMany({
     where: { projectId: id },
     orderBy: { fullName: "asc" },
   });
 
+  const baseUrl = env.PUBLIC_BASE_URL.replace(/\/$/, "");
   const installUrl = env.githubAppConfigured
     ? `https://github.com/apps/${env.GITHUB_APP_SLUG}/installations/new?state=${encodeURIComponent(id)}`
     : null;
+  const gateYaml = ciGateYaml(baseUrl, project.slug);
+  const reconcileYaml = ciReconcileYaml(baseUrl, project.slug);
 
   return (
     <div className="space-y-6">
@@ -37,9 +154,9 @@ export default async function ProjectRepos({
         <CardHeader>
           <CardTitle className="text-base">Add a repo</CardTitle>
           <CardDescription>
-            Enter any GitHub repo by name. PR gating only kicks in once the
-            GitHub App is installed on it, but you can list repos here ahead of
-            time.
+            Enter any GitHub repo by name. PR gating starts once either the
+            GitHub App is installed on it, or you set up the GitHub Actions
+            workflow below.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -66,7 +183,7 @@ export default async function ProjectRepos({
               <a className="underline" href={installUrl}>
                 Install the GitHub App
               </a>{" "}
-              to activate PR checks.
+              to activate PR checks, or use the GitHub Actions workflow below.
             </div>
           )}
         </CardContent>
@@ -76,8 +193,8 @@ export default async function ProjectRepos({
         <CardHeader>
           <CardTitle className="text-base">Linked repos</CardTitle>
           <CardDescription>
-            Repos tracked by this project. The GitHub App must be installed for
-            the contribution checker to act on PRs.
+            Repos tracked by this project. Each must be activated either by
+            installing the GitHub App or by the Actions workflow.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -92,10 +209,13 @@ export default async function ProjectRepos({
                 >
                   <span className="font-mono">{r.fullName}</span>
                   <div className="flex items-center gap-2">
-                    {!r.installationId && (
-                      <Badge variant="warning">App not installed</Badge>
+                    {r.installationId != null && r.active && (
+                      <Badge variant="success">App installed</Badge>
                     )}
-                    {r.installationId && !r.active && (
+                    {r.installationId == null && r.active && (
+                      <Badge variant="secondary">CI mode</Badge>
+                    )}
+                    {r.installationId != null && !r.active && (
                       <Badge variant="destructive">uninstalled</Badge>
                     )}
                     {r.requireOwnApproval && (
@@ -123,6 +243,56 @@ export default async function ProjectRepos({
               <a href={installUrl}>Install GitHub App on more repos</a>
             </Button>
           )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">
+            GitHub Actions CI (no App)
+          </CardTitle>
+          <CardDescription>
+            For repos where you can&apos;t install the GitHub App. Drop these
+            two workflows into <code>.github/workflows/</code>; they
+            authenticate via the GitHub Actions OIDC token — no secrets to
+            configure.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4 text-sm">
+          <ol className="list-decimal space-y-1 pl-5">
+            <li>Add the repo above using its <code>owner/name</code>.</li>
+            <li>
+              Save <code>contribution-check-gate.yml</code> and{" "}
+              <code>contribution-check-reconcile.yml</code> below into{" "}
+              <code>.github/workflows/</code> on the default branch.
+            </li>
+            <li>Push. PR gating activates on the next opened PR.</li>
+          </ol>
+
+          <div className="space-y-2">
+            <div className="text-xs font-medium text-muted-foreground">
+              .github/workflows/contribution-check-gate.yml
+            </div>
+            <pre className="overflow-x-auto rounded-md border bg-muted p-3 text-xs">
+              <code>{gateYaml}</code>
+            </pre>
+          </div>
+
+          <div className="space-y-2">
+            <div className="text-xs font-medium text-muted-foreground">
+              .github/workflows/contribution-check-reconcile.yml
+            </div>
+            <pre className="overflow-x-auto rounded-md border bg-muted p-3 text-xs">
+              <code>{reconcileYaml}</code>
+            </pre>
+          </div>
+
+          <p className="text-xs text-muted-foreground">
+            Reopen-on-approval has up to ~10 minutes of latency (matches the
+            reconcile cron). Auto-bypass for repository collaborators is not
+            available in CI mode — list collaborators in the project&apos;s
+            bypass handles instead.
+          </p>
         </CardContent>
       </Card>
     </div>
