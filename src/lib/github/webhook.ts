@@ -203,11 +203,13 @@ export async function handlePullRequestEvent(payload: WebhookPayload) {
 }
 
 export async function handleInstallationEvent(payload: WebhookPayload) {
-  // Mark repos as inactive when the App is uninstalled
+  // Detach repos from the installation when the App is uninstalled.
+  // The Repo row stays so the project still lists the repo; it just falls
+  // back to the "App not installed" state and can be re-linked later.
   if (payload.action === "deleted" && payload.installation) {
     await prisma.repo.updateMany({
       where: { installationId: payload.installation.id },
-      data: { active: false },
+      data: { installationId: null, ghRepoId: null },
     });
   }
 }
@@ -226,9 +228,29 @@ export async function handleInstallationReposEvent(payload: WebhookPayload) {
         ghRepoId: { in: ghRepoIds },
         installationId: payload.installation.id,
       },
-      data: { active: false },
+      data: { installationId: null, ghRepoId: null },
     });
   }
-  // Note: `added` events are deliberately ignored — repos are only linked
-  // when the user explicitly selects them in the dashboard after install.
+  // When repos are added to an installation, attach App metadata to any
+  // manually-entered Repo rows whose fullName matches.
+  if (
+    payload.action === "added" &&
+    payload.repositories_added &&
+    payload.installation
+  ) {
+    const installationId = payload.installation.id;
+    for (const r of payload.repositories_added) {
+      await prisma.repo
+        .updateMany({
+          where: { fullName: r.full_name, installationId: null },
+          data: { ghRepoId: r.id, installationId, active: true },
+        })
+        .catch((e) =>
+          logger.warn(
+            { err: e, fullName: r.full_name },
+            "linking manual repo to installation failed"
+          )
+        );
+    }
+  }
 }

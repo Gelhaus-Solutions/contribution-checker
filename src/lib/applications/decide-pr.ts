@@ -125,7 +125,7 @@ export async function decideForPR(args: {
   }
 
   // 2) Collaborator auto-bypass
-  if (repo.project.bypassCollabs) {
+  if (repo.project.bypassCollabs && repo.installationId != null) {
     const [owner, name] = repo.fullName.split("/");
     try {
       if (

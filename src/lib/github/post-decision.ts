@@ -36,7 +36,7 @@ export async function onApplicationApproved(args: {
         select: {
           ...APPLICATION_PROJECT_SELECT,
           repos: {
-            where: { active: true },
+            where: { active: true, installationId: { not: null } },
             select: { id: true, fullName: true, installationId: true },
           },
         },
@@ -58,6 +58,7 @@ export async function onApplicationApproved(args: {
 
   let reopened = 0;
   for (const check of reopens) {
+    if (check.repo.installationId == null) continue;
     const ref = repoRef(check.repo.fullName, check.repo.installationId);
     try {
       await reopenPullRequest(
@@ -105,7 +106,7 @@ export async function onApplicationRevokedWithClose(args: {
         select: {
           ...APPLICATION_PROJECT_SELECT,
           repos: {
-            where: { active: true },
+            where: { active: true, installationId: { not: null } },
             select: { id: true, fullName: true, installationId: true },
           },
         },
@@ -126,6 +127,7 @@ export async function onApplicationRevokedWithClose(args: {
 
   let closed = 0;
   for (const check of checks) {
+    if (check.repo.installationId == null) continue;
     const ref = repoRef(check.repo.fullName, check.repo.installationId);
     const body =
       `@${app.user.ghLogin}, your contributor approval for **${app.project.name}** has been revoked` +

@@ -10,8 +10,8 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { addManualDecision, removeManualDecision } from "./actions";
+import { addManualDecision } from "./actions";
+import { DecisionsList, type DecisionRow } from "./decisions-list";
 
 export default async function ProjectDecisions({
   params,
@@ -21,14 +21,47 @@ export default async function ProjectDecisions({
   const { id } = await params;
   await requireProjectRole(id, "ADMIN");
 
-  const decisions = await prisma.manualDecision.findMany({
-    where: { projectId: id },
-    include: { decidedBy: { select: { ghLogin: true } } },
-    orderBy: [{ status: "asc" }, { ghLogin: "asc" }],
-  });
+  const [manual, applications] = await Promise.all([
+    prisma.manualDecision.findMany({
+      where: { projectId: id },
+      include: { decidedBy: { select: { ghLogin: true } } },
+      orderBy: { updatedAt: "desc" },
+    }),
+    prisma.application.findMany({
+      where: {
+        projectId: id,
+        status: { in: ["APPROVED", "DENIED", "REVOKED"] },
+      },
+      include: {
+        user: { select: { ghLogin: true } },
+        decidedBy: { select: { ghLogin: true } },
+      },
+      orderBy: { decidedAt: "desc" },
+      take: 500,
+    }),
+  ]);
 
-  const approved = decisions.filter((d) => d.status === "APPROVED");
-  const denied = decisions.filter((d) => d.status === "DENIED");
+  const rows: DecisionRow[] = [
+    ...manual.map<DecisionRow>((d) => ({
+      kind: "manual",
+      id: d.id,
+      ghLogin: d.ghLogin,
+      status: d.status as "APPROVED" | "DENIED",
+      reason: d.reason,
+      decidedAt: d.updatedAt.toISOString(),
+      decidedByLogin: d.decidedBy?.ghLogin ?? null,
+    })),
+    ...applications.map<DecisionRow>((a) => ({
+      kind: "application",
+      id: a.id,
+      ghLogin: a.user.ghLogin ?? "(no login)",
+      status: a.status as "APPROVED" | "DENIED" | "REVOKED",
+      reason: a.reason,
+      decidedAt: (a.decidedAt ?? a.updatedAt).toISOString(),
+      decidedByLogin: a.decidedBy?.ghLogin ?? null,
+      applicationId: a.id,
+    })),
+  ].sort((a, b) => b.decidedAt.localeCompare(a.decidedAt));
 
   return (
     <div className="space-y-6">
@@ -76,90 +109,18 @@ export default async function ProjectDecisions({
         </CardContent>
       </Card>
 
-      <DecisionList
-        title="Approved"
-        variant="success"
-        items={approved}
-        projectId={id}
-      />
-      <DecisionList
-        title="Denied"
-        variant="destructive"
-        items={denied}
-        projectId={id}
-      />
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Decisions</CardTitle>
+          <CardDescription>
+            All manual decisions and finalized applications, searchable by
+            login, reason, or reviewer.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <DecisionsList projectId={id} decisions={rows} />
+        </CardContent>
+      </Card>
     </div>
-  );
-}
-
-type DecisionRow = {
-  id: string;
-  ghLogin: string;
-  reason: string | null;
-  createdAt: Date;
-  decidedBy: { ghLogin: string | null } | null;
-};
-
-function DecisionList({
-  title,
-  variant,
-  items,
-  projectId,
-}: {
-  title: string;
-  variant: "success" | "destructive";
-  items: DecisionRow[];
-  projectId: string;
-}) {
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-base">
-          <Badge variant={variant}>{title}</Badge>
-          <span className="text-muted-foreground">{items.length}</span>
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="p-0">
-        {items.length === 0 ? (
-          <div className="px-6 pb-6 text-sm text-muted-foreground">
-            None.
-          </div>
-        ) : (
-          <ul className="divide-y divide-border">
-            {items.map((d) => (
-              <li
-                key={d.id}
-                className="flex items-center justify-between gap-3 px-6 py-3 text-sm"
-              >
-                <div>
-                  <div className="font-mono">{d.ghLogin}</div>
-                  {d.reason && (
-                    <div className="mt-0.5 text-xs text-muted-foreground">
-                      {d.reason}
-                    </div>
-                  )}
-                  <div className="mt-0.5 text-xs text-muted-foreground">
-                    Set by {d.decidedBy?.ghLogin ?? "unknown"} on{" "}
-                    {d.createdAt.toISOString().slice(0, 10)}
-                  </div>
-                </div>
-                <form action={removeManualDecision}>
-                  <input type="hidden" name="projectId" value={projectId} />
-                  <input type="hidden" name="decisionId" value={d.id} />
-                  <Button
-                    type="submit"
-                    size="sm"
-                    variant="ghost"
-                    className="text-destructive hover:bg-destructive/10"
-                  >
-                    Remove
-                  </Button>
-                </form>
-              </li>
-            ))}
-          </ul>
-        )}
-      </CardContent>
-    </Card>
   );
 }
