@@ -56,6 +56,10 @@ export default async function NotificationsPage() {
                       return {} as Record<string, unknown>;
                     }
                   })();
+                  const projectId =
+                    typeof payload.projectId === "string"
+                      ? payload.projectId
+                      : null;
                   const projectSlug =
                     typeof payload.projectSlug === "string"
                       ? payload.projectSlug
@@ -64,19 +68,30 @@ export default async function NotificationsPage() {
                     typeof payload.projectName === "string"
                       ? payload.projectName
                       : null;
+                  const applicationId =
+                    typeof payload.applicationId === "string"
+                      ? payload.applicationId
+                      : null;
                   const ghLogin =
                     typeof payload.ghLogin === "string" ? payload.ghLogin : null;
                   const reason =
                     typeof payload.reason === "string" ? payload.reason : null;
-                  return (
-                    <li
-                      key={n.id}
-                      className={
-                        n.readAt
-                          ? "px-6 py-3 text-sm"
-                          : "bg-muted/30 px-6 py-3 text-sm"
-                      }
-                    >
+
+                  // Reviewer-side notifications go to the application detail
+                  // page; applicant-side go to the public apply page.
+                  const href =
+                    n.kind === "application.submitted" &&
+                    projectId &&
+                    applicationId
+                      ? `/dashboard/projects/${projectId}/applications/${applicationId}`
+                      : n.kind === "project.invited" && projectId
+                        ? `/dashboard/projects/${projectId}`
+                        : projectSlug
+                          ? `/p/${projectSlug}`
+                          : null;
+
+                  const body = (
+                    <>
                       <div className="flex items-center justify-between">
                         <div className="font-medium">
                           {KIND_LABELS[n.kind] ?? n.kind}
@@ -88,23 +103,33 @@ export default async function NotificationsPage() {
                       <div className="mt-1 text-muted-foreground">
                         {projectName && (
                           <span>
-                            {projectSlug ? (
-                              <Link
-                                href={`/p/${projectSlug}`}
-                                className="underline"
-                              >
-                                {projectName}
-                              </Link>
-                            ) : (
-                              projectName
-                            )}
-                            {ghLogin ? ` · ${ghLogin}` : ""}
+                            {projectName}
+                            {ghLogin ? ` · @${ghLogin}` : ""}
                           </span>
                         )}
                         {reason && (
                           <div className="mt-1">Reason: {reason}</div>
                         )}
                       </div>
+                    </>
+                  );
+
+                  const baseClass = n.readAt
+                    ? "block px-6 py-3 text-sm"
+                    : "block bg-muted/30 px-6 py-3 text-sm";
+
+                  return (
+                    <li key={n.id}>
+                      {href ? (
+                        <Link
+                          href={href}
+                          className={`${baseClass} transition-colors hover:bg-muted/60`}
+                        >
+                          {body}
+                        </Link>
+                      ) : (
+                        <div className={baseClass}>{body}</div>
+                      )}
                     </li>
                   );
                 })}

@@ -242,6 +242,8 @@ export async function notifyAdminsOfNewApplication(args: {
     kind: "application.submitted",
     payload: {
       applicationId: app.id,
+      projectId: app.projectId,
+      projectSlug: app.project.slug,
       projectName: app.project.name,
       ghLogin: app.user.ghLogin,
     },
