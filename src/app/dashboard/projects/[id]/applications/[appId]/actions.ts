@@ -40,7 +40,7 @@ export async function approveAction(formData: FormData) {
   });
   const { session } = await requireProjectRole(parsed.projectId, "REVIEWER");
   const app = await ensureApplicationInProject(parsed.projectId, parsed.appId);
-  if (app.status !== "SUBMITTED") {
+  if (app.status !== "SUBMITTED" && app.status !== "REVOKED") {
     throw new Error(`Cannot approve an application with status ${app.status}.`);
   }
 
@@ -78,16 +78,11 @@ export async function denyAction(formData: FormData) {
   revalidatePath(`/dashboard/projects/${parsed.projectId}/applications/${parsed.appId}`);
 }
 
-const revokeSchema = baseSchema.extend({
-  closeOpenPrs: z.string().optional(),
-});
-
 export async function revokeAction(formData: FormData) {
-  const parsed = revokeSchema.parse({
+  const parsed = baseSchema.parse({
     projectId: formData.get("projectId"),
     appId: formData.get("appId"),
     reason: String(formData.get("reason") ?? "").trim() || undefined,
-    closeOpenPrs: formData.get("closeOpenPrs") ?? undefined,
   });
   const { session } = await requireProjectRole(parsed.projectId, "ADMIN");
   const app = await ensureApplicationInProject(parsed.projectId, parsed.appId);
@@ -101,12 +96,10 @@ export async function revokeAction(formData: FormData) {
     reason: parsed.reason,
   });
 
-  if (parsed.closeOpenPrs) {
-    await onApplicationRevokedWithClose({
-      applicationId: parsed.appId,
-      reason: parsed.reason,
-    });
-  }
+  await onApplicationRevokedWithClose({
+    applicationId: parsed.appId,
+    reason: parsed.reason,
+  });
 
   revalidatePath(`/dashboard/projects/${parsed.projectId}/applications`);
   revalidatePath(`/dashboard/projects/${parsed.projectId}/applications/${parsed.appId}`);
