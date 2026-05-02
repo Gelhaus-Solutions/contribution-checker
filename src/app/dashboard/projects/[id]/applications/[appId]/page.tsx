@@ -59,6 +59,7 @@ export default async function ApplicationDetail({
 
   const isPending = app.status === "SUBMITTED";
   const isApproved = app.status === "APPROVED";
+  const isRevoked = app.status === "REVOKED";
 
   return (
     <div className="space-y-6">
@@ -135,11 +136,15 @@ export default async function ApplicationDetail({
         </CardContent>
       </Card>
 
-      {(isPending || isApproved) && (
+      {(isPending || isApproved || isRevoked) && (
         <Card>
           <CardHeader>
             <CardTitle className="text-base">
-              {isPending ? "Decide" : "Revoke approval"}
+              {isPending
+                ? "Decide"
+                : isApproved
+                  ? "Revoke approval"
+                  : "Reinstate approval"}
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
@@ -178,7 +183,7 @@ export default async function ApplicationDetail({
                   </Button>
                 </form>
               </>
-            ) : (
+            ) : isApproved ? (
               <form action={revokeAction} className="space-y-2">
                 <input type="hidden" name="projectId" value={id} />
                 <input type="hidden" name="appId" value={app.id} />
@@ -191,18 +196,33 @@ export default async function ApplicationDetail({
                   rows={2}
                   placeholder="Why revoke?"
                 />
-                <label className="flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    name="closeOpenPrs"
-                    value="1"
-                    className="h-4 w-4 rounded border-border"
-                  />
-                  Also close any of their currently open PRs across this
-                  project&apos;s repos
-                </label>
+                <p className="text-xs text-muted-foreground">
+                  Revoking will close any of their currently open PRs across
+                  this project&apos;s repos.
+                </p>
                 <Button type="submit" variant="destructive">
                   Revoke approval
+                </Button>
+              </form>
+            ) : (
+              <form action={approveAction} className="space-y-2">
+                <input type="hidden" name="projectId" value={id} />
+                <input type="hidden" name="appId" value={app.id} />
+                <Label htmlFor="reason-reapprove" className="text-xs">
+                  Optional note
+                </Label>
+                <Textarea
+                  id="reason-reapprove"
+                  name="reason"
+                  rows={2}
+                  placeholder="Welcome back…"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Re-approving will reopen any PRs that were closed when
+                  approval was revoked.
+                </p>
+                <Button type="submit" variant="success">
+                  Re-approve
                 </Button>
               </form>
             )}
