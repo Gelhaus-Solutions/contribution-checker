@@ -3,6 +3,7 @@ import Image from "next/image";
 import { auth, signIn, signOut } from "@/auth";
 import { unreadCount } from "@/lib/notifications/inbox";
 import { Button } from "@/components/ui/button";
+import { BrandMark } from "@/components/brand-mark";
 
 export async function SiteHeader() {
   const session = await auth();
@@ -10,8 +11,16 @@ export async function SiteHeader() {
   return (
     <header className="border-b border-border">
       <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-4">
-        <Link href="/" className="text-sm font-semibold">
-          contribution-checker
+        <Link
+          href="/"
+          className="group flex items-center gap-2 text-sm font-semibold tracking-tight"
+        >
+          <BrandMark className="h-7 w-7 text-primary transition-transform group-hover:rotate-3" />
+          <span className="hidden sm:inline">
+            <span>contribution</span>
+            <span className="text-muted-foreground">/</span>
+            <span>checker</span>
+          </span>
         </Link>
         <nav className="flex items-center gap-3 text-sm">
           {session?.user ? (

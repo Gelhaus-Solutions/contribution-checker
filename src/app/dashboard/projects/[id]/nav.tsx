@@ -8,7 +8,7 @@ import type { Role } from "@/lib/authz";
 const items: { href: string; label: string; minRole: Role }[] = [
   { href: "", label: "Overview", minRole: "REVIEWER" },
   { href: "/applications", label: "Applications", minRole: "REVIEWER" },
-  { href: "/decisions", label: "Manual decisions", minRole: "ADMIN" },
+  { href: "/decisions", label: "Decisions", minRole: "ADMIN" },
   { href: "/repos", label: "Repos", minRole: "ADMIN" },
   { href: "/form", label: "Form", minRole: "ADMIN" },
   { href: "/settings", label: "Settings", minRole: "ADMIN" },

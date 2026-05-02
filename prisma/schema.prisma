@@ -157,9 +157,9 @@ model ProjectMember {
 model Repo {
   id                 String  @id @default(cuid())
   projectId          String
-  ghRepoId           Int     @unique // numeric GH id (survives renames)
+  ghRepoId           Int?    @unique // numeric GH id (survives renames); null until App is installed
   fullName           String          // "owner/name", cached
-  installationId     Int             // GH App installation id
+  installationId     Int?            // GH App installation id; null = manually entered, App not installed yet
   requireOwnApproval Boolean @default(false)
   active             Boolean @default(true) // false if installation was uninstalled
 
@@ -168,6 +168,7 @@ model Repo {
   project  Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
   prChecks PrCheck[]
 
+  @@unique([projectId, fullName])
   @@index([projectId])
 }
 

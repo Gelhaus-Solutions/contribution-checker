@@ -33,20 +33,32 @@ export async function linkRepos(formData: FormData) {
 
   const existing = await prisma.repo.findMany({
     where: { projectId: parsed.projectId },
-    select: { id: true, ghRepoId: true },
+    select: { id: true, ghRepoId: true, fullName: true, installationId: true },
   });
-  const existingByGhId = new Map(existing.map((r) => [r.ghRepoId, r]));
+  const byGhId = new Map(
+    existing.filter((r) => r.ghRepoId != null).map((r) => [r.ghRepoId!, r])
+  );
+  const byFullName = new Map(existing.map((r) => [r.fullName, r]));
 
   const desiredIds = new Set(selections.map((s) => s.ghRepoId));
-  const toRemove = existing.filter((r) => !desiredIds.has(r.ghRepoId));
+  // Only remove repos that were previously linked through this installation
+  // and are no longer selected. Manually-added rows (installationId: null)
+  // are preserved.
+  const toRemove = existing.filter(
+    (r) =>
+      r.installationId === parsed.installationId &&
+      r.ghRepoId != null &&
+      !desiredIds.has(r.ghRepoId)
+  );
 
   for (const sel of selections) {
-    const found = existingByGhId.get(sel.ghRepoId);
+    const found = byGhId.get(sel.ghRepoId) ?? byFullName.get(sel.fullName);
     if (found) {
       await prisma.repo.update({
         where: { id: found.id },
         data: {
           fullName: sel.fullName,
+          ghRepoId: sel.ghRepoId,
           installationId: parsed.installationId,
           active: true,
         },
@@ -71,12 +83,15 @@ export async function linkRepos(formData: FormData) {
   }
 
   for (const r of toRemove) {
-    await prisma.repo.delete({ where: { id: r.id } });
+    await prisma.repo.update({
+      where: { id: r.id },
+      data: { installationId: null, ghRepoId: null },
+    });
     await recordAudit({
       projectId: parsed.projectId,
       actorId: session.user.id,
       kind: "repo.unlinked",
-      payload: { ghRepoId: r.ghRepoId },
+      payload: { ghRepoId: r.ghRepoId, fullName: r.fullName },
     });
   }
 
