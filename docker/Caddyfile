@@ -1,0 +1,12 @@
+# Replace `your-domain.example` with your actual domain.
+# Caddy will automatically request and renew Let's Encrypt certificates.
+your-domain.example {
+    reverse_proxy app:3000
+
+    # GitHub webhook deliveries can be larger than typical requests.
+    request_body {
+        max_size 10MB
+    }
+
+    encode zstd gzip
+}
