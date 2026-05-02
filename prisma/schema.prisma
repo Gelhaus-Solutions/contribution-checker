@@ -1,0 +1,319 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ----- NextAuth tables (Auth.js Prisma adapter) -----
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ----- Domain -----
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String?   @unique
+  emailVerified DateTime?
+  image         String?
+
+  // GitHub identity (populated on first sign-in via OAuth profile)
+  ghId    Int?    @unique
+  ghLogin String? @unique
+
+  // Authorization flags
+  isSuperAdmin  Boolean @default(false)
+  canCreateProj Boolean @default(false)
+
+  createdAt DateTime @default(now())
+
+  accounts        Account[]
+  sessions        Session[]
+  memberships     ProjectMember[]
+  applications    Application[]
+  notifications   Notification[]
+  decidedApps     Application[]      @relation("ApplicationDecidedBy")
+  decidedManual   ManualDecision[]   @relation("ManualDecisionDecidedBy")
+  appNotes        ApplicationNote[]
+  auditedEvents   AuditEvent[]
+  formTemplates   FormTemplate[]
+  webhookDeliveries WebhookDelivery[]
+}
+
+model Project {
+  id          String  @id @default(cuid())
+  slug        String  @unique
+  name        String
+  description String?
+
+  // Form schema: Field[] (see src/lib/applications/schema.ts)
+  formSchema    String  @default("[]")
+  templateId    String?
+
+  // Denial cooldown: null = permanent denial (admin must reset to allow re-apply)
+  cooldownDays  Int?
+
+  // Bypass list: JSON-stringified array of GitHub login patterns (supports * glob)
+  bypassHandles String  @default("[]")
+  bypassCollabs Boolean @default(true)
+
+  // Outbound webhook
+  webhookUrl    String?
+  webhookSecret String?
+
+  // PR labels
+  labelsEnabled Boolean @default(true)
+  labelPending  String  @default("contribution:pending")
+  labelApproved String  @default("contribution:approved")
+  labelDenied   String  @default("contribution:denied")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  members      ProjectMember[]
+  repos        Repo[]
+  applications Application[]
+  audits       AuditEvent[]
+  webhookDeliveries WebhookDelivery[]
+  manualDecisions  ManualDecision[]
+  template     FormTemplate?    @relation(fields: [templateId], references: [id], onDelete: SetNull)
+}
+
+/**
+ * Admin-set approve/deny on a GitHub login, no application required.
+ * Checked BEFORE applications in the PR decision flow. If a row exists
+ * for (projectId, ghLogin), it wins.
+ */
+model ManualDecision {
+  id          String   @id @default(cuid())
+  projectId   String
+  ghLogin     String   // canonical lowercase GH login
+  ghId        Int?     // captured opportunistically
+  status      String   // "APPROVED" | "DENIED"
+  reason      String?
+  decidedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  decidedBy User?   @relation("ManualDecisionDecidedBy", fields: [decidedById], references: [id], onDelete: SetNull)
+
+  @@unique([projectId, ghLogin])
+  @@index([ghId])
+}
+
+model ProjectMember {
+  id        String @id @default(cuid())
+  projectId String
+  userId    String
+  role      String // "OWNER" | "ADMIN" | "REVIEWER"
+
+  createdAt DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, userId])
+  @@index([userId])
+}
+
+model Repo {
+  id                 String  @id @default(cuid())
+  projectId          String
+  ghRepoId           Int     @unique // numeric GH id (survives renames)
+  fullName           String          // "owner/name", cached
+  installationId     Int             // GH App installation id
+  requireOwnApproval Boolean @default(false)
+  active             Boolean @default(true) // false if installation was uninstalled
+
+  createdAt DateTime @default(now())
+
+  project  Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  prChecks PrCheck[]
+
+  @@index([projectId])
+}
+
+model Application {
+  id        String   @id @default(cuid())
+  projectId String
+  userId    String
+  repoId    String?  // set if requireOwnApproval was hit (per-repo opt-out)
+  status    String   @default("SUBMITTED") // "SUBMITTED" | "APPROVED" | "DENIED" | "REVOKED"
+
+  // JSON-stringified { fieldId: value }
+  answers   String   @default("{}")
+
+  decidedById String?
+  decidedAt   DateTime?
+  reason      String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  project   Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user      User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  decidedBy User?             @relation("ApplicationDecidedBy", fields: [decidedById], references: [id], onDelete: SetNull)
+  notes     ApplicationNote[]
+
+  @@index([projectId, status])
+  @@index([userId])
+}
+
+model ApplicationNote {
+  id            String   @id @default(cuid())
+  applicationId String
+  authorId      String
+  body          String
+  createdAt     DateTime @default(now())
+
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  author      User        @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  @@index([applicationId])
+}
+
+model PrCheck {
+  id            String   @id @default(cuid())
+  repoId        String
+  prNumber      Int
+  prNodeId      String
+  authorGhLogin String
+  authorGhId    Int
+  status        String // "PENDING" | "APPROVED" | "DENIED" | "BYPASSED"
+  closedByApp   Boolean  @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  repo Repo @relation(fields: [repoId], references: [id], onDelete: Cascade)
+
+  @@unique([repoId, prNumber])
+  @@index([authorGhLogin, status])
+  @@index([authorGhId, status])
+}
+
+model AuditEvent {
+  id        String   @id @default(cuid())
+  projectId String
+  actorId   String? // null = system
+  kind      String  // e.g. "application.approved"
+  // JSON-stringified
+  payload   String  @default("{}")
+  createdAt DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  actor   User?   @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([projectId, createdAt])
+}
+
+model FormTemplate {
+  id        String   @id @default(cuid())
+  ownerId   String
+  name      String
+  // JSON-stringified Field[]
+  schema    String
+  createdAt DateTime @default(now())
+
+  owner    User      @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  projects Project[]
+
+  @@index([ownerId])
+}
+
+model Notification {
+  id      String   @id @default(cuid())
+  userId  String
+  kind    String
+  // JSON-stringified
+  payload String   @default("{}")
+  readAt  DateTime?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt])
+}
+
+model RateLimitBucket {
+  key       String   @id
+  count     Int
+  windowEnd DateTime
+}
+
+model WebhookDelivery {
+  id            String   @id @default(cuid())
+  projectId     String
+  event         String
+  // JSON-stringified payload
+  payload       String
+  url           String
+  status        String   @default("PENDING") // "PENDING" | "DELIVERED" | "FAILED"
+  responseCode  Int?
+  responseBody  String?
+  attempts      Int      @default(0)
+  lastAttemptAt DateTime?
+  nextAttemptAt DateTime?
+  createdAt     DateTime @default(now())
+  triggeredById String?
+
+  project     Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  triggeredBy User?   @relation(fields: [triggeredById], references: [id], onDelete: SetNull)
+
+  @@index([projectId, createdAt])
+  @@index([status, nextAttemptAt])
+}
+
+// In-process job queue persisted to DB (PR close/reopen/comment/label)
+model JobQueue {
+  id            String   @id @default(cuid())
+  kind          String   // "pr.close" | "pr.reopen" | "pr.comment" | "pr.label.set" | "webhook.deliver"
+  // JSON-stringified
+  payload       String
+  status        String   @default("PENDING") // "PENDING" | "RUNNING" | "DONE" | "FAILED"
+  attempts      Int      @default(0)
+  lastError     String?
+  nextAttemptAt DateTime @default(now())
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([status, nextAttemptAt])
+}

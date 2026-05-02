@@ -1,0 +1,18 @@
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: contribution-checker:latest
+    restart: unless-stopped
+    env_file:
+      - ../.env
+    environment:
+      - DATABASE_URL=file:/app/data/contribution-checker.db
+    volumes:
+      - data:/app/data
+    ports:
+      - ${PORT}:3000
+
+volumes:
+  data:
