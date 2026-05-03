@@ -30,7 +30,7 @@ export default async function ProjectPeople({
     prisma.application.findMany({
       where: {
         projectId: id,
-        status: { in: ["APPROVED", "DENIED", "REVOKED"] },
+        status: { in: ["APPROVED", "DENIED"] },
       },
       include: {
         user: { select: { ghLogin: true } },
@@ -55,7 +55,7 @@ export default async function ProjectPeople({
       kind: "application",
       id: a.id,
       ghLogin: a.user.ghLogin ?? "(no login)",
-      status: a.status as "APPROVED" | "DENIED" | "REVOKED",
+      status: a.status as "APPROVED" | "DENIED",
       reason: a.reason,
       decidedAt: (a.decidedAt ?? a.updatedAt).toISOString(),
       decidedByLogin: a.decidedBy?.ghLogin ?? null,

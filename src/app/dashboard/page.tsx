@@ -23,7 +23,6 @@ const STATUS_VARIANT: Record<
   SUBMITTED: "warning",
   APPROVED: "success",
   DENIED: "destructive",
-  REVOKED: "secondary",
 };
 
 export default async function DashboardHome() {

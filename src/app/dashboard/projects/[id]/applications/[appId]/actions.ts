@@ -40,7 +40,7 @@ export async function approveAction(formData: FormData) {
   });
   const { session } = await requireProjectRole(parsed.projectId, "REVIEWER");
   const app = await ensureApplicationInProject(parsed.projectId, parsed.appId);
-  if (app.status !== "SUBMITTED" && app.status !== "REVOKED") {
+  if (app.status !== "SUBMITTED" && app.status !== "DENIED") {
     throw new Error(`Cannot approve an application with status ${app.status}.`);
   }
 
@@ -56,11 +56,18 @@ export async function approveAction(formData: FormData) {
   revalidatePath(`/dashboard/projects/${parsed.projectId}/applications/${parsed.appId}`);
 }
 
+const denySchema = baseSchema.extend({
+  allowResubmit: z
+    .union([z.literal("on"), z.literal("true"), z.literal("1"), z.literal("")])
+    .optional(),
+});
+
 export async function denyAction(formData: FormData) {
-  const parsed = baseSchema.parse({
+  const parsed = denySchema.parse({
     projectId: formData.get("projectId"),
     appId: formData.get("appId"),
     reason: String(formData.get("reason") ?? "").trim() || undefined,
+    allowResubmit: formData.get("allowResubmit") ?? undefined,
   });
   const { session } = await requireProjectRole(parsed.projectId, "REVIEWER");
   const app = await ensureApplicationInProject(parsed.projectId, parsed.appId);
@@ -68,21 +75,32 @@ export async function denyAction(formData: FormData) {
     throw new Error(`Cannot deny an application with status ${app.status}.`);
   }
 
+  const allowResubmit =
+    parsed.allowResubmit === "on" ||
+    parsed.allowResubmit === "true" ||
+    parsed.allowResubmit === "1";
+
   await denyApplication({
     applicationId: parsed.appId,
     decidedById: session.user.id,
     reason: parsed.reason,
+    allowResubmit,
   });
 
   revalidatePath(`/dashboard/projects/${parsed.projectId}/applications`);
   revalidatePath(`/dashboard/projects/${parsed.projectId}/applications/${parsed.appId}`);
 }
 
+const revokeSchema = baseSchema.extend({
+  target: z.enum(["DENIED", "SUBMITTED", "PENDING"]).default("DENIED"),
+});
+
 export async function revokeAction(formData: FormData) {
-  const parsed = baseSchema.parse({
+  const parsed = revokeSchema.parse({
     projectId: formData.get("projectId"),
     appId: formData.get("appId"),
     reason: String(formData.get("reason") ?? "").trim() || undefined,
+    target: formData.get("target") ?? "DENIED",
   });
   const { session } = await requireProjectRole(parsed.projectId, "ADMIN");
   const app = await ensureApplicationInProject(parsed.projectId, parsed.appId);
@@ -94,6 +112,7 @@ export async function revokeAction(formData: FormData) {
     applicationId: parsed.appId,
     decidedById: session.user.id,
     reason: parsed.reason,
+    target: parsed.target,
   });
 
   await onApplicationRevokedWithClose({

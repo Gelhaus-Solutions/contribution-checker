@@ -11,10 +11,9 @@ import {
 import { Badge } from "@/components/ui/badge";
 
 const STATUS_OPTIONS = [
-  { value: "SUBMITTED", label: "Pending" },
+  { value: "SUBMITTED", label: "Submitted" },
   { value: "APPROVED", label: "Approved" },
   { value: "DENIED", label: "Denied" },
-  { value: "REVOKED", label: "Revoked" },
 ] as const;
 
 const STATUS_VARIANT: Record<
@@ -24,7 +23,6 @@ const STATUS_VARIANT: Record<
   SUBMITTED: "warning",
   APPROVED: "success",
   DENIED: "destructive",
-  REVOKED: "secondary",
 };
 
 export default async function ProjectApplications({

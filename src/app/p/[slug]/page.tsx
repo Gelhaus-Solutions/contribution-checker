@@ -20,10 +20,10 @@ const STATUS_VARIANT: Record<
   string,
   "default" | "secondary" | "success" | "warning" | "destructive"
 > = {
+  PENDING: "warning",
   SUBMITTED: "warning",
   APPROVED: "success",
   DENIED: "destructive",
-  REVOKED: "secondary",
 };
 
 export default async function PublicProjectPage({
@@ -40,7 +40,6 @@ export default async function PublicProjectPage({
       slug: true,
       description: true,
       formSchema: true,
-      cooldownDays: true,
       repos: {
         where: { active: true },
         select: { fullName: true },
@@ -103,19 +102,11 @@ export default async function PublicProjectPage({
               >
                 <Button type="submit">Sign in with GitHub to apply</Button>
               </form>
-            ) : existing ? (
-              <ExistingApplication
-                status={existing.status}
-                createdAt={existing.createdAt}
-                cooldownDays={project.cooldownDays}
-                decidedAt={existing.decidedAt}
-                reason={existing.reason}
-              />
             ) : (
-              <ApplyForm
+              <ApplicantSurface
+                existing={existing}
                 projectId={project.id}
                 fields={fields}
-                action={applyAction}
               />
             )}
           </CardContent>
@@ -133,71 +124,144 @@ export default async function PublicProjectPage({
   );
 }
 
-function ExistingApplication({
-  status,
-  createdAt,
-  cooldownDays,
-  decidedAt,
-  reason,
-}: {
+type ApplicantExisting = {
   status: string;
   createdAt: Date;
-  cooldownDays: number | null;
-  decidedAt: Date | null;
   reason: string | null;
-}) {
-  let body: React.ReactNode = null;
+  allowResubmit: boolean;
+  cooldownUntil: Date | null;
+};
 
-  if (status === "SUBMITTED") {
-    body = (
-      <p className="text-sm">
-        Your application was submitted on{" "}
-        {createdAt.toISOString().slice(0, 10)} and is awaiting review.
-      </p>
-    );
-  } else if (status === "APPROVED") {
-    body = (
-      <p className="text-sm">
-        You&apos;re approved. You can open pull requests on the linked
-        repositories.
-      </p>
-    );
-  } else if (status === "DENIED") {
-    const cooldownEnd =
-      cooldownDays && decidedAt
-        ? new Date(decidedAt.getTime() + cooldownDays * 86400000)
-        : null;
-    body = (
-      <div className="space-y-2 text-sm">
-        <p>Your application was declined.</p>
-        {reason && (
-          <p>
-            <strong>Reason:</strong> {reason}
-          </p>
-        )}
-        {cooldownEnd && cooldownEnd > new Date() ? (
-          <p>You can re-apply on {cooldownEnd.toISOString().slice(0, 10)}.</p>
-        ) : cooldownDays === null ? (
-          <p>Re-applying is disabled. Contact a project admin if you believe this is in error.</p>
-        ) : (
-          <p>You can re-apply now.</p>
-        )}
-      </div>
-    );
-  } else if (status === "REVOKED") {
-    body = (
-      <p className="text-sm">
-        Your access was revoked. You may submit a new application below.
-      </p>
+type ApplicantView = {
+  derivedStatus: "SUBMITTED" | "APPROVED" | "DENIED" | "PENDING";
+  info: React.ReactNode;
+  canApply: boolean;
+};
+
+function ApplicantSurface({
+  existing,
+  projectId,
+  fields,
+}: {
+  existing: ApplicantExisting | null;
+  projectId: string;
+  fields: ReturnType<typeof parseFormSchema>;
+}) {
+  if (!existing) {
+    return (
+      <ApplyForm projectId={projectId} fields={fields} action={applyAction} />
     );
   }
+  const view = deriveApplicantView(existing);
+  return (
+    <div className="space-y-4">
+      <ExistingApplication derivedStatus={view.derivedStatus} info={view.info} />
+      {view.canApply && (
+        <ApplyForm projectId={projectId} fields={fields} action={applyAction} />
+      )}
+    </div>
+  );
+}
 
+function deriveApplicantView(existing: ApplicantExisting): ApplicantView {
+  if (existing.status === "SUBMITTED") {
+    return {
+      derivedStatus: "SUBMITTED",
+      info: (
+        <p className="text-sm">
+          Your application was submitted on{" "}
+          {existing.createdAt.toISOString().slice(0, 10)} and is awaiting review.
+        </p>
+      ),
+      canApply: false,
+    };
+  }
+  if (existing.status === "APPROVED") {
+    return {
+      derivedStatus: "APPROVED",
+      info: (
+        <p className="text-sm">
+          You&apos;re approved. You can open pull requests on the linked
+          repositories.
+        </p>
+      ),
+      canApply: false,
+    };
+  }
+  // DENIED
+  if (!existing.allowResubmit) {
+    return {
+      derivedStatus: "DENIED",
+      info: (
+        <div className="space-y-2 text-sm">
+          <p>Your application was declined.</p>
+          {existing.reason && (
+            <p>
+              <strong>Reason:</strong> {existing.reason}
+            </p>
+          )}
+          <p>
+            Re-applying is disabled. Contact a project admin if you believe
+            this is in error.
+          </p>
+        </div>
+      ),
+      canApply: false,
+    };
+  }
+  if (existing.cooldownUntil && existing.cooldownUntil > new Date()) {
+    return {
+      derivedStatus: "DENIED",
+      info: (
+        <div className="space-y-2 text-sm">
+          <p>Your application was declined.</p>
+          {existing.reason && (
+            <p>
+              <strong>Reason:</strong> {existing.reason}
+            </p>
+          )}
+          <p>
+            You can re-apply on{" "}
+            {existing.cooldownUntil.toISOString().slice(0, 10)}.
+          </p>
+        </div>
+      ),
+      canApply: false,
+    };
+  }
+  // Derived PENDING: previous denial, resubmit allowed and cooldown elapsed.
+  return {
+    derivedStatus: "PENDING",
+    info: (
+      <div className="space-y-2 text-sm">
+        <p>Your previous application was declined.</p>
+        {existing.reason && (
+          <p>
+            <strong>Reason:</strong> {existing.reason}
+          </p>
+        )}
+        <p>You may submit a new application below.</p>
+      </div>
+    ),
+    canApply: true,
+  };
+}
+
+function ExistingApplication({
+  derivedStatus,
+  info,
+}: {
+  derivedStatus: ApplicantView["derivedStatus"];
+  info: React.ReactNode;
+}) {
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2">
-        <Badge variant={STATUS_VARIANT[status] ?? "secondary"}>{status}</Badge>
+        <Badge variant={STATUS_VARIANT[derivedStatus] ?? "secondary"}>
+          {derivedStatus}
+        </Badge>
       </div>
-      {body}
+      {info}
     </div>
   );
 }

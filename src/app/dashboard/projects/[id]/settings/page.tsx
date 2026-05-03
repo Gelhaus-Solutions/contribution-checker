@@ -70,17 +70,19 @@ export default async function ProjectSettings({
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="cooldownDays">Denial cooldown (days)</Label>
+              <Label htmlFor="cooldownDays">Default cooldown after denial (days)</Label>
               <Input
                 id="cooldownDays"
                 name="cooldownDays"
                 type="number"
                 min={0}
                 defaultValue={project.cooldownDays ?? ""}
-                placeholder="(blank = permanent until manually reset)"
+                placeholder="(blank = instant resubmit when allowed)"
               />
               <p className="text-xs text-muted-foreground">
-                After a denial, applicant must wait this many days before re-applying. Leave blank for permanent denials.
+                Applied when an admin denies an application with &quot;Allow resubmitting&quot; checked.
+                Leave blank to let approved-resubmits happen immediately.
+                Whether resubmitting is allowed at all is a per-denial choice in the deny dialog.
               </p>
             </div>
             <Button type="submit">Save</Button>

@@ -17,7 +17,6 @@ const STATUS_VARIANT: Record<
   SUBMITTED: "warning",
   APPROVED: "success",
   DENIED: "destructive",
-  REVOKED: "secondary",
 };
 
 export default async function ProjectOverview({
@@ -46,11 +45,10 @@ export default async function ProjectOverview({
 
   return (
     <div className="space-y-6">
-      <div className="grid gap-3 sm:grid-cols-4">
-        <StatCard label="Pending" value={byStatus.SUBMITTED ?? 0} variant="warning" />
+      <div className="grid gap-3 sm:grid-cols-3">
+        <StatCard label="Submitted" value={byStatus.SUBMITTED ?? 0} variant="warning" />
         <StatCard label="Approved" value={byStatus.APPROVED ?? 0} variant="success" />
         <StatCard label="Denied" value={byStatus.DENIED ?? 0} variant="destructive" />
-        <StatCard label="Revoked" value={byStatus.REVOKED ?? 0} variant="secondary" />
       </div>
 
       <Card>

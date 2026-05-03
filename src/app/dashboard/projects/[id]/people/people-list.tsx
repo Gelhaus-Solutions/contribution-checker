@@ -11,7 +11,7 @@ export type PersonRow = {
   kind: "manual" | "application";
   id: string;
   ghLogin: string;
-  status: "APPROVED" | "DENIED" | "REVOKED";
+  status: "APPROVED" | "DENIED";
   reason: string | null;
   decidedAt: string;
   decidedByLogin: string | null;
@@ -21,7 +21,6 @@ export type PersonRow = {
 const STATUS_VARIANT = {
   APPROVED: "success",
   DENIED: "destructive",
-  REVOKED: "secondary",
 } as const;
 
 type SearchField = "ALL" | "login" | "reason" | "reviewer";
@@ -35,7 +34,7 @@ export function PeopleList({
 }) {
   const [query, setQuery] = useState("");
   const [searchField, setSearchField] = useState<SearchField>("ALL");
-  const [filter, setFilter] = useState<"ALL" | "APPROVED" | "DENIED" | "REVOKED">(
+  const [filter, setFilter] = useState<"ALL" | "APPROVED" | "DENIED">(
     "ALL"
   );
   const [source, setSource] = useState<"ALL" | "manual" | "application">("ALL");
@@ -68,7 +67,6 @@ export function PeopleList({
       total: people.length,
       approved: people.filter((d) => d.status === "APPROVED").length,
       denied: people.filter((d) => d.status === "DENIED").length,
-      revoked: people.filter((d) => d.status === "REVOKED").length,
     };
   }, [people]);
 
@@ -113,13 +111,6 @@ export function PeopleList({
             active={filter === "DENIED"}
             onClick={() => setFilter("DENIED")}
           />
-          {counts.revoked > 0 && (
-            <FilterChip
-              label={`Revoked ${counts.revoked}`}
-              active={filter === "REVOKED"}
-              onClick={() => setFilter("REVOKED")}
-            />
-          )}
         </div>
         <div className="flex flex-wrap gap-1 sm:ml-auto">
           <FilterChip
