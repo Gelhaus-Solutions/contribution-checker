@@ -122,6 +122,7 @@ const labelsSchema = z.object({
   labelPending: z.string().min(1).max(50),
   labelApproved: z.string().min(1).max(50),
   labelDenied: z.string().min(1).max(50),
+  labelEvaluate: z.string().min(1).max(50),
 });
 
 export async function updateLabelSettings(formData: FormData) {
@@ -131,7 +132,17 @@ export async function updateLabelSettings(formData: FormData) {
     labelPending: formData.get("labelPending"),
     labelApproved: formData.get("labelApproved"),
     labelDenied: formData.get("labelDenied"),
+    labelEvaluate: formData.get("labelEvaluate"),
   });
+  const labelSet = new Set([
+    parsed.labelPending,
+    parsed.labelApproved,
+    parsed.labelDenied,
+    parsed.labelEvaluate,
+  ]);
+  if (labelSet.size !== 4) {
+    throw new Error("All four labels must be unique.");
+  }
   const { session } = await requireProjectRole(parsed.projectId, "ADMIN");
 
   await prisma.project.update({
@@ -141,6 +152,7 @@ export async function updateLabelSettings(formData: FormData) {
       labelPending: parsed.labelPending,
       labelApproved: parsed.labelApproved,
       labelDenied: parsed.labelDenied,
+      labelEvaluate: parsed.labelEvaluate,
     },
   });
 

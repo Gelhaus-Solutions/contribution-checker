@@ -77,6 +77,13 @@ export type HeuristicResult = {
   value?: number | string | null;
   /** Optional short human-readable reason. */
   reason?: string;
+  /**
+   * When this heuristic fires, the final score is capped at this value (0–100).
+   * The score formula takes the min over all caps from failed signals. Use
+   * sparingly — only for signals that, when true, mean the PR's quality is
+   * fundamentally suspect regardless of other passes.
+   */
+  scoreCap?: number;
 };
 
 export type Heuristic = {

@@ -251,6 +251,20 @@ export default async function ProjectSettings({
                 />
               </div>
             </div>
+            <div className="space-y-2">
+              <Label htmlFor="labelEvaluate">Re-evaluate trigger</Label>
+              <Input
+                id="labelEvaluate"
+                name="labelEvaluate"
+                defaultValue={project.labelEvaluate}
+              />
+              <p className="text-xs text-muted-foreground">
+                Admins add this label to a PR to force the checker to re-run
+                (reopens closed-by-app PRs that now pass, or evaluates PRs
+                opened before the App was installed). The bot strips the label
+                after processing &mdash; even when labels are otherwise off.
+              </p>
+            </div>
             <Button type="submit">Save labels</Button>
           </form>
         </CardContent>

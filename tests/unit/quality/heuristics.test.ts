@@ -61,6 +61,97 @@ describe("size heuristics", () => {
     });
     expect(h.run(c, 10000).failed).toBe(true);
   });
+
+  it("size.trivial_patch fires for 1f/1L/1c with cap 50 by default", () => {
+    const h = get("size.trivial_patch");
+    const c = ctx({
+      pr: {
+        ...ctx().pr,
+        title: "Fix a typo where Tracker had an extra letter",
+        body: "This corrects a typo introduced in commit abc.",
+      },
+      files: [
+        { filename: "README.md", status: "modified", additions: 1, deletions: 1, changes: 2 },
+      ],
+      commits: [{ sha: "abc", message: "fix typo" }],
+    });
+    const r = h.run(c, 3);
+    expect(r.failed).toBe(true);
+    expect(r.scoreCap).toBe(50);
+  });
+
+  it("size.trivial_patch caps at 25 when paired with empty body", () => {
+    const h = get("size.trivial_patch");
+    const c = ctx({
+      pr: {
+        ...ctx().pr,
+        title: "Fix a typo where Tracker had an extra letter",
+        body: "",
+      },
+      files: [
+        { filename: "README.md", status: "modified", additions: 1, deletions: 1, changes: 2 },
+      ],
+      commits: [{ sha: "abc", message: "fix typo" }],
+    });
+    const r = h.run(c, 3);
+    expect(r.failed).toBe(true);
+    expect(r.scoreCap).toBe(25);
+  });
+
+  it("size.trivial_patch caps at 25 when paired with vague title", () => {
+    const h = get("size.trivial_patch");
+    const c = ctx({
+      pr: {
+        ...ctx().pr,
+        title: "Update README.md",
+        body: "This is a substantive description of the change being made.",
+      },
+      files: [
+        { filename: "README.md", status: "modified", additions: 1, deletions: 1, changes: 2 },
+      ],
+      commits: [{ sha: "abc", message: "fix typo" }],
+    });
+    const r = h.run(c, 3);
+    expect(r.failed).toBe(true);
+    expect(r.scoreCap).toBe(25);
+  });
+
+  it("size.trivial_patch does not fire above the line threshold", () => {
+    const h = get("size.trivial_patch");
+    const c = ctx({
+      files: [
+        { filename: "a.ts", status: "modified", additions: 8, deletions: 2, changes: 10 },
+      ],
+      commits: [{ sha: "abc", message: "real change" }],
+    });
+    expect(h.run(c, 3).failed).toBe(false);
+  });
+
+  it("size.trivial_patch does not fire when more than one file is touched", () => {
+    const h = get("size.trivial_patch");
+    const c = ctx({
+      files: [
+        { filename: "a.ts", status: "modified", additions: 1, deletions: 0, changes: 1 },
+        { filename: "b.ts", status: "modified", additions: 1, deletions: 0, changes: 1 },
+      ],
+      commits: [{ sha: "abc", message: "small" }],
+    });
+    expect(h.run(c, 3).failed).toBe(false);
+  });
+
+  it("size.trivial_patch does not fire when there are multiple commits", () => {
+    const h = get("size.trivial_patch");
+    const c = ctx({
+      files: [
+        { filename: "a.ts", status: "modified", additions: 1, deletions: 0, changes: 1 },
+      ],
+      commits: [
+        { sha: "abc", message: "one" },
+        { sha: "def", message: "two" },
+      ],
+    });
+    expect(h.run(c, 3).failed).toBe(false);
+  });
 });
 
 describe("PR text heuristics", () => {
@@ -78,6 +169,25 @@ describe("PR text heuristics", () => {
     expect(h.run(ctx({ pr: { ...ctx().pr, title: "🎉🎉🎉" } }), undefined).failed).toBe(true);
     expect(
       h.run(ctx({ pr: { ...ctx().pr, title: "Add OAuth provider for SSO" } }), undefined).failed
+    ).toBe(false);
+  });
+
+  it("pr.title_vague flags GitHub web-UI default titles", () => {
+    const h = get("pr.title_vague");
+    expect(
+      h.run(ctx({ pr: { ...ctx().pr, title: "Update README.md" } }), undefined).failed
+    ).toBe(true);
+    expect(
+      h.run(ctx({ pr: { ...ctx().pr, title: "Create foo.ts" } }), undefined).failed
+    ).toBe(true);
+    expect(
+      h.run(ctx({ pr: { ...ctx().pr, title: "Delete legacy.md" } }), undefined).failed
+    ).toBe(true);
+    expect(
+      h.run(
+        ctx({ pr: { ...ctx().pr, title: "Update DB schema for users table" } }),
+        undefined
+      ).failed
     ).toBe(false);
   });
 

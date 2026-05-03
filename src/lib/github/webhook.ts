@@ -8,6 +8,7 @@ import {
   closePullRequest,
   ensureLabel,
   removeLabelIfPresent,
+  reopenPullRequest,
   setLabels,
   repoRef,
 } from "@/lib/github/pr-actions";
@@ -32,6 +33,7 @@ type WebhookPayload = {
     title?: string;
     body?: string | null;
   };
+  label?: { name: string };
   repositories?: Array<{ id: number; full_name: string }>;
   repositories_added?: Array<{ id: number; full_name: string }>;
   repositories_removed?: Array<{ id: number; full_name: string }>;
@@ -133,24 +135,34 @@ async function ensureProjectLabels(args: {
   pending: string;
   approved: string;
   denied: string;
+  evaluate: string;
 }): Promise<void> {
   const ref = repoRef(args.fullName, args.installationId);
   await Promise.all([
     ensureLabel(ref, args.pending, "fbca04", "Awaiting application review"),
     ensureLabel(ref, args.approved, "0e8a16", "Approved contributor"),
     ensureLabel(ref, args.denied, "b60205", "Application denied"),
+    ensureLabel(
+      ref,
+      args.evaluate,
+      "5319e7",
+      "Add to trigger a re-evaluation by the contribution checker"
+    ),
   ]).catch((e) =>
     logger.warn({ err: e, fullName: args.fullName }, "ensureProjectLabels failed")
   );
 }
 
 export async function handlePullRequestEvent(payload: WebhookPayload) {
+  const action = payload.action ?? "";
+  const isReEvalLabel = action === "labeled";
   if (
     !payload.pull_request ||
     !payload.repository ||
     !payload.installation ||
-    !["opened", "reopened", "ready_for_review", "synchronize"].includes(
-      payload.action ?? ""
+    !(
+      ["opened", "reopened", "ready_for_review", "synchronize"].includes(action) ||
+      isReEvalLabel
     )
   ) {
     return;
@@ -163,6 +175,22 @@ export async function handlePullRequestEvent(payload: WebhookPayload) {
   const prNodeId = payload.pull_request.node_id;
   const author = payload.pull_request.user;
   const headSha = payload.pull_request.head?.sha ?? null;
+  const prIsClosed = payload.pull_request.state === "closed";
+
+  // For "labeled" events we only care about the project's evaluate label.
+  // Anything else (the bot's own status labels included) must short-circuit
+  // before we touch the DB or run the decision pipeline.
+  if (isReEvalLabel) {
+    const labelName = payload.label?.name;
+    if (!labelName) return;
+    const repoForLabelGate = await prisma.repo.findUnique({
+      where: { ghRepoId },
+      select: { project: { select: { labelEvaluate: true } } },
+    });
+    if (!repoForLabelGate || repoForLabelGate.project.labelEvaluate !== labelName) {
+      return;
+    }
+  }
 
   const decision = await decideForPR({
     ghRepoId,
@@ -187,6 +215,7 @@ export async function handlePullRequestEvent(payload: WebhookPayload) {
           labelPending: true,
           labelApproved: true,
           labelDenied: true,
+          labelEvaluate: true,
           checkerEnabled: true,
           trackWhenDisabled: true,
           checksEnabled: true,
@@ -245,10 +274,47 @@ export async function handlePullRequestEvent(payload: WebhookPayload) {
       pending: project.labelPending,
       approved: project.labelApproved,
       denied: project.labelDenied,
+      evaluate: project.labelEvaluate,
     });
   }
 
+  // Always strip the evaluate trigger label after a re-eval, regardless of
+  // labelsEnabled — the admin added it to fire this run, leaving it on would
+  // re-trigger on every subsequent webhook touch.
+  const removeEvaluateLabel = async () => {
+    if (!isReEvalLabel) return;
+    await removeLabelIfPresent(ref, prNumber, project.labelEvaluate).catch(() =>
+      undefined
+    );
+  };
+
   if (decision.status === "APPROVED" || decision.status === "BYPASSED") {
+    // Re-eval on a previously closed-by-app PR: reopen it so the now-passing
+    // decision has somewhere to land.
+    if (isReEvalLabel && prIsClosed && decision.repoId) {
+      const existing = await prisma.prCheck.findUnique({
+        where: { repoId_prNumber: { repoId: decision.repoId, prNumber } },
+        select: { closedByApp: true },
+      });
+      if (existing?.closedByApp) {
+        try {
+          await reopenPullRequest(
+            ref,
+            prNumber,
+            `Re-evaluation by **${project.name}** passed — reopening this PR.`
+          );
+          await prisma.prCheck.update({
+            where: { repoId_prNumber: { repoId: decision.repoId, prNumber } },
+            data: { closedByApp: false },
+          });
+        } catch (e) {
+          logger.warn(
+            { err: e, repoFullName, prNumber },
+            "re-eval reopen failed"
+          );
+        }
+      }
+    }
     if (project.labelsEnabled) {
       await Promise.all([
         removeLabelIfPresent(ref, prNumber, project.labelPending).catch(() => undefined),
@@ -256,6 +322,7 @@ export async function handlePullRequestEvent(payload: WebhookPayload) {
         setLabels(ref, prNumber, [project.labelApproved]).catch(() => undefined),
       ]);
     }
+    await removeEvaluateLabel();
     await postDecisionSideEffects({
       installationId,
       repoFullName,
@@ -279,23 +346,28 @@ export async function handlePullRequestEvent(payload: WebhookPayload) {
     }) ?? "";
 
   try {
-    await closePullRequest(ref, prNumber, body);
-    if (decision.repoId && shouldTrackPr) {
-      await prisma.prCheck.update({
-        where: { repoId_prNumber: { repoId: decision.repoId, prNumber } },
-        data: { closedByApp: true },
+    // Skip the close+comment when the PR is already closed (the only path
+    // that gets here closed is a re-eval label add). Re-closing would post a
+    // duplicate decision comment on every label re-trigger.
+    if (!prIsClosed) {
+      await closePullRequest(ref, prNumber, body);
+      if (decision.repoId && shouldTrackPr) {
+        await prisma.prCheck.update({
+          where: { repoId_prNumber: { repoId: decision.repoId, prNumber } },
+          data: { closedByApp: true },
+        });
+      }
+      await enqueueProjectWebhook({
+        projectId: project.id,
+        event: "pr.blocked",
+        payload: {
+          repo: repoFullName,
+          prNumber,
+          ghLogin: author.login,
+          reason: decision.status === "PENDING" ? "no-application" : "denied",
+        },
       });
     }
-    await enqueueProjectWebhook({
-      projectId: project.id,
-      event: "pr.blocked",
-      payload: {
-        repo: repoFullName,
-        prNumber,
-        ghLogin: author.login,
-        reason: decision.status === "PENDING" ? "no-application" : "denied",
-      },
-    });
     if (project.labelsEnabled) {
       const targetLabel =
         decision.status === "PENDING" ? project.labelPending : project.labelDenied;
@@ -313,6 +385,8 @@ export async function handlePullRequestEvent(payload: WebhookPayload) {
   } catch (e) {
     logger.error({ err: e, repoFullName, prNumber }, "PR close/label failed");
   }
+
+  await removeEvaluateLabel();
 
   await postDecisionSideEffects({
     installationId,

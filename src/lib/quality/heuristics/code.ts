@@ -278,7 +278,7 @@ export const codeHeuristics: Heuristic[] = [
     label: "Docs-only changes",
     description: "Only Markdown files changed.",
     weight: 1,
-    defaultEnabled: false,
+    defaultEnabled: true,
     run(ctx) {
       if (ctx.files.length === 0) return { failed: false };
       const allMd = ctx.files.every((f) => /\.(md|markdown|mdx)$/i.test(f.filename));
