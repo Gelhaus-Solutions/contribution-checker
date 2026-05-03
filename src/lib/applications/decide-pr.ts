@@ -18,10 +18,15 @@ function globToRegex(pattern: string): RegExp {
   return new RegExp(out, "i");
 }
 
+export type PendingReason =
+  | "no-application"
+  | "submitted"
+  | "cooldown-elapsed";
+
 export type PrDecision =
   | { status: "APPROVED"; bypassReason?: "checker_disabled" }
   | { status: "BYPASSED"; reason: "bot" | "collaborator" }
-  | { status: "PENDING" }
+  | { status: "PENDING"; reason: PendingReason }
   | { status: "DENIED"; reason?: string | null; cooldownUntil?: Date | null }
   | { status: "IGNORED"; reason: string };
 
@@ -194,6 +199,7 @@ export async function decideForRepo(args: {
   if (!user) {
     return {
       status: "PENDING",
+      reason: "no-application",
       repoId: repo.id,
       projectId: repo.projectId,
     };
@@ -213,7 +219,12 @@ export async function decideForRepo(args: {
   });
 
   if (!app) {
-    return { status: "PENDING", repoId: repo.id, projectId: repo.projectId };
+    return {
+      status: "PENDING",
+      reason: "no-application",
+      repoId: repo.id,
+      projectId: repo.projectId,
+    };
   }
 
   if (app.status === "APPROVED") {
@@ -242,11 +253,33 @@ export async function decideForRepo(args: {
         projectId: repo.projectId,
       };
     }
-    return { status: "PENDING", repoId: repo.id, projectId: repo.projectId };
+    return {
+      status: "PENDING",
+      reason: "cooldown-elapsed",
+      repoId: repo.id,
+      projectId: repo.projectId,
+    };
   }
 
-  // SUBMITTED or REVOKED → pending.
-  return { status: "PENDING", repoId: repo.id, projectId: repo.projectId };
+  // REVOKED → admin pulled approval. Treated as a denial with no cooldown:
+  // the user can't re-apply automatically, they need an admin to act.
+  if (app.status === "REVOKED") {
+    return {
+      status: "DENIED",
+      reason: app.reason,
+      cooldownUntil: null,
+      repoId: repo.id,
+      projectId: repo.projectId,
+    };
+  }
+
+  // SUBMITTED → awaiting reviewer action.
+  return {
+    status: "PENDING",
+    reason: "submitted",
+    repoId: repo.id,
+    projectId: repo.projectId,
+  };
 }
 
 /**

@@ -179,7 +179,7 @@ describe("decideForRepo", () => {
     expect(isCollaborator).toHaveBeenCalledOnce();
   });
 
-  it("returns PENDING when no User row exists", async () => {
+  it("returns PENDING (no-application) when no User row exists", async () => {
     manualDecisionFindUnique.mockResolvedValue(null);
     userFindUnique.mockResolvedValue(null);
     const decision = await decideForRepo({
@@ -188,6 +188,66 @@ describe("decideForRepo", () => {
       prAuthorGhId: 42,
     });
     expect(decision.status).toBe("PENDING");
+    if (decision.status === "PENDING") {
+      expect(decision.reason).toBe("no-application");
+    }
+  });
+
+  it("returns PENDING (no-application) when a user exists but has never applied", async () => {
+    manualDecisionFindUnique.mockResolvedValue(null);
+    userFindUnique.mockResolvedValue({ id: "u1" });
+    applicationFindFirst.mockResolvedValue(null);
+    const decision = await decideForRepo({
+      repo: makeRepo({ installationId: null }),
+      prAuthorGhLogin: "alice",
+      prAuthorGhId: 2,
+    });
+    expect(decision.status).toBe("PENDING");
+    if (decision.status === "PENDING") {
+      expect(decision.reason).toBe("no-application");
+    }
+  });
+
+  it("returns PENDING (submitted) when the latest application is awaiting review", async () => {
+    manualDecisionFindUnique.mockResolvedValue(null);
+    userFindUnique.mockResolvedValue({ id: "u1" });
+    applicationFindFirst.mockResolvedValue({
+      status: "SUBMITTED",
+      decidedAt: null,
+      updatedAt: new Date(),
+      reason: null,
+    });
+    const decision = await decideForRepo({
+      repo: makeRepo({ installationId: null }),
+      prAuthorGhLogin: "alice",
+      prAuthorGhId: 2,
+    });
+    expect(decision.status).toBe("PENDING");
+    if (decision.status === "PENDING") {
+      expect(decision.reason).toBe("submitted");
+    }
+  });
+
+  it("returns DENIED with no cooldown when the latest application has been revoked", async () => {
+    manualDecisionFindUnique.mockResolvedValue(null);
+    userFindUnique.mockResolvedValue({ id: "u1" });
+    applicationFindFirst.mockResolvedValue({
+      status: "REVOKED",
+      decidedAt: new Date(),
+      updatedAt: new Date(),
+      reason: "policy violation",
+    });
+    const decision = await decideForRepo({
+      repo: makeRepo({ installationId: null }),
+      prAuthorGhLogin: "alice",
+      prAuthorGhId: 2,
+    });
+    expect(decision.status).toBe("DENIED");
+    if (decision.status === "DENIED") {
+      expect(decision.reason).toBe("policy violation");
+      // Revocations don't honour the project's cooldown — admin must act.
+      expect(decision.cooldownUntil).toBeNull();
+    }
   });
 
   it("returns APPROVED when the latest application is approved", async () => {

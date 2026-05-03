@@ -46,11 +46,14 @@ export async function onApplicationApproved(args: {
   if (!app || !app.user.ghId) return { reopened: 0 };
 
   const repoIds = app.project.repos.map((r) => r.id);
+  // Reopen any PR we closed for this user, regardless of whether it was last
+  // categorised as PENDING (no application) or DENIED (e.g. a revoked app
+  // that was re-evaluated). The `closedByApp` flag is the source of truth.
   const reopens = await prisma.prCheck.findMany({
     where: {
       repoId: { in: repoIds },
       authorGhId: app.user.ghId,
-      status: "PENDING",
+      status: { in: ["PENDING", "DENIED"] },
       closedByApp: true,
     },
     include: { repo: { select: { id: true, fullName: true, installationId: true } } },
