@@ -5,7 +5,12 @@ import Link from "next/link";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { removeManualDecision, getUserOverview, type UserOverview } from "./actions";
+import {
+  removeManualDecision,
+  getUserOverview,
+  setApplicationStatus,
+  type UserOverview,
+} from "./actions";
 
 export type PersonRow = {
   kind: "manual" | "application";
@@ -243,6 +248,17 @@ function UserOverviewDialog({
 }) {
   const [data, setData] = useState<UserOverview | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const reload = () => {
+    setData(null);
+    setError(null);
+    return getUserOverview({ projectId, ghLogin })
+      .then((d) => setData(d))
+      .catch((e: unknown) =>
+        setError(e instanceof Error ? e.message : String(e))
+      );
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -259,6 +275,25 @@ function UserOverviewDialog({
       cancelled = true;
     };
   }, [projectId, ghLogin]);
+
+  const setStatus = async (
+    target: "PENDING" | "SUBMITTED" | "APPROVED" | "DENIED"
+  ) => {
+    if (!data?.application) return;
+    setBusy(true);
+    try {
+      await setApplicationStatus({
+        projectId,
+        applicationId: data.application.id,
+        target,
+      });
+      await reload();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -323,6 +358,25 @@ function UserOverviewDialog({
                       {data.application.reason}
                     </p>
                   )}
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <span className="text-xs text-muted-foreground">
+                      Set state:
+                    </span>
+                    {(
+                      ["PENDING", "SUBMITTED", "APPROVED", "DENIED"] as const
+                    ).map((t) => (
+                      <Button
+                        key={t}
+                        size="sm"
+                        variant="outline"
+                        disabled={busy}
+                        onClick={() => setStatus(t)}
+                        className="h-7 px-2 text-[11px]"
+                      >
+                        {t}
+                      </Button>
+                    ))}
+                  </div>
                   <div className="mt-3">
                     <Link
                       className="text-xs underline"

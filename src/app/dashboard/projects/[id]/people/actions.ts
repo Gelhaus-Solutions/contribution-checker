@@ -5,7 +5,15 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
 import { requireProjectRole } from "@/lib/authz";
 import { recordAudit } from "@/lib/audit";
-import { onApplicationApproved } from "@/lib/github/post-decision";
+import {
+  onApplicationApproved,
+  onApplicationRevokedWithClose,
+} from "@/lib/github/post-decision";
+import {
+  approveApplication,
+  denyApplication,
+  revokeApplication,
+} from "@/lib/applications/decide";
 
 const ghLoginPattern = /^[a-z0-9](?:[a-z0-9]|-(?=[a-z0-9])){0,38}$/i;
 
@@ -107,6 +115,111 @@ const removeSchema = z.object({
   projectId: z.string().min(1),
   decisionId: z.string().min(1),
 });
+
+const setStatusSchema = z.object({
+  projectId: z.string().min(1),
+  applicationId: z.string().min(1),
+  target: z.enum(["PENDING", "SUBMITTED", "APPROVED", "DENIED"]),
+});
+
+/**
+ * Admin override: force an application into any of the four user-facing
+ * states. Reuses the regular approve/deny/revoke side effects when the
+ * source state matches; otherwise writes directly with an audit entry so
+ * we don't fire a misleading "your approval was revoked" notification on
+ * a user who was never approved.
+ */
+export async function setApplicationStatus(args: {
+  projectId: string;
+  applicationId: string;
+  target: "PENDING" | "SUBMITTED" | "APPROVED" | "DENIED";
+}) {
+  const parsed = setStatusSchema.parse(args);
+  const { session } = await requireProjectRole(parsed.projectId, "ADMIN");
+
+  const app = await prisma.application.findUnique({
+    where: { id: parsed.applicationId },
+    select: { id: true, projectId: true, status: true },
+  });
+  if (!app || app.projectId !== parsed.projectId) {
+    throw new Error("Application not found");
+  }
+
+  const wasApproved = app.status === "APPROVED";
+
+  if (parsed.target === "APPROVED") {
+    if (app.status === "APPROVED") return;
+    await approveApplication({
+      applicationId: app.id,
+      decidedById: session.user.id,
+    });
+    await onApplicationApproved({ applicationId: app.id });
+  } else if (wasApproved) {
+    await revokeApplication({
+      applicationId: app.id,
+      decidedById: session.user.id,
+      target: parsed.target,
+    });
+    await onApplicationRevokedWithClose({ applicationId: app.id });
+  } else if (parsed.target === "DENIED") {
+    await denyApplication({
+      applicationId: app.id,
+      decidedById: session.user.id,
+      allowResubmit: true,
+    });
+  } else {
+    const now = new Date();
+    if (parsed.target === "SUBMITTED") {
+      await prisma.application.update({
+        where: { id: app.id },
+        data: {
+          status: "SUBMITTED",
+          decidedById: null,
+          decidedAt: null,
+          allowResubmit: true,
+          cooldownUntil: null,
+        },
+      });
+      await recordAudit({
+        projectId: app.projectId,
+        actorId: session.user.id,
+        kind: "application.submitted",
+        payload: {
+          applicationId: app.id,
+          manualOverride: true,
+          from: app.status,
+        },
+      });
+    } else {
+      // PENDING: stored as DENIED + resubmit + no cooldown so the apply
+      // page derives "pending — can apply now".
+      await prisma.application.update({
+        where: { id: app.id },
+        data: {
+          status: "DENIED",
+          decidedById: session.user.id,
+          decidedAt: now,
+          allowResubmit: true,
+          cooldownUntil: null,
+        },
+      });
+      await recordAudit({
+        projectId: app.projectId,
+        actorId: session.user.id,
+        kind: "application.revoked",
+        payload: {
+          applicationId: app.id,
+          target: "PENDING",
+          manualOverride: true,
+          from: app.status,
+        },
+      });
+    }
+  }
+
+  revalidatePath(`/dashboard/projects/${parsed.projectId}/people`);
+  revalidatePath(`/dashboard/projects/${parsed.projectId}/applications/${app.id}`);
+}
 
 export async function removeManualDecision(formData: FormData) {
   const parsed = removeSchema.parse({
