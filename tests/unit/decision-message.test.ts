@@ -28,9 +28,9 @@ describe("buildDecisionMessage", () => {
     ).toBeNull();
   });
 
-  it("composes a PENDING body with the apply URL and login", () => {
+  it("composes a PENDING (no-application) body with the apply URL and login", () => {
     const msg = buildDecisionMessage({
-      decision: { status: "PENDING" },
+      decision: { status: "PENDING", reason: "no-application" },
       projectName,
       applyUrl,
       ghLogin,
@@ -38,6 +38,19 @@ describe("buildDecisionMessage", () => {
     expect(msg).toContain("@octocat");
     expect(msg).toContain("**Acme**");
     expect(msg).toContain(applyUrl);
+    expect(msg).toContain("Please apply");
+  });
+
+  it("PENDING (submitted) tells the user the application is awaiting review", () => {
+    const msg = buildDecisionMessage({
+      decision: { status: "PENDING", reason: "submitted" },
+      projectName,
+      applyUrl,
+      ghLogin,
+    });
+    expect(msg).toContain("@octocat");
+    expect(msg).toContain("awaiting review");
+    expect(msg).not.toContain("Please apply");
   });
 
   it("includes the cooldown date for DENIED with cooldown", () => {

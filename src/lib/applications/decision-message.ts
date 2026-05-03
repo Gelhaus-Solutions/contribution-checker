@@ -15,6 +15,13 @@ export function buildDecisionMessage(args: {
 }): string | null {
   const { decision, projectName, applyUrl, ghLogin } = args;
   if (decision.status === "PENDING") {
+    if (decision.reason === "submitted") {
+      return (
+        `Hi @${ghLogin}! Your application for **${projectName}** is awaiting review. ` +
+        `We'll reopen this PR once it's approved. Status: ${applyUrl}`
+      );
+    }
+    // "no-application" or "cooldown-elapsed" → invite the user to apply.
     return (
       `Hi @${ghLogin}! Thanks for the PR. ` +
       `Contributions to **${projectName}** are gated behind a short application. ` +

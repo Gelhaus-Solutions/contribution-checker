@@ -69,7 +69,17 @@ export function buildDecisionCheckPayload(args: {
             : "PR author is a repo collaborator and is bypassed.",
         detailsUrl: applyUrl,
       };
-    case "PENDING":
+    case "PENDING": {
+      if (decision.reason === "submitted") {
+        return {
+          name: CHECK_RUN_NAME,
+          status: "completed",
+          conclusion: "action_required",
+          title: "Application under review",
+          summary: `Your application for ${projectName} is awaiting reviewer action.`,
+          detailsUrl: applyUrl,
+        };
+      }
       return {
         name: CHECK_RUN_NAME,
         status: "completed",
@@ -78,6 +88,7 @@ export function buildDecisionCheckPayload(args: {
         summary: `Open an application for ${projectName} to unblock this PR.`,
         detailsUrl: applyUrl,
       };
+    }
     case "DENIED": {
       const cooldownText = decision.cooldownUntil
         ? `Denied until ${decision.cooldownUntil.toISOString().slice(0, 10)}.`

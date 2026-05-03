@@ -47,15 +47,27 @@ describe("buildDecisionCheckPayload", () => {
     expect(p.title).toBe("Bypassed (collaborator)");
   });
 
-  it("PENDING → action_required, details points at apply URL", () => {
+  it("PENDING (no-application) → action_required, invites the user to apply", () => {
     const p = buildDecisionCheckPayload({
-      decision: { status: "PENDING" },
+      decision: { status: "PENDING", reason: "no-application" },
       applyUrl,
       projectName,
     });
     expect(p.conclusion).toBe("action_required");
-    expect(p.title).toContain("Application required");
+    expect(p.title).toBe("Application required");
+    expect(p.summary).toContain("Open an application");
     expect(p.detailsUrl).toBe(applyUrl);
+  });
+
+  it("PENDING (submitted) → action_required with under-review copy", () => {
+    const p = buildDecisionCheckPayload({
+      decision: { status: "PENDING", reason: "submitted" },
+      applyUrl,
+      projectName,
+    });
+    expect(p.conclusion).toBe("action_required");
+    expect(p.title).toBe("Application under review");
+    expect(p.summary).toContain("awaiting reviewer action");
   });
 
   it("DENIED permanent → failure", () => {
