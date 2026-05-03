@@ -16,7 +16,7 @@ export type PersonRow = {
   kind: "manual" | "application";
   id: string;
   ghLogin: string;
-  status: "APPROVED" | "DENIED";
+  status: "APPROVED" | "DENIED" | "PENDING";
   reason: string | null;
   decidedAt: string;
   decidedByLogin: string | null;
@@ -26,6 +26,7 @@ export type PersonRow = {
 const STATUS_VARIANT = {
   APPROVED: "success",
   DENIED: "destructive",
+  PENDING: "warning",
 } as const;
 
 type SearchField = "ALL" | "login" | "reason" | "reviewer";
@@ -39,7 +40,7 @@ export function PeopleList({
 }) {
   const [query, setQuery] = useState("");
   const [searchField, setSearchField] = useState<SearchField>("ALL");
-  const [filter, setFilter] = useState<"ALL" | "APPROVED" | "DENIED">(
+  const [filter, setFilter] = useState<"ALL" | "APPROVED" | "DENIED" | "PENDING">(
     "ALL"
   );
   const [source, setSource] = useState<"ALL" | "manual" | "application">("ALL");
@@ -72,6 +73,7 @@ export function PeopleList({
       total: people.length,
       approved: people.filter((d) => d.status === "APPROVED").length,
       denied: people.filter((d) => d.status === "DENIED").length,
+      pending: people.filter((d) => d.status === "PENDING").length,
     };
   }, [people]);
 
@@ -116,6 +118,13 @@ export function PeopleList({
             active={filter === "DENIED"}
             onClick={() => setFilter("DENIED")}
           />
+          {counts.pending > 0 && (
+            <FilterChip
+              label={`Pending ${counts.pending}`}
+              active={filter === "PENDING"}
+              onClick={() => setFilter("PENDING")}
+            />
+          )}
         </div>
         <div className="flex flex-wrap gap-1 sm:ml-auto">
           <FilterChip
@@ -338,14 +347,17 @@ function UserOverviewDialog({
                   <div className="flex flex-wrap items-center gap-2">
                     <Badge
                       variant={
-                        data.application.status === "APPROVED"
+                        data.application.derivedStatus === "APPROVED"
                           ? "success"
-                          : data.application.status === "DENIED"
+                          : data.application.derivedStatus === "DENIED"
                             ? "destructive"
-                            : "secondary"
+                            : data.application.derivedStatus === "PENDING" ||
+                                data.application.derivedStatus === "SUBMITTED"
+                              ? "warning"
+                              : "secondary"
                       }
                     >
-                      {data.application.status}
+                      {data.application.derivedStatus}
                     </Badge>
                     <span className="text-xs text-muted-foreground">
                       Submitted {data.application.createdAt.slice(0, 10)}
