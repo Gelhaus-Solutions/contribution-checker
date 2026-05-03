@@ -24,6 +24,8 @@ const STATUS_VARIANT = {
   REVOKED: "secondary",
 } as const;
 
+type SearchField = "ALL" | "login" | "reason" | "reviewer";
+
 export function PeopleList({
   projectId,
   people,
@@ -32,6 +34,7 @@ export function PeopleList({
   people: PersonRow[];
 }) {
   const [query, setQuery] = useState("");
+  const [searchField, setSearchField] = useState<SearchField>("ALL");
   const [filter, setFilter] = useState<"ALL" | "APPROVED" | "DENIED" | "REVOKED">(
     "ALL"
   );
@@ -44,13 +47,21 @@ export function PeopleList({
       if (filter !== "ALL" && d.status !== filter) return false;
       if (source !== "ALL" && d.kind !== source) return false;
       if (!q) return true;
-      return (
-        d.ghLogin.toLowerCase().includes(q) ||
-        (d.reason ?? "").toLowerCase().includes(q) ||
-        (d.decidedByLogin ?? "").toLowerCase().includes(q)
-      );
+      const login = d.ghLogin.toLowerCase();
+      const reason = (d.reason ?? "").toLowerCase();
+      const reviewer = (d.decidedByLogin ?? "").toLowerCase();
+      switch (searchField) {
+        case "login":
+          return login.includes(q);
+        case "reason":
+          return reason.includes(q);
+        case "reviewer":
+          return reviewer.includes(q);
+        default:
+          return login.includes(q) || reason.includes(q) || reviewer.includes(q);
+      }
     });
-  }, [people, query, filter, source]);
+  }, [people, query, searchField, filter, source]);
 
   const counts = useMemo(() => {
     return {
@@ -64,12 +75,28 @@ export function PeopleList({
   return (
     <div className="space-y-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-        <Input
-          placeholder="Search by login, reason, or reviewer..."
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          className="sm:max-w-sm"
-        />
+        <div className="flex flex-1 gap-2 sm:max-w-md">
+          <select
+            value={searchField}
+            onChange={(e) => setSearchField(e.target.value as SearchField)}
+            className="h-9 rounded-md border border-border bg-background px-2 text-sm"
+            aria-label="Search field"
+          >
+            <option value="ALL">All fields</option>
+            <option value="login">Login</option>
+            <option value="reason">Reason</option>
+            <option value="reviewer">Reviewer</option>
+          </select>
+          <Input
+            placeholder={
+              searchField === "ALL"
+                ? "Search login, reason, or reviewer..."
+                : `Search by ${searchField}...`
+            }
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+        </div>
         <div className="flex flex-wrap gap-1">
           <FilterChip
             label={`All ${counts.total}`}
@@ -368,9 +395,7 @@ function UserOverviewDialog({
                     <div className="text-2xl font-semibold">
                       {data.averageQuality}%
                       <span className="ml-2 text-xs font-normal text-muted-foreground">
-                        average across{" "}
-                        {data.prs.filter((p) => p.quality && p.quality.score !== null).length}{" "}
-                        scored PR(s)
+                        average across {data.scoredPrCount} scored PR(s)
                       </span>
                     </div>
                   </div>
@@ -378,81 +403,14 @@ function UserOverviewDialog({
               </section>
             )}
 
-            <section>
-              <h3 className="text-sm font-medium">PRs in this project</h3>
-              {data.prs.length === 0 ? (
-                <p className="mt-2 text-xs text-muted-foreground">No PRs.</p>
-              ) : (
-                <ul className="mt-2 divide-y divide-border rounded-md border border-border">
-                  {data.prs.map((pr) => (
-                    <li
-                      key={`${pr.repoFullName}#${pr.prNumber}`}
-                      className="px-3 py-2 text-sm"
-                    >
-                      <div className="flex flex-wrap items-center gap-2">
-                        <a
-                          className="font-mono text-xs underline"
-                          href={`https://github.com/${pr.repoFullName}/pull/${pr.prNumber}`}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          {pr.repoFullName}#{pr.prNumber}
-                        </a>
-                        <Badge
-                          variant={
-                            pr.status === "APPROVED" || pr.status === "BYPASSED"
-                              ? "success"
-                              : pr.status === "DENIED"
-                                ? "destructive"
-                                : "warning"
-                          }
-                          className="text-[10px]"
-                        >
-                          {pr.status}
-                        </Badge>
-                        {pr.closedByApp && (
-                          <Badge variant="outline" className="text-[10px]">
-                            closed by app
-                          </Badge>
-                        )}
-                        {pr.quality && (
-                          <Badge
-                            variant={
-                              pr.quality.score === null
-                                ? "outline"
-                                : pr.quality.score < 50
-                                  ? "destructive"
-                                  : pr.quality.score < 75
-                                    ? "warning"
-                                    : "success"
-                            }
-                            className="text-[10px]"
-                          >
-                            quality{" "}
-                            {pr.quality.score === null
-                              ? "—"
-                              : `${pr.quality.score}%`}
-                          </Badge>
-                        )}
-                      </div>
-                      {pr.quality && pr.quality.failed.length > 0 && (
-                        <ul className="mt-1 list-disc pl-5 text-xs text-muted-foreground">
-                          {pr.quality.failed.slice(0, 6).map((f) => (
-                            <li key={f.id}>
-                              <span className="font-medium">{f.label}</span>
-                              {f.reason ? ` — ${f.reason}` : null}
-                            </li>
-                          ))}
-                          {pr.quality.failed.length > 6 && (
-                            <li>+{pr.quality.failed.length - 6} more</li>
-                          )}
-                        </ul>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </section>
+            <div className="pt-2">
+              <Link
+                className="text-sm underline"
+                href={`/dashboard/projects/${projectId}/prs?author=${encodeURIComponent(ghLogin)}`}
+              >
+                View all PRs from this user →
+              </Link>
+            </div>
           </div>
         )}
       </div>

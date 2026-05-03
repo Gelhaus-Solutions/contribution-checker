@@ -103,6 +103,11 @@ model Project {
   labelPending  String  @default("contribution:pending")
   labelApproved String  @default("contribution:approved")
   labelDenied   String  @default("contribution:denied")
+  // Manual re-eval trigger: admins add this label to a PR to force the
+  // checker to re-run (reopens closed-by-app PRs that now pass, or evaluates
+  // PRs opened before the App was installed). Always removed by the bot
+  // after processing, regardless of labelsEnabled.
+  labelEvaluate String  @default("contribution:evaluate")
 
   // Disable switch: when checkerEnabled=false, every PR is treated as APPROVED.
   // Tracking (PrCheck rows + quality scoring) only runs if trackWhenDisabled=true.

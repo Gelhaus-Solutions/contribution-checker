@@ -38,7 +38,16 @@ export function computeScore(
     return { score: null, failedIds, passedIds, totalWeight, earnedWeight };
   }
 
-  const score = Math.round((earnedWeight / totalWeight) * 100);
+  let cap = 100;
+  for (const id of failedIds) {
+    const sig = signals[id];
+    if (typeof sig?.scoreCap === "number") {
+      cap = Math.min(cap, sig.scoreCap);
+    }
+  }
+
+  const raw = Math.round((earnedWeight / totalWeight) * 100);
+  const score = Math.min(raw, cap);
   return { score, failedIds, passedIds, totalWeight, earnedWeight };
 }
 

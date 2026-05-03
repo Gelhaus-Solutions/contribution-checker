@@ -142,7 +142,6 @@ export async function removeManualDecision(formData: FormData) {
 import { computeScore } from "@/lib/quality/score";
 import { parseQualityConfig } from "@/lib/quality/registry";
 import type { SignalsRaw } from "@/lib/quality/types";
-import { ALL_HEURISTICS } from "@/lib/quality/registry";
 
 export type UserOverview = {
   ghLogin: string;
@@ -168,19 +167,8 @@ export type UserOverview = {
     bypassed: number;
     closedByApp: number;
   };
-  prs: Array<{
-    repoFullName: string;
-    prNumber: number;
-    status: string;
-    closedByApp: boolean;
-    headSha: string | null;
-    quality: {
-      score: number | null;
-      failed: Array<{ id: string; label: string; reason?: string }>;
-    } | null;
-    updatedAt: string;
-  }>;
   averageQuality: number | null;
+  scoredPrCount: number;
   qualityEnabled: boolean;
 };
 
@@ -245,11 +233,10 @@ export async function getUserOverview(args: {
       repo: { projectId },
     },
     include: {
-      repo: { select: { fullName: true } },
-      quality: true,
+      quality: project.qualityEnabled,
     },
     orderBy: { updatedAt: "desc" },
-    take: 100,
+    take: 500,
   });
 
   const stats = {
@@ -260,7 +247,6 @@ export async function getUserOverview(args: {
     bypassed: 0,
     closedByApp: 0,
   };
-  const prs: UserOverview["prs"] = [];
   const scoresForAverage: number[] = [];
 
   for (const c of prChecks) {
@@ -270,32 +256,11 @@ export async function getUserOverview(args: {
     if (c.status === "BYPASSED") stats.bypassed += 1;
     if (c.closedByApp) stats.closedByApp += 1;
 
-    let quality: UserOverview["prs"][number]["quality"] = null;
     if (project.qualityEnabled && c.quality) {
       const signals = JSON.parse(c.quality.signalsRaw) as SignalsRaw;
       const summary = computeScore(signals, config);
-      const failed = summary.failedIds.map((id) => {
-        const h = ALL_HEURISTICS.find((x) => x.id === id);
-        const sig = signals[id];
-        return {
-          id,
-          label: h?.label ?? id,
-          reason: sig?.reason,
-        };
-      });
-      quality = { score: summary.score, failed };
       if (summary.score !== null) scoresForAverage.push(summary.score);
     }
-
-    prs.push({
-      repoFullName: c.repo.fullName,
-      prNumber: c.prNumber,
-      status: c.status,
-      closedByApp: c.closedByApp,
-      headSha: c.headSha,
-      quality,
-      updatedAt: c.updatedAt.toISOString(),
-    });
   }
 
   const averageQuality =
@@ -317,8 +282,8 @@ export async function getUserOverview(args: {
         }
       : null,
     prStats: stats,
-    prs,
     averageQuality,
+    scoredPrCount: scoresForAverage.length,
     qualityEnabled: project.qualityEnabled,
   };
 }

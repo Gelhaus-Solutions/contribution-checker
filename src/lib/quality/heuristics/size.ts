@@ -1,4 +1,5 @@
 import type { Heuristic } from "@/lib/quality/types";
+import { isTitleVague } from "@/lib/quality/heuristics/prText";
 
 const asNumber = (v: unknown, fallback: number): number =>
   typeof v === "number" && Number.isFinite(v) ? v : fallback;
@@ -67,6 +68,46 @@ export const sizeHeuristics: Heuristic[] = [
         failed,
         value: `${ctx.files.length}f / ${lines}L / ${ctx.commits.length}c`,
         reason: failed ? "Huge diff in one commit" : undefined,
+      };
+    },
+  },
+  {
+    id: "size.trivial_patch",
+    group: "size",
+    label: "Trivial patch (too small to score high)",
+    description:
+      "PR changes ≤ N lines in ≤ 1 file with ≤ 1 commit — likely a typo, default-web-UI edit, or probe PR. Caps the score at 50% (or 25% when paired with a vague title or empty body).",
+    weight: 3,
+    defaultEnabled: true,
+    defaultThreshold: 3,
+    thresholdKind: "number",
+    run(ctx, threshold) {
+      const max = asNumber(threshold, 3);
+      const lines = ctx.files.reduce(
+        (acc, f) => acc + (f.additions ?? 0) + (f.deletions ?? 0),
+        0
+      );
+      const trivial =
+        lines <= max &&
+        ctx.files.length <= 1 &&
+        ctx.commits.length <= 1 &&
+        lines > 0;
+      if (!trivial) {
+        return {
+          failed: false,
+          value: `${ctx.files.length}f / ${lines}L / ${ctx.commits.length}c`,
+        };
+      }
+      const bodyEmpty = (ctx.pr.body ?? "").trim().length === 0;
+      const titleVague = isTitleVague(ctx.pr.title ?? "");
+      const harsher = bodyEmpty || titleVague;
+      return {
+        failed: true,
+        value: `${ctx.files.length}f / ${lines}L / ${ctx.commits.length}c`,
+        reason: harsher
+          ? "Trivial patch with vague title or empty body"
+          : "Trivial patch",
+        scoreCap: harsher ? 25 : 50,
       };
     },
   },
