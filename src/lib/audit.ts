@@ -21,7 +21,11 @@ export type AuditKind =
   | "bypass.removed"
   | "webhook.test_sent"
   | "user.allowlisted"
-  | "user.deallowlisted";
+  | "user.deallowlisted"
+  | "settings.gating_changed"
+  | "settings.quality_changed"
+  | "quality.backfill_started"
+  | "quality.backfill_completed";
 
 export async function recordAudit(args: {
   projectId: string;

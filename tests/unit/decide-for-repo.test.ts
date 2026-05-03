@@ -38,6 +38,7 @@ function makeRepo(overrides: Partial<RepoForDecision> = {}): RepoForDecision {
       cooldownDays: 7,
       bypassHandles: '["*[bot]"]',
       bypassCollabs: true,
+      checkerEnabled: true,
     },
     ...overrides,
   } as RepoForDecision;
@@ -52,6 +53,29 @@ beforeEach(() => {
 });
 
 describe("decideForRepo", () => {
+  it("returns APPROVED with bypassReason=checker_disabled when project's checker is off", async () => {
+    const decision = await decideForRepo({
+      repo: makeRepo({
+        project: {
+          id: "proj1",
+          cooldownDays: 7,
+          bypassHandles: '["*[bot]"]',
+          bypassCollabs: true,
+          checkerEnabled: false,
+        },
+      }),
+      prAuthorGhLogin: "stranger",
+      prAuthorGhId: 99,
+    });
+    expect(decision.status).toBe("APPROVED");
+    if (decision.status === "APPROVED") {
+      expect(decision.bypassReason).toBe("checker_disabled");
+    }
+    // Manual decision lookup must be skipped.
+    expect(manualDecisionFindUnique).not.toHaveBeenCalled();
+    expect(userFindUnique).not.toHaveBeenCalled();
+  });
+
   it("returns IGNORED when the repo is inactive", async () => {
     const decision = await decideForRepo({
       repo: makeRepo({ active: false }),
@@ -133,6 +157,7 @@ describe("decideForRepo", () => {
           cooldownDays: 7,
           bypassHandles: "[]",
           bypassCollabs: false,
+          checkerEnabled: true,
         },
       }),
       prAuthorGhLogin: "alice",
@@ -238,6 +263,7 @@ describe("decideForRepo", () => {
           cooldownDays: null,
           bypassHandles: "[]",
           bypassCollabs: false,
+          checkerEnabled: true,
         },
       }),
       prAuthorGhLogin: "alice",

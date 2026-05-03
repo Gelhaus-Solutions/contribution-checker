@@ -86,8 +86,16 @@ export default function GitHubAppSetup() {
                 <ul className="ml-4 list-disc">
                   <li>Pull requests — <strong>Read &amp; write</strong></li>
                   <li>Issues — <strong>Read &amp; write</strong></li>
+                  <li>Checks — <strong>Read &amp; write</strong></li>
+                  <li>Contents — Read (needed for PR Quality scoring &mdash; reads PR file diffs)</li>
                   <li>Metadata — Read (auto-selected)</li>
                 </ul>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Existing installations need to accept the new permissions:
+                  GitHub will surface a banner in the App&apos;s settings page
+                  for every installation owner. Until accepted, status checks
+                  and quality scoring silently no-op for that installation.
+                </p>
                 And <strong>account permissions</strong>:
                 <ul className="ml-4 list-disc">
                   <li>Email addresses — Read</li>
@@ -103,8 +111,9 @@ export default function GitHubAppSetup() {
                 Subscribe to events:{" "}
                 <code className="rounded bg-muted px-1 py-0.5 text-xs">
                   Pull request
-                </code>
-                ,{" "}
+                </code>{" "}
+                (with the <code>synchronize</code> action enabled so we
+                re-evaluate on push),{" "}
                 <code className="rounded bg-muted px-1 py-0.5 text-xs">
                   Installation target
                 </code>{" "}

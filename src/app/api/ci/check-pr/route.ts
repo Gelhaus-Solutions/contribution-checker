@@ -17,9 +17,49 @@ import {
   OidcVerificationError,
   verifyGhActionsToken,
 } from "@/lib/ci/oidc";
+import { buildDecisionCheckPayload } from "@/lib/github/check-run";
+import { runQualityFromContext } from "@/lib/quality/run";
+import { computeScore } from "@/lib/quality/score";
+import { parseQualityConfig } from "@/lib/quality/registry";
+import type { FetchedPrContext } from "@/lib/quality/fetch";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+const fileSchema = z.object({
+  filename: z.string(),
+  status: z.enum([
+    "added",
+    "removed",
+    "modified",
+    "renamed",
+    "copied",
+    "changed",
+  ]),
+  additions: z.number().int().nonnegative().default(0),
+  deletions: z.number().int().nonnegative().default(0),
+  changes: z.number().int().nonnegative().default(0),
+  patch: z.string().nullable().optional(),
+  previous_filename: z.string().optional(),
+});
+
+const commitSchema = z.object({
+  sha: z.string(),
+  message: z.string().default(""),
+  authorLogin: z.string().optional(),
+  authorEmail: z.string().optional(),
+  committerEmail: z.string().optional(),
+});
+
+const accountSchema = z.object({
+  login: z.string(),
+  createdAt: z.string().optional(),
+  publicRepos: z.number().int().nonnegative().optional(),
+  followers: z.number().int().nonnegative().optional(),
+  bio: z.string().nullable().optional(),
+  email: z.string().nullable().optional(),
+  hasAvatar: z.boolean().optional(),
+});
 
 const bodySchema = z.object({
   projectSlug: z.string().min(1).max(140),
@@ -27,6 +67,9 @@ const bodySchema = z.object({
   pull_request: z.object({
     number: z.number().int().positive(),
     node_id: z.string().min(1),
+    title: z.string().optional(),
+    body: z.string().nullable().optional(),
+    head: z.object({ sha: z.string() }).optional(),
     user: z.object({
       login: z.string().min(1),
       id: z.number().int().positive(),
@@ -34,6 +77,17 @@ const bodySchema = z.object({
     }),
   }),
   isCollaborator: z.boolean().optional(),
+  // Optional pre-fetched context for quality scoring. The Actions workflow
+  // calls `gh api` with its GITHUB_TOKEN to gather this and includes it in
+  // the body. When absent, quality scoring is skipped for this request.
+  qualityContext: z
+    .object({
+      files: z.array(fileSchema).max(500).optional(),
+      filesTruncated: z.boolean().optional(),
+      commits: z.array(commitSchema).max(500).optional(),
+      account: accountSchema.optional(),
+    })
+    .optional(),
 });
 
 function bearerToken(req: Request): string | null {
@@ -87,6 +141,13 @@ export async function POST(req: Request) {
       labelPending: true,
       labelApproved: true,
       labelDenied: true,
+      checkerEnabled: true,
+      trackWhenDisabled: true,
+      checksEnabled: true,
+      qualityEnabled: true,
+      qualityConfig: true,
+      qualityCommentMin: true,
+      prTemplateHoneypots: true,
     },
   });
   if (!project) {
@@ -169,27 +230,40 @@ export async function POST(req: Request) {
         ? "DENIED"
         : "PENDING";
 
-  await prisma.prCheck.upsert({
-    where: {
-      repoId_prNumber: { repoId: repo.id, prNumber: body.pull_request.number },
-    },
-    update: {
-      prNodeId: body.pull_request.node_id,
-      authorGhLogin: body.pull_request.user.login,
-      authorGhId: body.pull_request.user.id,
-      status: newStatus,
-      closedByApp: closePr,
-    },
-    create: {
-      repoId: repo.id,
-      prNumber: body.pull_request.number,
-      prNodeId: body.pull_request.node_id,
-      authorGhLogin: body.pull_request.user.login,
-      authorGhId: body.pull_request.user.id,
-      status: newStatus,
-      closedByApp: closePr,
-    },
-  });
+  const disabledByChecker =
+    decision.status === "APPROVED" &&
+    "bypassReason" in decision &&
+    decision.bypassReason === "checker_disabled";
+  const shouldTrackPr = !disabledByChecker || project.trackWhenDisabled;
+  const headSha = body.pull_request.head?.sha ?? null;
+
+  let prCheckId: string | null = null;
+  if (shouldTrackPr) {
+    const prCheck = await prisma.prCheck.upsert({
+      where: {
+        repoId_prNumber: { repoId: repo.id, prNumber: body.pull_request.number },
+      },
+      update: {
+        prNodeId: body.pull_request.node_id,
+        authorGhLogin: body.pull_request.user.login,
+        authorGhId: body.pull_request.user.id,
+        status: newStatus,
+        closedByApp: closePr,
+        ...(headSha ? { headSha } : {}),
+      },
+      create: {
+        repoId: repo.id,
+        prNumber: body.pull_request.number,
+        prNodeId: body.pull_request.node_id,
+        authorGhLogin: body.pull_request.user.login,
+        authorGhId: body.pull_request.user.id,
+        status: newStatus,
+        closedByApp: closePr,
+        headSha,
+      },
+    });
+    prCheckId = prCheck.id;
+  }
 
   const applyUrl = `${env.PUBLIC_BASE_URL.replace(/\/$/, "")}/p/${project.slug}`;
   const message = buildDecisionMessage({
@@ -201,7 +275,13 @@ export async function POST(req: Request) {
 
   let labels: { add: string[]; remove: string[] } | null = null;
   if (project.labelsEnabled) {
-    if (decision.status === "APPROVED" || decision.status === "BYPASSED") {
+    if (disabledByChecker) {
+      // When the checker is disabled, only the approved label is applied.
+      labels = {
+        add: [project.labelApproved],
+        remove: [project.labelPending, project.labelDenied],
+      };
+    } else if (decision.status === "APPROVED" || decision.status === "BYPASSED") {
       labels = {
         add: [project.labelApproved],
         remove: [project.labelPending, project.labelDenied],
@@ -219,7 +299,11 @@ export async function POST(req: Request) {
     }
   }
 
-  if (closePr) {
+  // Disable switch overrides closing — the workflow should NOT close the PR
+  // when the checker is off, even if the underlying decision would have.
+  const effectiveClosePr = closePr && !disabledByChecker;
+
+  if (effectiveClosePr) {
     await enqueueProjectWebhook({
       projectId: project.id,
       event: "pr.blocked",
@@ -232,11 +316,93 @@ export async function POST(req: Request) {
     });
   }
 
+  // Build the Check Run payload the workflow should publish via gh api.
+  // Skipped when the project has checks disabled. (decision.status is never
+  // IGNORED here — that path returns early above.)
+  const checkPayload =
+    project.checksEnabled && headSha
+      ? buildDecisionCheckPayload({
+          decision: decision as Parameters<typeof buildDecisionCheckPayload>[0]["decision"],
+          applyUrl,
+          projectName: project.name,
+        })
+      : null;
+
+  // Run quality scoring if the workflow provided a context payload.
+  let quality: {
+    score: number | null;
+    failedIds: string[];
+    passedIds: string[];
+  } | null = null;
+  if (
+    prCheckId &&
+    project.qualityEnabled &&
+    body.qualityContext &&
+    body.pull_request.head?.sha
+  ) {
+    const ctx: FetchedPrContext = {
+      pr: {
+        number: body.pull_request.number,
+        title: body.pull_request.title ?? "",
+        body: body.pull_request.body ?? null,
+        headSha: body.pull_request.head.sha,
+        authorLogin: body.pull_request.user.login,
+      },
+      files: (body.qualityContext.files ?? []).map((f) => ({
+        filename: f.filename,
+        status: f.status,
+        additions: f.additions,
+        deletions: f.deletions,
+        changes: f.changes,
+        patch: f.patch ?? null,
+        previous_filename: f.previous_filename,
+      })),
+      filesTruncated: body.qualityContext.filesTruncated ?? false,
+      commits: body.qualityContext.commits ?? [],
+      account: body.qualityContext.account ?? { login: body.pull_request.user.login },
+    };
+    const result = await runQualityFromContext({
+      prCheckId,
+      project,
+      fetched: ctx,
+    });
+    if (result) {
+      quality = {
+        score: result.summary.score,
+        failedIds: result.summary.failedIds,
+        passedIds: result.summary.passedIds,
+      };
+    }
+  } else if (prCheckId && project.qualityEnabled) {
+    // Quality enabled but no context provided — surface what we have on
+    // record so the workflow doesn't think we ran a fresh evaluation.
+    const existing = await prisma.prQuality.findUnique({
+      where: { prCheckId },
+      select: { signalsRaw: true },
+    });
+    if (existing) {
+      const config = parseQualityConfig(project.qualityConfig);
+      const signals = JSON.parse(existing.signalsRaw) as Record<
+        string,
+        { failed: boolean }
+      >;
+      const summary = computeScore(signals, config);
+      quality = {
+        score: summary.score,
+        failedIds: summary.failedIds,
+        passedIds: summary.passedIds,
+      };
+    }
+  }
+
   return NextResponse.json({
-    decision: closePr ? "block" : "approve",
-    closePr,
-    body: message,
+    decision: effectiveClosePr ? "block" : "approve",
+    closePr: effectiveClosePr,
+    disabled: disabledByChecker,
+    body: disabledByChecker ? null : message,
     labels,
     project: { name: project.name, slug: project.slug, applyUrl },
+    check: checkPayload,
+    quality,
   });
 }
