@@ -19,7 +19,7 @@ function globToRegex(pattern: string): RegExp {
 }
 
 export type PrDecision =
-  | { status: "APPROVED" }
+  | { status: "APPROVED"; bypassReason?: "checker_disabled" }
   | { status: "BYPASSED"; reason: "bot" | "collaborator" }
   | { status: "PENDING" }
   | { status: "DENIED"; reason?: string | null; cooldownUntil?: Date | null }
@@ -56,6 +56,7 @@ export type RepoForDecision = Prisma.RepoGetPayload<{
         cooldownDays: true;
         bypassHandles: true;
         bypassCollabs: true;
+        checkerEnabled: true;
       };
     };
   };
@@ -68,6 +69,7 @@ export const decisionRepoInclude = {
       cooldownDays: true,
       bypassHandles: true,
       bypassCollabs: true,
+      checkerEnabled: true,
     },
   },
 } as const satisfies Prisma.RepoInclude;
@@ -88,6 +90,18 @@ export async function decideForRepo(args: {
   const { repo } = args;
   if (!repo.active) {
     return { status: "IGNORED", reason: "repo inactive (uninstalled)" };
+  }
+
+  // Disable switch: when off, every PR is treated as APPROVED. Caller decides
+  // whether to still create PrCheck rows / run quality scoring (via the
+  // project's trackWhenDisabled flag).
+  if (repo.project.checkerEnabled === false) {
+    return {
+      status: "APPROVED",
+      bypassReason: "checker_disabled",
+      repoId: repo.id,
+      projectId: repo.projectId,
+    };
   }
 
   // 0) Admin-set manual decision wins over everything else

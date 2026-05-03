@@ -104,6 +104,24 @@ model Project {
   labelApproved String  @default("contribution:approved")
   labelDenied   String  @default("contribution:denied")
 
+  // Disable switch: when checkerEnabled=false, every PR is treated as APPROVED.
+  // Tracking (PrCheck rows + quality scoring) only runs if trackWhenDisabled=true.
+  checkerEnabled    Boolean @default(true)
+  trackWhenDisabled Boolean @default(false)
+
+  // GitHub Check Runs publishing. Skipped if installation lacks `checks:write`.
+  checksEnabled Boolean @default(true)
+
+  // PR Quality scoring (heuristic-based, anti-slop style).
+  qualityEnabled      Boolean @default(false)
+  // JSON: { [heuristicId]: { enabled: boolean, threshold?: any } }
+  qualityConfig       String  @default("{}")
+  // Score below this triggers a public PR comment with breakdown. Default 20.
+  qualityCommentMin   Int     @default(20)
+  // JSON array of strings: hidden honeypot tokens injected into the project's
+  // PR template; PRs whose body contains any of these score `pr.honeypot_hit`.
+  prTemplateHoneypots String  @default("[]")
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -221,14 +239,42 @@ model PrCheck {
   status        String // "PENDING" | "APPROVED" | "DENIED" | "BYPASSED"
   closedByApp   Boolean  @default(false)
 
+  // GitHub Check Run id (string to avoid BigInt JSON pitfalls). Null when the
+  // check publishing is disabled or the installation lacks `checks:write`.
+  checkRunId String?
+  // Latest commit SHA evaluated; used to detect re-eval on push (synchronize).
+  headSha    String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  repo Repo @relation(fields: [repoId], references: [id], onDelete: Cascade)
+  repo    Repo       @relation(fields: [repoId], references: [id], onDelete: Cascade)
+  quality PrQuality?
 
   @@unique([repoId, prNumber])
   @@index([authorGhLogin, status])
   @@index([authorGhId, status])
+}
+
+/**
+ * PR Quality signals, 1:1 with PrCheck. Stores the *raw* signals (which
+ * heuristics ran, what they found) so the final % score can be computed on
+ * the fly using the project's current qualityConfig — config changes apply
+ * instantly, no recompute job.
+ */
+model PrQuality {
+  id         String   @id @default(cuid())
+  prCheckId  String   @unique
+  // JSON: { [heuristicId]: { failed: boolean, value?: any, reason?: string } }
+  signalsRaw String   @default("{}")
+  // JSON: cached fetched data (PR files+commits, account snapshot) so re-eval
+  // doesn't require re-fetching everything on synchronize.
+  fetchedRaw String   @default("{}")
+  computedAt DateTime @default(now())
+
+  prCheck PrCheck @relation(fields: [prCheckId], references: [id], onDelete: Cascade)
+
+  @@index([prCheckId])
 }
 
 model AuditEvent {

@@ -15,6 +15,9 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { approveAction, denyAction, revokeAction, addNoteAction } from "./actions";
+import { computeScore } from "@/lib/quality/score";
+import { ALL_HEURISTICS, parseQualityConfig } from "@/lib/quality/registry";
+import type { SignalsRaw } from "@/lib/quality/types";
 
 const STATUS_VARIANT: Record<
   string,
@@ -39,7 +42,14 @@ export default async function ApplicationDetail({
     include: {
       user: { select: { id: true, ghLogin: true, name: true, image: true, email: true } },
       decidedBy: { select: { ghLogin: true } },
-      project: { select: { id: true, formSchema: true } },
+      project: {
+        select: {
+          id: true,
+          formSchema: true,
+          qualityEnabled: true,
+          qualityConfig: true,
+        },
+      },
       notes: {
         include: { author: { select: { ghLogin: true } } },
         orderBy: { createdAt: "asc" },
@@ -47,6 +57,48 @@ export default async function ApplicationDetail({
     },
   });
   if (!app) notFound();
+
+  // Aggregate this user's PR Quality across all PRs in the project (any
+  // status). The averages help reviewers judge a SUBMITTED application by
+  // looking at the user's historical PR quality.
+  const userPrChecks =
+    app.user.ghLogin && app.project.qualityEnabled
+      ? await prisma.prCheck.findMany({
+          where: {
+            authorGhLogin: app.user.ghLogin,
+            repo: { projectId: id },
+          },
+          include: {
+            repo: { select: { fullName: true } },
+            quality: { select: { signalsRaw: true } },
+          },
+          orderBy: { updatedAt: "desc" },
+          take: 50,
+        })
+      : [];
+  const qualityConfig = parseQualityConfig(app.project.qualityConfig);
+  const userPrSummaries = userPrChecks.map((c) => {
+    if (!c.quality) return { repoFullName: c.repo.fullName, prNumber: c.prNumber, score: null as number | null };
+    const signals = JSON.parse(c.quality.signalsRaw) as SignalsRaw;
+    const summary = computeScore(signals, qualityConfig);
+    return {
+      repoFullName: c.repo.fullName,
+      prNumber: c.prNumber,
+      status: c.status,
+      score: summary.score,
+      failed: summary.failedIds.map((fid) => {
+        const h = ALL_HEURISTICS.find((x) => x.id === fid);
+        return h?.label ?? fid;
+      }),
+    };
+  });
+  const scored = userPrSummaries.filter((s) => s.score !== null) as Array<
+    typeof userPrSummaries[number] & { score: number }
+  >;
+  const avgQuality =
+    scored.length > 0
+      ? Math.round(scored.reduce((a, b) => a + b.score, 0) / scored.length)
+      : null;
 
   const fields = parseFormSchema(app.project.formSchema);
   const answers = (() => {
@@ -225,6 +277,72 @@ export default async function ApplicationDetail({
                   Re-approve
                 </Button>
               </form>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {app.project.qualityEnabled && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">PR Quality</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {avgQuality === null ? (
+              <p className="text-sm text-muted-foreground">
+                {userPrChecks.length === 0
+                  ? "This applicant has no tracked PRs in the project."
+                  : "No quality scores recorded yet for this user. Run a backfill from the Quality tab."}
+              </p>
+            ) : (
+              <>
+                <div className="flex items-center gap-3">
+                  <div className="text-3xl font-semibold">{avgQuality}%</div>
+                  <div className="text-xs text-muted-foreground">
+                    average across {scored.length} scored PR(s) (of{" "}
+                    {userPrChecks.length} tracked)
+                  </div>
+                </div>
+                <ul className="divide-y divide-border rounded-md border border-border">
+                  {userPrSummaries.slice(0, 12).map((p) => (
+                    <li
+                      key={`${p.repoFullName}#${p.prNumber}`}
+                      className="px-3 py-2 text-sm"
+                    >
+                      <div className="flex flex-wrap items-center gap-2">
+                        <a
+                          className="font-mono text-xs underline"
+                          href={`https://github.com/${p.repoFullName}/pull/${p.prNumber}`}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          {p.repoFullName}#{p.prNumber}
+                        </a>
+                        <Badge
+                          variant={
+                            p.score === null
+                              ? "outline"
+                              : p.score < 50
+                                ? "destructive"
+                                : p.score < 75
+                                  ? "warning"
+                                  : "success"
+                          }
+                          className="text-[10px]"
+                        >
+                          {p.score === null ? "not scored" : `${p.score}%`}
+                        </Badge>
+                      </div>
+                      {p.score !== null && p.failed && p.failed.length > 0 && (
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          flagged: {p.failed.slice(0, 5).join(" • ")}
+                          {p.failed.length > 5 ? ` +${p.failed.length - 5} more` : ""}
+                        </p>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </>
             )}
           </CardContent>
         </Card>

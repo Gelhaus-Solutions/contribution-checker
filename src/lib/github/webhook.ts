@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { env } from "@/lib/env";
-import { decideForPR } from "@/lib/applications/decide-pr";
+import { decideForPR, type PrDecision } from "@/lib/applications/decide-pr";
 import { buildDecisionMessage } from "@/lib/applications/decision-message";
 import { enqueueProjectWebhook } from "@/lib/notifications/webhooks";
 import {
@@ -11,6 +11,8 @@ import {
   setLabels,
   repoRef,
 } from "@/lib/github/pr-actions";
+import { publishDecisionCheck } from "@/lib/github/check-run";
+import { runQualityForPrCheck } from "@/lib/quality/run";
 
 type WebhookPayload = {
   action?: string;
@@ -26,6 +28,9 @@ type WebhookPayload = {
     node_id: string;
     state: string;
     user: { login: string; id: number; type: string };
+    head?: { sha: string };
+    title?: string;
+    body?: string | null;
   };
   repositories?: Array<{ id: number; full_name: string }>;
   repositories_added?: Array<{ id: number; full_name: string }>;
@@ -51,6 +56,77 @@ async function attachInstallationToManualRepos(args: {
   }
 }
 
+type ProjectForSideEffects = {
+  id: string;
+  slug: string;
+  name: string;
+  checksEnabled: boolean;
+  qualityEnabled: boolean;
+  qualityConfig: string;
+  qualityCommentMin: number;
+  prTemplateHoneypots: string;
+  trackWhenDisabled: boolean;
+  checkerEnabled: boolean;
+};
+
+/**
+ * Publish the Check Run and run quality scoring after a decision has been
+ * applied (close/comment/label already done). Both paths are best-effort —
+ * a failure here must not block the webhook response.
+ */
+async function postDecisionSideEffects(args: {
+  installationId: number;
+  repoFullName: string;
+  prNumber: number;
+  headSha: string | null;
+  prCheckId: string | null;
+  project: ProjectForSideEffects;
+  decision: PrDecision;
+  applyUrl: string;
+}): Promise<void> {
+  const { decision, project } = args;
+  if (decision.status === "IGNORED") return;
+
+  // Check Run (App-mode publishing). Skipped automatically when checks are
+  // disabled or installation lacks checks:write.
+  await publishDecisionCheck({
+    installationId: args.installationId,
+    repoFullName: args.repoFullName,
+    prCheckId: args.prCheckId,
+    headSha: args.headSha,
+    project: {
+      id: project.id,
+      slug: project.slug,
+      name: project.name,
+      checksEnabled: project.checksEnabled,
+    },
+    decision,
+    applyUrl: args.applyUrl,
+  }).catch((e) =>
+    logger.warn(
+      { err: e, prCheckId: args.prCheckId },
+      "publishDecisionCheck failed"
+    )
+  );
+
+  // Quality scoring runs only when there is a tracked PrCheck row AND the
+  // feature is enabled.
+  if (args.prCheckId && project.qualityEnabled) {
+    await runQualityForPrCheck({
+      prCheckId: args.prCheckId,
+      installationId: args.installationId,
+      repoFullName: args.repoFullName,
+      prNumber: args.prNumber,
+      project,
+    }).catch((e) =>
+      logger.warn(
+        { err: e, prCheckId: args.prCheckId },
+        "runQualityForPrCheck failed"
+      )
+    );
+  }
+}
+
 async function ensureProjectLabels(args: {
   installationId: number;
   fullName: string;
@@ -73,7 +149,9 @@ export async function handlePullRequestEvent(payload: WebhookPayload) {
     !payload.pull_request ||
     !payload.repository ||
     !payload.installation ||
-    !["opened", "reopened", "ready_for_review"].includes(payload.action ?? "")
+    !["opened", "reopened", "ready_for_review", "synchronize"].includes(
+      payload.action ?? ""
+    )
   ) {
     return;
   }
@@ -84,6 +162,7 @@ export async function handlePullRequestEvent(payload: WebhookPayload) {
   const prNumber = payload.pull_request.number;
   const prNodeId = payload.pull_request.node_id;
   const author = payload.pull_request.user;
+  const headSha = payload.pull_request.head?.sha ?? null;
 
   const decision = await decideForPR({
     ghRepoId,
@@ -94,38 +173,6 @@ export async function handlePullRequestEvent(payload: WebhookPayload) {
   if (decision.status === "IGNORED") {
     logger.debug({ ghRepoId, prNumber, reason: decision.reason }, "PR ignored");
     return;
-  }
-
-  // Persist PrCheck
-  if (decision.repoId) {
-    await prisma.prCheck.upsert({
-      where: { repoId_prNumber: { repoId: decision.repoId, prNumber } },
-      update: {
-        prNodeId,
-        authorGhLogin: author.login,
-        authorGhId: author.id,
-        status:
-          decision.status === "APPROVED" || decision.status === "BYPASSED"
-            ? "APPROVED"
-            : decision.status === "DENIED"
-              ? "DENIED"
-              : "PENDING",
-      },
-      create: {
-        repoId: decision.repoId,
-        prNumber,
-        prNodeId,
-        authorGhLogin: author.login,
-        authorGhId: author.id,
-        status:
-          decision.status === "APPROVED" || decision.status === "BYPASSED"
-            ? "APPROVED"
-            : decision.status === "DENIED"
-              ? "DENIED"
-              : "PENDING",
-        closedByApp: false,
-      },
-    });
   }
 
   // Look up project for label config + apply URL
@@ -140,10 +187,53 @@ export async function handlePullRequestEvent(payload: WebhookPayload) {
           labelPending: true,
           labelApproved: true,
           labelDenied: true,
+          checkerEnabled: true,
+          trackWhenDisabled: true,
+          checksEnabled: true,
+          qualityEnabled: true,
+          qualityConfig: true,
+          qualityCommentMin: true,
+          prTemplateHoneypots: true,
         },
       })
     : null;
   if (!project) return;
+
+  const disabledByChecker =
+    decision.status === "APPROVED" && decision.bypassReason === "checker_disabled";
+  const shouldTrackPr = !disabledByChecker || project.trackWhenDisabled;
+  let prCheckId: string | null = null;
+
+  // Persist PrCheck (skipped when checker is disabled and tracking is off)
+  const prCheckStatus =
+    decision.status === "APPROVED" || decision.status === "BYPASSED"
+      ? "APPROVED"
+      : decision.status === "DENIED"
+        ? "DENIED"
+        : "PENDING";
+  if (decision.repoId && shouldTrackPr) {
+    const prCheck = await prisma.prCheck.upsert({
+      where: { repoId_prNumber: { repoId: decision.repoId, prNumber } },
+      update: {
+        prNodeId,
+        authorGhLogin: author.login,
+        authorGhId: author.id,
+        status: prCheckStatus,
+        ...(headSha ? { headSha } : {}),
+      },
+      create: {
+        repoId: decision.repoId,
+        prNumber,
+        prNodeId,
+        authorGhLogin: author.login,
+        authorGhId: author.id,
+        status: prCheckStatus,
+        closedByApp: false,
+        headSha,
+      },
+    });
+    prCheckId = prCheck.id;
+  }
 
   const ref = repoRef(repoFullName, installationId);
   const applyUrl = `${env.PUBLIC_BASE_URL.replace(/\/$/, "")}/p/${project.slug}`;
@@ -166,6 +256,16 @@ export async function handlePullRequestEvent(payload: WebhookPayload) {
         setLabels(ref, prNumber, [project.labelApproved]).catch(() => undefined),
       ]);
     }
+    await postDecisionSideEffects({
+      installationId,
+      repoFullName,
+      prNumber,
+      headSha,
+      prCheckId,
+      project,
+      decision,
+      applyUrl,
+    });
     return;
   }
 
@@ -180,7 +280,7 @@ export async function handlePullRequestEvent(payload: WebhookPayload) {
 
   try {
     await closePullRequest(ref, prNumber, body);
-    if (decision.repoId) {
+    if (decision.repoId && shouldTrackPr) {
       await prisma.prCheck.update({
         where: { repoId_prNumber: { repoId: decision.repoId, prNumber } },
         data: { closedByApp: true },
@@ -213,6 +313,17 @@ export async function handlePullRequestEvent(payload: WebhookPayload) {
   } catch (e) {
     logger.error({ err: e, repoFullName, prNumber }, "PR close/label failed");
   }
+
+  await postDecisionSideEffects({
+    installationId,
+    repoFullName,
+    prNumber,
+    headSha,
+    prCheckId,
+    project,
+    decision,
+    applyUrl,
+  });
 }
 
 export async function handleInstallationEvent(payload: WebhookPayload) {

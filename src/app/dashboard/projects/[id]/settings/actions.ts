@@ -190,6 +190,61 @@ export async function updateWebhookSettings(formData: FormData) {
   revalidatePath(`/dashboard/projects/${parsed.projectId}/settings`);
 }
 
+const gatingSchema = z.object({
+  projectId: z.string().min(1),
+  checkerEnabled: z.string().optional(),
+  trackWhenDisabled: z.string().optional(),
+  checksEnabled: z.string().optional(),
+});
+
+export async function updateGatingSettings(formData: FormData) {
+  const parsed = gatingSchema.parse({
+    projectId: formData.get("projectId"),
+    checkerEnabled: formData.get("checkerEnabled") ?? undefined,
+    trackWhenDisabled: formData.get("trackWhenDisabled") ?? undefined,
+    checksEnabled: formData.get("checksEnabled") ?? undefined,
+  });
+  const { session } = await requireProjectRole(parsed.projectId, "ADMIN");
+
+  const before = await prisma.project.findUnique({
+    where: { id: parsed.projectId },
+    select: {
+      checkerEnabled: true,
+      trackWhenDisabled: true,
+      checksEnabled: true,
+    },
+  });
+  if (!before) throw new Error("Project not found");
+
+  const after = {
+    checkerEnabled: !!parsed.checkerEnabled,
+    trackWhenDisabled: !!parsed.trackWhenDisabled,
+    checksEnabled: !!parsed.checksEnabled,
+  };
+
+  await prisma.project.update({
+    where: { id: parsed.projectId },
+    data: after,
+  });
+
+  await recordAudit({
+    projectId: parsed.projectId,
+    actorId: session.user.id,
+    kind: "settings.gating_changed",
+    payload: {
+      changed: Object.fromEntries(
+        Object.entries({
+          checkerEnabled: [before.checkerEnabled, after.checkerEnabled],
+          trackWhenDisabled: [before.trackWhenDisabled, after.trackWhenDisabled],
+          checksEnabled: [before.checksEnabled, after.checksEnabled],
+        }).filter(([, [a, b]]) => a !== b)
+      ),
+    },
+  });
+
+  revalidatePath(`/dashboard/projects/${parsed.projectId}/settings`);
+}
+
 const testSchema = z.object({ projectId: z.string().min(1) });
 
 export async function sendTestWebhook(formData: FormData) {

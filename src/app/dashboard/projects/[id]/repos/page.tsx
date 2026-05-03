@@ -19,12 +19,14 @@ function ciGateYaml(baseUrl: string, slug: string): string {
   return `name: Contribution check (gate)
 on:
   pull_request_target:
-    types: [opened, reopened, ready_for_review]
+    types: [opened, reopened, ready_for_review, synchronize]
 
 permissions:
   id-token: write
   pull-requests: write
   issues: write
+  checks: write
+  contents: read
 
 jobs:
   check:
@@ -39,6 +41,44 @@ jobs:
             const audience = \`\${process.env.CC_BASE}/p/\${process.env.CC_PROJECT}\`;
             const jwt = await core.getIDToken(audience);
             const pr = context.payload.pull_request;
+
+            // Fetch PR context for quality scoring (skipped server-side if
+            // the project hasn't enabled quality). Capped at 100 files+commits
+            // each to keep the body reasonable.
+            const [filesRes, commitsRes, userRes] = await Promise.all([
+              github.rest.pulls.listFiles({ ...context.repo, pull_number: pr.number, per_page: 100 }).catch(() => null),
+              github.rest.pulls.listCommits({ ...context.repo, pull_number: pr.number, per_page: 100 }).catch(() => null),
+              github.rest.users.getByUsername({ username: pr.user.login }).catch(() => null),
+            ]);
+            const qualityContext = {
+              files: (filesRes?.data ?? []).map(f => ({
+                filename: f.filename,
+                status: f.status,
+                additions: f.additions,
+                deletions: f.deletions,
+                changes: f.changes,
+                patch: f.patch ?? null,
+                previous_filename: f.previous_filename,
+              })),
+              filesTruncated: (filesRes?.data ?? []).length >= 100,
+              commits: (commitsRes?.data ?? []).map(c => ({
+                sha: c.sha,
+                message: c.commit?.message ?? "",
+                authorLogin: c.author?.login,
+                authorEmail: c.commit?.author?.email,
+                committerEmail: c.commit?.committer?.email,
+              })),
+              account: userRes ? {
+                login: userRes.data.login,
+                createdAt: userRes.data.created_at,
+                publicRepos: userRes.data.public_repos,
+                followers: userRes.data.followers,
+                bio: userRes.data.bio,
+                email: userRes.data.email,
+                hasAvatar: !!userRes.data.avatar_url,
+              } : { login: pr.user.login },
+            };
+
             const r = await fetch(\`\${process.env.CC_BASE}/api/ci/check-pr\`, {
               method: "POST",
               headers: { authorization: \`Bearer \${jwt}\`, "content-type": "application/json" },
@@ -48,12 +88,30 @@ jobs:
                 pull_request: {
                   number: pr.number,
                   node_id: pr.node_id,
+                  title: pr.title,
+                  body: pr.body,
+                  head: { sha: pr.head.sha },
                   user: { login: pr.user.login, id: pr.user.id, type: pr.user.type },
                 },
+                qualityContext,
               }),
             });
             if (!r.ok) { core.setFailed(\`check-pr \${r.status}\`); return; }
             const d = await r.json();
+
+            // Publish the Check Run on the PR head SHA, if the server returned a payload.
+            if (d.check && pr.head?.sha) {
+              await github.rest.checks.create({
+                ...context.repo,
+                head_sha: pr.head.sha,
+                name: d.check.name,
+                status: d.check.status,
+                conclusion: d.check.conclusion,
+                details_url: d.check.detailsUrl,
+                output: { title: d.check.title, summary: d.check.summary },
+              }).catch(e => core.warning(\`check-run publish: \${e.message}\`));
+            }
+
             if (d.decision === "block" && d.closePr) {
               await github.rest.pulls.update({ ...context.repo, pull_number: pr.number, state: "closed" });
               if (d.body) await github.rest.issues.createComment({

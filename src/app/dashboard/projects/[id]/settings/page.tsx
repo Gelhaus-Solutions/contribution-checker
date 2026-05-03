@@ -13,6 +13,7 @@ import {
   sendTestWebhook,
   updateLabelSettings,
   updateBypassSettings,
+  updateGatingSettings,
 } from "./actions";
 
 export default async function ProjectSettings({
@@ -96,6 +97,73 @@ export default async function ProjectSettings({
           <Button asChild variant="outline">
             <Link href={`/dashboard/projects/${id}/settings/team`}>Manage team →</Link>
           </Button>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Gating</CardTitle>
+          <CardDescription>
+            Temporarily disable the contribution checker (PRs auto-approve, no
+            close/comment), or turn off GitHub status checks.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form action={updateGatingSettings} className="space-y-4">
+            <input type="hidden" name="projectId" value={project.id} />
+            <label className="flex items-start gap-3 text-sm">
+              <input
+                type="checkbox"
+                name="checkerEnabled"
+                value="1"
+                defaultChecked={project.checkerEnabled}
+                className="mt-0.5 h-4 w-4 rounded border-border"
+              />
+              <span>
+                <span className="font-medium">Checker enabled</span>
+                <span className="block text-xs text-muted-foreground">
+                  When off, every PR is treated as approved &mdash; the
+                  &quot;approved&quot; label is applied and PRs are not closed.
+                </span>
+              </span>
+            </label>
+            <label className="flex items-start gap-3 pl-7 text-sm">
+              <input
+                type="checkbox"
+                name="trackWhenDisabled"
+                value="1"
+                defaultChecked={project.trackWhenDisabled}
+                className="mt-0.5 h-4 w-4 rounded border-border"
+              />
+              <span>
+                <span className="font-medium">
+                  Still track PRs while disabled
+                </span>
+                <span className="block text-xs text-muted-foreground">
+                  Persist PR rows so you have history if you re-enable. PR
+                  Quality scoring (when enabled) also runs.
+                </span>
+              </span>
+            </label>
+            <label className="flex items-start gap-3 text-sm">
+              <input
+                type="checkbox"
+                name="checksEnabled"
+                value="1"
+                defaultChecked={project.checksEnabled}
+                className="mt-0.5 h-4 w-4 rounded border-border"
+              />
+              <span>
+                <span className="font-medium">Publish GitHub status checks</span>
+                <span className="block text-xs text-muted-foreground">
+                  Mirrors the decision as a Check Run on each PR (success /
+                  action_required / failure). Requires the App installation to
+                  grant <code>checks:write</code>; silently no-ops otherwise.
+                </span>
+              </span>
+            </label>
+            <Button type="submit">Save gating</Button>
+          </form>
         </CardContent>
       </Card>
 
