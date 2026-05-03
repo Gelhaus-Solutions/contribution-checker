@@ -26,7 +26,6 @@ const STATUS_VARIANT: Record<
   SUBMITTED: "warning",
   APPROVED: "success",
   DENIED: "destructive",
-  REVOKED: "secondary",
 };
 
 export default async function ApplicationDetail({
@@ -46,6 +45,7 @@ export default async function ApplicationDetail({
         select: {
           id: true,
           formSchema: true,
+          cooldownDays: true,
           qualityEnabled: true,
           qualityConfig: true,
         },
@@ -111,7 +111,12 @@ export default async function ApplicationDetail({
 
   const isPending = app.status === "SUBMITTED";
   const isApproved = app.status === "APPROVED";
-  const isRevoked = app.status === "REVOKED";
+  const isDenied = app.status === "DENIED";
+  const cooldownDays = app.project.cooldownDays;
+  const cooldownHelp =
+    cooldownDays != null
+      ? `Cooldown set to ${cooldownDays} day${cooldownDays === 1 ? "" : "s"}.`
+      : `No cooldown configured — applicant can resubmit immediately.`;
 
   return (
     <div className="space-y-6">
@@ -150,7 +155,7 @@ export default async function ApplicationDetail({
             <div>Submitted {app.createdAt.toISOString().slice(0, 10)}</div>
             {app.decidedAt && (
               <div>
-                {app.status === "APPROVED" ? "Approved" : app.status === "DENIED" ? "Denied" : "Revoked"} by{" "}
+                {app.status === "APPROVED" ? "Approved" : "Denied"} by{" "}
                 {app.decidedBy?.ghLogin ?? "system"} on{" "}
                 {app.decidedAt.toISOString().slice(0, 10)}
               </div>
@@ -188,7 +193,7 @@ export default async function ApplicationDetail({
         </CardContent>
       </Card>
 
-      {(isPending || isApproved || isRevoked) && (
+      {(isPending || isApproved || isDenied) && (
         <Card>
           <CardHeader>
             <CardTitle className="text-base">
@@ -230,6 +235,20 @@ export default async function ApplicationDetail({
                     rows={2}
                     placeholder="Optional"
                   />
+                  <label className="flex items-start gap-2 text-xs">
+                    <input
+                      type="checkbox"
+                      name="allowResubmit"
+                      defaultChecked
+                      className="mt-0.5"
+                    />
+                    <span>
+                      <span className="font-medium">Allow resubmitting</span>
+                      <span className="ml-1 text-muted-foreground">
+                        — {cooldownHelp}
+                      </span>
+                    </span>
+                  </label>
                   <Button type="submit" variant="destructive">
                     Deny
                   </Button>
@@ -248,6 +267,21 @@ export default async function ApplicationDetail({
                   rows={2}
                   placeholder="Why revoke?"
                 />
+                <fieldset className="space-y-1 text-xs">
+                  <legend className="font-medium">After revoking, set status to:</legend>
+                  <label className="flex items-center gap-2">
+                    <input type="radio" name="target" value="DENIED" defaultChecked />
+                    <span>Denied (default cooldown applies)</span>
+                  </label>
+                  <label className="flex items-center gap-2">
+                    <input type="radio" name="target" value="SUBMITTED" />
+                    <span>Submitted (back to review queue)</span>
+                  </label>
+                  <label className="flex items-center gap-2">
+                    <input type="radio" name="target" value="PENDING" />
+                    <span>Pending (applicant may resubmit immediately)</span>
+                  </label>
+                </fieldset>
                 <p className="text-xs text-muted-foreground">
                   Revoking will close any of their currently open PRs across
                   this project&apos;s repos.
@@ -270,8 +304,8 @@ export default async function ApplicationDetail({
                   placeholder="Welcome back…"
                 />
                 <p className="text-xs text-muted-foreground">
-                  Re-approving will reopen any PRs that were closed when
-                  approval was revoked.
+                  Re-approving will reopen any PRs that were closed when this
+                  application was denied.
                 </p>
                 <Button type="submit" variant="success">
                   Re-approve

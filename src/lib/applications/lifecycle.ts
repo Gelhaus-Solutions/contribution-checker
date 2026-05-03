@@ -13,7 +13,7 @@ export async function submitApplication(args: {
 }): Promise<SubmitResult> {
   const project = await prisma.project.findUnique({
     where: { id: args.projectId },
-    select: { id: true, formSchema: true, cooldownDays: true },
+    select: { id: true, formSchema: true },
   });
   if (!project) return { ok: false, reason: "Project not found" };
 
@@ -44,26 +44,21 @@ export async function submitApplication(args: {
       return { ok: false, reason: "You already have an approved application." };
     }
     if (last.status === "DENIED") {
-      if (project.cooldownDays === null || project.cooldownDays === undefined) {
+      if (!last.allowResubmit) {
         return {
           ok: false,
           reason:
             "Your previous application was denied. The project owner must reset your status before you can re-apply.",
         };
       }
-      const cooldownEnd = new Date(
-        (last.decidedAt ?? last.updatedAt).getTime() +
-          project.cooldownDays * 24 * 60 * 60 * 1000
-      );
-      if (cooldownEnd > new Date()) {
+      if (last.cooldownUntil && last.cooldownUntil > new Date()) {
         return {
           ok: false,
           reason: `You are in a cooldown period after a denial.`,
-          cooldownUntil: cooldownEnd,
+          cooldownUntil: last.cooldownUntil,
         };
       }
     }
-    // REVOKED → applying again is allowed (effectively a fresh application).
   }
 
   const application = await prisma.application.create({

@@ -61,6 +61,8 @@ export async function approveApplication(args: {
       decidedById: args.decidedById,
       decidedAt: new Date(),
       reason: args.reason,
+      allowResubmit: true,
+      cooldownUntil: null,
     },
   });
 
@@ -105,15 +107,21 @@ export async function denyApplication(args: {
   applicationId: string;
   decidedById: string;
   reason?: string;
+  allowResubmit: boolean;
 }) {
   const app = await prisma.application.findUnique({
     where: { id: args.applicationId },
     include: {
-      project: { select: { id: true, name: true, slug: true } },
+      project: { select: { id: true, name: true, slug: true, cooldownDays: true } },
       user: { select: { ghLogin: true } },
     },
   });
   if (!app) throw new Error("Application not found");
+
+  const cooldownUntil =
+    args.allowResubmit && app.project.cooldownDays != null
+      ? new Date(Date.now() + app.project.cooldownDays * 24 * 60 * 60 * 1000)
+      : null;
 
   const updated = await prisma.application.update({
     where: { id: args.applicationId },
@@ -122,6 +130,8 @@ export async function denyApplication(args: {
       decidedById: args.decidedById,
       decidedAt: new Date(),
       reason: args.reason,
+      allowResubmit: args.allowResubmit,
+      cooldownUntil,
     },
   });
 
@@ -163,35 +173,79 @@ export async function denyApplication(args: {
   return updated;
 }
 
+export type RevokeTarget = "DENIED" | "SUBMITTED" | "PENDING";
+
 export async function revokeApplication(args: {
   applicationId: string;
   decidedById: string;
   reason?: string;
+  target: RevokeTarget;
 }) {
   const app = await prisma.application.findUnique({
     where: { id: args.applicationId },
     include: {
-      project: { select: { id: true, name: true, slug: true } },
+      project: { select: { id: true, name: true, slug: true, cooldownDays: true } },
       user: { select: { ghLogin: true } },
     },
   });
   if (!app) throw new Error("Application not found");
 
+  const now = new Date();
+  let data: {
+    status: "DENIED" | "SUBMITTED";
+    decidedById: string | null;
+    decidedAt: Date | null;
+    reason: string | null;
+    allowResubmit: boolean;
+    cooldownUntil: Date | null;
+  };
+  if (args.target === "DENIED") {
+    data = {
+      status: "DENIED",
+      decidedById: args.decidedById,
+      decidedAt: now,
+      reason: args.reason ?? null,
+      allowResubmit: true,
+      cooldownUntil:
+        app.project.cooldownDays != null
+          ? new Date(now.getTime() + app.project.cooldownDays * 24 * 60 * 60 * 1000)
+          : null,
+    };
+  } else if (args.target === "PENDING") {
+    data = {
+      status: "DENIED",
+      decidedById: args.decidedById,
+      decidedAt: now,
+      reason: args.reason ?? null,
+      allowResubmit: true,
+      cooldownUntil: null,
+    };
+  } else {
+    // target === "SUBMITTED": send back to review queue, clear decision metadata.
+    data = {
+      status: "SUBMITTED",
+      decidedById: null,
+      decidedAt: null,
+      reason: args.reason ?? null,
+      allowResubmit: true,
+      cooldownUntil: null,
+    };
+  }
+
   const updated = await prisma.application.update({
     where: { id: args.applicationId },
-    data: {
-      status: "REVOKED",
-      decidedById: args.decidedById,
-      decidedAt: new Date(),
-      reason: args.reason,
-    },
+    data,
   });
 
   await recordAudit({
     projectId: app.projectId,
     actorId: args.decidedById,
     kind: "application.revoked",
-    payload: { applicationId: app.id, applicantId: app.userId },
+    payload: {
+      applicationId: app.id,
+      applicantId: app.userId,
+      target: args.target,
+    },
   });
   await notifyUser({
     userId: app.userId,
@@ -201,15 +255,22 @@ export async function revokeApplication(args: {
       projectSlug: app.project.slug,
       projectName: app.project.name,
       reason: args.reason ?? null,
+      target: args.target,
     },
   });
+  const followUp =
+    args.target === "PENDING"
+      ? `\n\nYou may submit a new application at any time: ${applyUrl(app.project.slug)}\n`
+      : args.target === "SUBMITTED"
+        ? `\n\nYour application has been put back under review.\n`
+        : `\n`;
   await emailUser({
     userId: app.userId,
     subject: `Approval revoked: ${app.project.name}`,
     text:
       `Your contributor approval for ${app.project.name} has been revoked.` +
       (args.reason ? `\n\nReason: ${args.reason}` : "") +
-      `\n`,
+      followUp,
   });
   await enqueueProjectWebhook({
     projectId: app.projectId,
@@ -218,9 +279,14 @@ export async function revokeApplication(args: {
       applicationId: app.id,
       ghLogin: app.user.ghLogin,
       reason: args.reason ?? null,
+      target: args.target,
     },
     triggeredById: args.decidedById,
   });
+
+  if (args.target === "SUBMITTED") {
+    await notifyAdminsOfNewApplication({ applicationId: app.id });
+  }
 
   return updated;
 }

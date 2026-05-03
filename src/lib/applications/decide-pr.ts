@@ -58,7 +58,6 @@ export type RepoForDecision = Prisma.RepoGetPayload<{
     project: {
       select: {
         id: true;
-        cooldownDays: true;
         bypassHandles: true;
         bypassCollabs: true;
         checkerEnabled: true;
@@ -71,7 +70,6 @@ export const decisionRepoInclude = {
   project: {
     select: {
       id: true,
-      cooldownDays: true,
       bypassHandles: true,
       bypassCollabs: true,
       checkerEnabled: true,
@@ -232,9 +230,7 @@ export async function decideForRepo(args: {
   }
 
   if (app.status === "DENIED") {
-    const cooldownDays = repo.project.cooldownDays;
-    const decidedAt = app.decidedAt ?? app.updatedAt;
-    if (cooldownDays === null || cooldownDays === undefined) {
+    if (!app.allowResubmit) {
       return {
         status: "DENIED",
         reason: app.reason,
@@ -243,12 +239,11 @@ export async function decideForRepo(args: {
         projectId: repo.projectId,
       };
     }
-    const cooldownEnd = new Date(decidedAt.getTime() + cooldownDays * 86400000);
-    if (cooldownEnd > new Date()) {
+    if (app.cooldownUntil && app.cooldownUntil > new Date()) {
       return {
         status: "DENIED",
         reason: app.reason,
-        cooldownUntil: cooldownEnd,
+        cooldownUntil: app.cooldownUntil,
         repoId: repo.id,
         projectId: repo.projectId,
       };
@@ -256,18 +251,6 @@ export async function decideForRepo(args: {
     return {
       status: "PENDING",
       reason: "cooldown-elapsed",
-      repoId: repo.id,
-      projectId: repo.projectId,
-    };
-  }
-
-  // REVOKED → admin pulled approval. Treated as a denial with no cooldown:
-  // the user can't re-apply automatically, they need an admin to act.
-  if (app.status === "REVOKED") {
-    return {
-      status: "DENIED",
-      reason: app.reason,
-      cooldownUntil: null,
       repoId: repo.id,
       projectId: repo.projectId,
     };

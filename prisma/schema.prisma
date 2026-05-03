@@ -87,7 +87,9 @@ model Project {
   formSchema    String  @default("[]")
   templateId    String?
 
-  // Denial cooldown: null = permanent denial (admin must reset to allow re-apply)
+  // Default cooldown applied to new denials when "Allow resubmitting" is checked.
+  // Null = no cooldown (instant resubmit if resubmitting is allowed).
+  // Per-denial behavior is captured in Application.allowResubmit + cooldownUntil.
   cooldownDays  Int?
 
   // Bypass list: JSON-stringified array of GitHub login patterns (supports * glob)
@@ -200,7 +202,7 @@ model Application {
   projectId String
   userId    String
   repoId    String?  // set if requireOwnApproval was hit (per-repo opt-out)
-  status    String   @default("SUBMITTED") // "SUBMITTED" | "APPROVED" | "DENIED" | "REVOKED"
+  status    String   @default("SUBMITTED") // "SUBMITTED" | "APPROVED" | "DENIED"
 
   // JSON-stringified { fieldId: value }
   answers   String   @default("{}")
@@ -208,6 +210,13 @@ model Application {
   decidedById String?
   decidedAt   DateTime?
   reason      String?
+
+  // Denial controls. Only meaningful when status = "DENIED".
+  // allowResubmit=false → applicant cannot re-apply without admin action.
+  // allowResubmit=true + cooldownUntil null/elapsed → derived "pending" (can apply now).
+  // allowResubmit=true + cooldownUntil > now → "denied; can re-apply on {date}".
+  allowResubmit Boolean   @default(true)
+  cooldownUntil DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

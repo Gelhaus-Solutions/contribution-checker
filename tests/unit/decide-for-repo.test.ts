@@ -35,7 +35,6 @@ function makeRepo(overrides: Partial<RepoForDecision> = {}): RepoForDecision {
     createdAt: new Date(),
     project: {
       id: "proj1",
-      cooldownDays: 7,
       bypassHandles: '["*[bot]"]',
       bypassCollabs: true,
       checkerEnabled: true,
@@ -58,7 +57,6 @@ describe("decideForRepo", () => {
       repo: makeRepo({
         project: {
           id: "proj1",
-          cooldownDays: 7,
           bypassHandles: '["*[bot]"]',
           bypassCollabs: true,
           checkerEnabled: false,
@@ -71,7 +69,6 @@ describe("decideForRepo", () => {
     if (decision.status === "APPROVED") {
       expect(decision.bypassReason).toBe("checker_disabled");
     }
-    // Manual decision lookup must be skipped.
     expect(manualDecisionFindUnique).not.toHaveBeenCalled();
     expect(userFindUnique).not.toHaveBeenCalled();
   });
@@ -154,7 +151,6 @@ describe("decideForRepo", () => {
       repo: makeRepo({
         project: {
           id: "proj1",
-          cooldownDays: 7,
           bypassHandles: "[]",
           bypassCollabs: false,
           checkerEnabled: true,
@@ -216,6 +212,8 @@ describe("decideForRepo", () => {
       decidedAt: null,
       updatedAt: new Date(),
       reason: null,
+      allowResubmit: true,
+      cooldownUntil: null,
     });
     const decision = await decideForRepo({
       repo: makeRepo({ installationId: null }),
@@ -228,14 +226,16 @@ describe("decideForRepo", () => {
     }
   });
 
-  it("returns DENIED with no cooldown when the latest application has been revoked", async () => {
+  it("returns DENIED with no cooldown when allowResubmit is false", async () => {
     manualDecisionFindUnique.mockResolvedValue(null);
     userFindUnique.mockResolvedValue({ id: "u1" });
     applicationFindFirst.mockResolvedValue({
-      status: "REVOKED",
+      status: "DENIED",
       decidedAt: new Date(),
       updatedAt: new Date(),
       reason: "policy violation",
+      allowResubmit: false,
+      cooldownUntil: null,
     });
     const decision = await decideForRepo({
       repo: makeRepo({ installationId: null }),
@@ -245,8 +245,29 @@ describe("decideForRepo", () => {
     expect(decision.status).toBe("DENIED");
     if (decision.status === "DENIED") {
       expect(decision.reason).toBe("policy violation");
-      // Revocations don't honour the project's cooldown — admin must act.
       expect(decision.cooldownUntil).toBeNull();
+    }
+  });
+
+  it("returns PENDING (cooldown-elapsed) when allowResubmit + cooldownUntil is null", async () => {
+    manualDecisionFindUnique.mockResolvedValue(null);
+    userFindUnique.mockResolvedValue({ id: "u1" });
+    applicationFindFirst.mockResolvedValue({
+      status: "DENIED",
+      decidedAt: new Date(),
+      updatedAt: new Date(),
+      reason: "borderline",
+      allowResubmit: true,
+      cooldownUntil: null,
+    });
+    const decision = await decideForRepo({
+      repo: makeRepo({ installationId: null }),
+      prAuthorGhLogin: "alice",
+      prAuthorGhId: 2,
+    });
+    expect(decision.status).toBe("PENDING");
+    if (decision.status === "PENDING") {
+      expect(decision.reason).toBe("cooldown-elapsed");
     }
   });
 
@@ -258,6 +279,8 @@ describe("decideForRepo", () => {
       decidedAt: new Date(),
       updatedAt: new Date(),
       reason: null,
+      allowResubmit: true,
+      cooldownUntil: null,
     });
     const decision = await decideForRepo({
       repo: makeRepo({ installationId: null }),
@@ -267,7 +290,7 @@ describe("decideForRepo", () => {
     expect(decision.status).toBe("APPROVED");
   });
 
-  it("treats DENIED past the cooldown as PENDING", async () => {
+  it("treats DENIED past the snapshotted cooldown as PENDING", async () => {
     manualDecisionFindUnique.mockResolvedValue(null);
     userFindUnique.mockResolvedValue({ id: "u1" });
     const longAgo = new Date(Date.now() - 30 * 86400_000);
@@ -276,24 +299,31 @@ describe("decideForRepo", () => {
       decidedAt: longAgo,
       updatedAt: longAgo,
       reason: "spam",
+      allowResubmit: true,
+      cooldownUntil: new Date(Date.now() - 23 * 86400_000),
     });
     const decision = await decideForRepo({
-      repo: makeRepo({ installationId: null }), // cooldownDays = 7 from default
+      repo: makeRepo({ installationId: null }),
       prAuthorGhLogin: "alice",
       prAuthorGhId: 2,
     });
     expect(decision.status).toBe("PENDING");
+    if (decision.status === "PENDING") {
+      expect(decision.reason).toBe("cooldown-elapsed");
+    }
   });
 
   it("returns DENIED with cooldownUntil when still within cooldown", async () => {
     manualDecisionFindUnique.mockResolvedValue(null);
     userFindUnique.mockResolvedValue({ id: "u1" });
-    const recent = new Date(Date.now() - 1 * 86400_000);
+    const cooldownUntil = new Date(Date.now() + 6 * 86400_000);
     applicationFindFirst.mockResolvedValue({
       status: "DENIED",
-      decidedAt: recent,
-      updatedAt: recent,
+      decidedAt: new Date(Date.now() - 1 * 86400_000),
+      updatedAt: new Date(),
       reason: "spam",
+      allowResubmit: true,
+      cooldownUntil,
     });
     const decision = await decideForRepo({
       repo: makeRepo({ installationId: null }),
@@ -302,36 +332,7 @@ describe("decideForRepo", () => {
     });
     expect(decision.status).toBe("DENIED");
     if (decision.status === "DENIED") {
-      expect(decision.cooldownUntil).toBeInstanceOf(Date);
-    }
-  });
-
-  it("returns DENIED permanently when cooldownDays is null", async () => {
-    manualDecisionFindUnique.mockResolvedValue(null);
-    userFindUnique.mockResolvedValue({ id: "u1" });
-    applicationFindFirst.mockResolvedValue({
-      status: "DENIED",
-      decidedAt: new Date("2020-01-01"),
-      updatedAt: new Date("2020-01-01"),
-      reason: "spam",
-    });
-    const decision = await decideForRepo({
-      repo: makeRepo({
-        installationId: null,
-        project: {
-          id: "proj1",
-          cooldownDays: null,
-          bypassHandles: "[]",
-          bypassCollabs: false,
-          checkerEnabled: true,
-        },
-      }),
-      prAuthorGhLogin: "alice",
-      prAuthorGhId: 2,
-    });
-    expect(decision.status).toBe("DENIED");
-    if (decision.status === "DENIED") {
-      expect(decision.cooldownUntil).toBeNull();
+      expect(decision.cooldownUntil?.getTime()).toBe(cooldownUntil.getTime());
     }
   });
 });
