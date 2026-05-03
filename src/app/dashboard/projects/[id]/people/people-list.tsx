@@ -9,6 +9,7 @@ import {
   removeManualDecision,
   getUserOverview,
   setApplicationStatus,
+  setManualDecisionStatus,
   type UserOverview,
 } from "./actions";
 
@@ -304,6 +305,23 @@ function UserOverviewDialog({
     }
   };
 
+  const setManual = async (status: "APPROVED" | "DENIED") => {
+    if (!data?.manualDecision) return;
+    setBusy(true);
+    try {
+      await setManualDecisionStatus({
+        projectId,
+        decisionId: data.manualDecision.id,
+        status,
+      });
+      await reload();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -424,6 +442,23 @@ function UserOverviewDialog({
                       {data.manualDecision.reason}
                     </p>
                   )}
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <span className="text-xs text-muted-foreground">
+                      Set decision:
+                    </span>
+                    {(["APPROVED", "DENIED"] as const).map((s) => (
+                      <Button
+                        key={s}
+                        size="sm"
+                        variant="outline"
+                        disabled={busy || data.manualDecision?.status === s}
+                        onClick={() => setManual(s)}
+                        className="h-7 px-2 text-[11px]"
+                      >
+                        {s}
+                      </Button>
+                    ))}
+                  </div>
                 </div>
               </section>
             )}

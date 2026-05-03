@@ -111,6 +111,46 @@ export async function addManualDecision(formData: FormData) {
   revalidatePath(`/dashboard/projects/${parsed.projectId}`);
 }
 
+const setManualSchema = z.object({
+  projectId: z.string().min(1),
+  decisionId: z.string().min(1),
+  status: z.enum(["APPROVED", "DENIED"]),
+});
+
+export async function setManualDecisionStatus(args: {
+  projectId: string;
+  decisionId: string;
+  status: "APPROVED" | "DENIED";
+}) {
+  const parsed = setManualSchema.parse(args);
+  const { session } = await requireProjectRole(parsed.projectId, "ADMIN");
+
+  const existing = await prisma.manualDecision.findUnique({
+    where: { id: parsed.decisionId },
+  });
+  if (!existing || existing.projectId !== parsed.projectId) {
+    throw new Error("Decision not found");
+  }
+  if (existing.status === parsed.status) return;
+
+  await prisma.manualDecision.update({
+    where: { id: parsed.decisionId },
+    data: { status: parsed.status, decidedById: session.user.id },
+  });
+  await recordAudit({
+    projectId: parsed.projectId,
+    actorId: session.user.id,
+    kind: parsed.status === "APPROVED" ? "application.approved" : "application.denied",
+    payload: {
+      manual: true,
+      ghLogin: existing.ghLogin,
+      from: existing.status,
+    },
+  });
+
+  revalidatePath(`/dashboard/projects/${parsed.projectId}/people`);
+}
+
 const removeSchema = z.object({
   projectId: z.string().min(1),
   decisionId: z.string().min(1),
