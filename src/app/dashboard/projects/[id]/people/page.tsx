@@ -32,6 +32,8 @@ export default async function ProjectPeople({
         projectId: id,
         status: { in: ["APPROVED", "DENIED"] },
       },
+      // status, allowResubmit, cooldownUntil collapse into the derived
+      // PENDING badge below.
       include: {
         user: { select: { ghLogin: true } },
         decidedBy: { select: { ghLogin: true } },
@@ -51,16 +53,24 @@ export default async function ProjectPeople({
       decidedAt: d.updatedAt.toISOString(),
       decidedByLogin: d.decidedBy?.ghLogin ?? null,
     })),
-    ...applications.map<PersonRow>((a) => ({
-      kind: "application",
-      id: a.id,
-      ghLogin: a.user.ghLogin ?? "(no login)",
-      status: a.status as "APPROVED" | "DENIED",
-      reason: a.reason,
-      decidedAt: (a.decidedAt ?? a.updatedAt).toISOString(),
-      decidedByLogin: a.decidedBy?.ghLogin ?? null,
-      applicationId: a.id,
-    })),
+    ...applications.map<PersonRow>((a) => {
+      const derived: "APPROVED" | "DENIED" | "PENDING" =
+        a.status === "DENIED" &&
+        a.allowResubmit &&
+        (!a.cooldownUntil || a.cooldownUntil <= new Date())
+          ? "PENDING"
+          : (a.status as "APPROVED" | "DENIED");
+      return {
+        kind: "application",
+        id: a.id,
+        ghLogin: a.user.ghLogin ?? "(no login)",
+        status: derived,
+        reason: a.reason,
+        decidedAt: (a.decidedAt ?? a.updatedAt).toISOString(),
+        decidedByLogin: a.decidedBy?.ghLogin ?? null,
+        applicationId: a.id,
+      };
+    }),
   ].sort((a, b) => b.decidedAt.localeCompare(a.decidedAt));
 
   return (

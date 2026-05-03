@@ -261,10 +261,13 @@ export type UserOverview = {
   application: {
     id: string;
     status: string;
+    derivedStatus: "SUBMITTED" | "APPROVED" | "DENIED" | "PENDING";
     createdAt: string;
     decidedAt: string | null;
     reason: string | null;
     answersPreview: string;
+    allowResubmit: boolean;
+    cooldownUntil: string | null;
   } | null;
   manualDecision: {
     id: string;
@@ -330,14 +333,26 @@ export async function getUserOverview(args: {
   ]);
 
   const application = user?.applications[0]
-    ? {
-        id: user.applications[0].id,
-        status: user.applications[0].status,
-        createdAt: user.applications[0].createdAt.toISOString(),
-        decidedAt: user.applications[0].decidedAt?.toISOString() ?? null,
-        reason: user.applications[0].reason,
-        answersPreview: user.applications[0].answers.slice(0, 800),
-      }
+    ? (() => {
+        const a = user.applications[0];
+        const derivedStatus: "SUBMITTED" | "APPROVED" | "DENIED" | "PENDING" =
+          a.status === "DENIED" &&
+          a.allowResubmit &&
+          (!a.cooldownUntil || a.cooldownUntil <= new Date())
+            ? "PENDING"
+            : (a.status as "SUBMITTED" | "APPROVED" | "DENIED");
+        return {
+          id: a.id,
+          status: a.status,
+          derivedStatus,
+          createdAt: a.createdAt.toISOString(),
+          decidedAt: a.decidedAt?.toISOString() ?? null,
+          reason: a.reason,
+          answersPreview: a.answers.slice(0, 800),
+          allowResubmit: a.allowResubmit,
+          cooldownUntil: a.cooldownUntil?.toISOString() ?? null,
+        };
+      })()
     : null;
 
   const prChecks = await prisma.prCheck.findMany({
