@@ -4,7 +4,7 @@ import { auth, signIn } from "@/auth";
 import { prisma } from "@/lib/db";
 import { parseFormSchema } from "@/lib/applications/schema";
 import { SiteHeader } from "@/components/site-header";
-import { Button } from "@/components/ui/button";
+import { SubmitButton } from "@/components/ui/submit-button";
 import { Badge } from "@/components/ui/badge";
 import {
   Card,
@@ -100,7 +100,7 @@ export default async function PublicProjectPage({
                   });
                 }}
               >
-                <Button type="submit">Sign in with GitHub to apply</Button>
+                <SubmitButton>Sign in with GitHub to apply</SubmitButton>
               </form>
             ) : (
               <ApplicantSurface

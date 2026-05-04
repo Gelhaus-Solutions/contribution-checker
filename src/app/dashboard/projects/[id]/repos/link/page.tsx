@@ -10,7 +10,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
+import { SubmitButton } from "@/components/ui/submit-button";
 import { linkRepos } from "./actions";
 
 export default async function LinkRepos({
@@ -94,7 +94,7 @@ export default async function LinkRepos({
               );
             })}
           </ul>
-          <Button type="submit">Save selection</Button>
+          <SubmitButton>Save selection</SubmitButton>
         </form>
       </CardContent>
     </Card>

@@ -10,7 +10,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Button } from "@/components/ui/button";
+import { SubmitButton } from "@/components/ui/submit-button";
 import { Badge } from "@/components/ui/badge";
 import { ALL_HEURISTICS } from "@/lib/quality/registry";
 import {
@@ -145,7 +145,7 @@ export default async function ProjectQualityPage({
                 </p>
               </div>
             </div>
-            <Button type="submit">Save</Button>
+            <SubmitButton>Save</SubmitButton>
           </form>
         </CardContent>
       </Card>
@@ -242,7 +242,7 @@ export default async function ProjectQualityPage({
                 </ul>
               </section>
             ))}
-            <Button type="submit">Save heuristics</Button>
+            <SubmitButton>Save heuristics</SubmitButton>
           </form>
         </CardContent>
       </Card>
@@ -260,13 +260,9 @@ export default async function ProjectQualityPage({
         <CardContent>
           <form action={backfillQuality}>
             <input type="hidden" name="projectId" value={project.id} />
-            <Button
-              type="submit"
-              variant="outline"
-              disabled={!project.qualityEnabled}
-            >
+            <SubmitButton variant="outline" disabled={!project.qualityEnabled}>
               Run backfill
-            </Button>
+            </SubmitButton>
             {!project.qualityEnabled && (
               <p className="mt-2 text-xs text-muted-foreground">
                 Enable quality scoring above before backfilling.

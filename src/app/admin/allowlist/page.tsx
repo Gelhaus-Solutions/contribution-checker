@@ -9,7 +9,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
+import { SubmitButton } from "@/components/ui/submit-button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
@@ -64,7 +64,7 @@ export default async function AllowlistPage() {
                 <Label htmlFor="ghLogin">GitHub login</Label>
                 <Input id="ghLogin" name="ghLogin" placeholder="octocat" required />
               </div>
-              <Button type="submit">Grant</Button>
+              <SubmitButton>Grant</SubmitButton>
             </form>
           </CardContent>
         </Card>
@@ -105,21 +105,20 @@ export default async function AllowlistPage() {
                       {u.canCreateProj && <Badge variant="outline">creator</Badge>}
                       <form action={toggleSuperAdmin}>
                         <input type="hidden" name="userId" value={u.id} />
-                        <Button type="submit" size="sm" variant="outline">
+                        <SubmitButton size="sm" variant="outline">
                           {u.isSuperAdmin ? "Revoke super" : "Make super"}
-                        </Button>
+                        </SubmitButton>
                       </form>
                       {u.canCreateProj && !u.isSuperAdmin && (
                         <form action={revokeCreator}>
                           <input type="hidden" name="userId" value={u.id} />
-                          <Button
-                            type="submit"
+                          <SubmitButton
                             size="sm"
                             variant="ghost"
                             className="text-destructive hover:bg-destructive/10"
                           >
                             Revoke
-                          </Button>
+                          </SubmitButton>
                         </form>
                       )}
                     </div>

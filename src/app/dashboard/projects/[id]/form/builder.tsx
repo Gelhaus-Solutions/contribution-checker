@@ -52,6 +52,7 @@ export function FormBuilder({
   const [fields, setFields] = useState<FormSchema>(initial);
   const [isPending, startTransition] = useTransition();
   const [savedAt, setSavedAt] = useState<string | null>(null);
+  const [justSaved, setJustSaved] = useState(false);
 
   const updateField = (i: number, patch: Partial<Field>) => {
     setFields((prev) =>
@@ -82,6 +83,8 @@ export function FormBuilder({
     startTransition(async () => {
       await action(fd);
       setSavedAt(new Date().toLocaleTimeString());
+      setJustSaved(true);
+      setTimeout(() => setJustSaved(false), 1500);
     });
   };
 
@@ -313,8 +316,13 @@ export function FormBuilder({
         ))}
 
         <div className="flex items-center gap-3 pt-2">
-          <Button type="button" onClick={onSave} disabled={isPending}>
-            {isPending ? "Saving…" : "Save form"}
+          <Button
+            type="button"
+            onClick={onSave}
+            loading={isPending}
+            success={justSaved}
+          >
+            Save form
           </Button>
           {savedAt && (
             <span className="text-xs text-muted-foreground">

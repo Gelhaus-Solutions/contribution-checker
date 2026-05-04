@@ -2,7 +2,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { auth, signIn, signOut } from "@/auth";
 import { unreadCount } from "@/lib/notifications/inbox";
-import { Button } from "@/components/ui/button";
+import { SubmitButton } from "@/components/ui/submit-button";
 import { BrandMark } from "@/components/brand-mark";
 
 export async function SiteHeader() {
@@ -65,9 +65,9 @@ export async function SiteHeader() {
                   await signOut({ redirectTo: "/" });
                 }}
               >
-                <Button variant="ghost" size="sm" type="submit">
+                <SubmitButton variant="ghost" size="sm">
                   Sign out
-                </Button>
+                </SubmitButton>
               </form>
             </>
           ) : (
@@ -77,9 +77,7 @@ export async function SiteHeader() {
                 await signIn("github");
               }}
             >
-              <Button size="sm" type="submit">
-                Sign in with GitHub
-              </Button>
+              <SubmitButton size="sm">Sign in with GitHub</SubmitButton>
             </form>
           )}
         </nav>

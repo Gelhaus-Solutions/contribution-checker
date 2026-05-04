@@ -5,6 +5,8 @@ import Link from "next/link";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { SubmitButton } from "@/components/ui/submit-button";
+import { useActionFeedback } from "@/components/ui/use-action-feedback";
 import {
   removeManualDecision,
   getUserOverview,
@@ -196,14 +198,13 @@ export function PeopleList({
                   <form action={removeManualDecision}>
                     <input type="hidden" name="projectId" value={projectId} />
                     <input type="hidden" name="decisionId" value={d.id} />
-                    <Button
-                      type="submit"
+                    <SubmitButton
                       size="sm"
                       variant="ghost"
                       className="text-destructive hover:bg-destructive/10"
                     >
                       Remove
-                    </Button>
+                    </SubmitButton>
                   </form>
                 )}
               </div>
@@ -258,7 +259,7 @@ function UserOverviewDialog({
 }) {
   const [data, setData] = useState<UserOverview | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const feedback = useActionFeedback<string>();
 
   const reload = () => {
     setData(null);
@@ -286,40 +287,36 @@ function UserOverviewDialog({
     };
   }, [projectId, ghLogin]);
 
-  const setStatus = async (
+  const setStatus = (
     target: "PENDING" | "SUBMITTED" | "APPROVED" | "DENIED"
   ) => {
     if (!data?.application) return;
-    setBusy(true);
-    try {
-      await setApplicationStatus({
-        projectId,
-        applicationId: data.application.id,
-        target,
-      });
-      await reload();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
+    const appId = data.application.id;
+    feedback
+      .run(`status:${target}`, async () => {
+        await setApplicationStatus({
+          projectId,
+          applicationId: appId,
+          target,
+        });
+        await reload();
+      })
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)));
   };
 
-  const setManual = async (status: "APPROVED" | "DENIED") => {
+  const setManual = (status: "APPROVED" | "DENIED") => {
     if (!data?.manualDecision) return;
-    setBusy(true);
-    try {
-      await setManualDecisionStatus({
-        projectId,
-        decisionId: data.manualDecision.id,
-        status,
-      });
-      await reload();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
+    const decisionId = data.manualDecision.id;
+    feedback
+      .run(`manual:${status}`, async () => {
+        await setManualDecisionStatus({
+          projectId,
+          decisionId,
+          status,
+        });
+        await reload();
+      })
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)));
   };
 
   useEffect(() => {
@@ -399,7 +396,9 @@ function UserOverviewDialog({
                         key={t}
                         size="sm"
                         variant="outline"
-                        disabled={busy}
+                        loading={feedback.isLoading(`status:${t}`)}
+                        success={feedback.isSuccess(`status:${t}`)}
+                        disabled={feedback.isAnyLoading}
                         onClick={() => setStatus(t)}
                         className="h-7 px-2 text-[11px]"
                       >
@@ -451,7 +450,12 @@ function UserOverviewDialog({
                         key={s}
                         size="sm"
                         variant="outline"
-                        disabled={busy || data.manualDecision?.status === s}
+                        loading={feedback.isLoading(`manual:${s}`)}
+                        success={feedback.isSuccess(`manual:${s}`)}
+                        disabled={
+                          feedback.isAnyLoading ||
+                          data.manualDecision?.status === s
+                        }
                         onClick={() => setManual(s)}
                         className="h-7 px-2 text-[11px]"
                       >

@@ -126,8 +126,8 @@ export function ApplyForm({
           The project owner hasn&apos;t set up the application form yet.
         </p>
       ) : (
-        <Button type="submit" disabled={pending}>
-          {pending ? "Submitting…" : "Submit application"}
+        <Button type="submit" loading={pending}>
+          Submit application
         </Button>
       )}
     </form>

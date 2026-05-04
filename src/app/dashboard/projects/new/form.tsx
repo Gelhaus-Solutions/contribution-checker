@@ -71,8 +71,8 @@ export function CreateProjectForm({
       {state.error && (
         <p className="text-sm text-destructive">{state.error}</p>
       )}
-      <Button type="submit" disabled={pending}>
-        {pending ? "Creating…" : "Create project"}
+      <Button type="submit" loading={pending}>
+        Create project
       </Button>
     </form>
   );
