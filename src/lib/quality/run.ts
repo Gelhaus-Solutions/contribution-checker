@@ -1,3 +1,4 @@
+import * as Sentry from "@sentry/nextjs";
 import { prisma } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { fetchPrContext, type FetchedPrContext } from "@/lib/quality/fetch";
@@ -107,6 +108,11 @@ export async function runQualityFromContext(args: {
     },
   });
 
+  if (summary.score !== null) {
+    Sentry.metrics.distribution("pr.quality.score", summary.score, {
+      attributes: { mode: "ci" },
+    });
+  }
   return { signalsRaw: signals, summary };
 }
 
@@ -234,6 +240,11 @@ export async function runQualityForPrCheck(args: {
     );
   }
 
+  if (summary.score !== null) {
+    Sentry.metrics.distribution("pr.quality.score", summary.score, {
+      attributes: { mode: "app" },
+    });
+  }
   return { signalsRaw: signals, summary };
 }
 

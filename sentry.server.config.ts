@@ -9,12 +9,14 @@ Sentry.init({
   profilesSampleRate: 1.0,
   sendDefaultPii: true,
   enableLogs: true,
-  debug: process.env.NODE_ENV !== "production",
 });
 
-if (!process.env.SENTRY_DSN) {
-  console.warn("[sentry.server.config] SENTRY_DSN is not set — SDK is no-op");
-}
+console.info(
+  "[sentry.server] init",
+  process.env.SENTRY_DSN
+    ? `dsn=set (len=${process.env.SENTRY_DSN.length}) env=${process.env.SENTRY_ENVIRONMENT ?? process.env.NODE_ENV}`
+    : "DSN MISSING — SDK is no-op",
+);
 
 Sentry.getGlobalScope().setAttributes({
   "service.name": "contribution-checker",

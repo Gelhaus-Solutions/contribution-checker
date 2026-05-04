@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import * as Sentry from "@sentry/nextjs";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
@@ -71,6 +72,7 @@ export async function POST(req: Request) {
     async () => {
       // Dispatch by event. Each handler is wrapped so a single failing event
       // never stalls the GitHub webhook delivery (which would back off and retry).
+      const t0 = Date.now();
       try {
         switch (eventName) {
           case "pull_request":
@@ -88,12 +90,37 @@ export async function POST(req: Request) {
             logger.debug({ eventName, deliveryId }, "unhandled GH event");
         }
       } catch (e) {
+        Sentry.captureException(e, {
+          tags: { "github.event": eventName, "github.delivery_id": deliveryId },
+        });
         logger.error(
           { err: e, eventName, deliveryId },
           "webhook handler threw"
         );
+        Sentry.metrics.count("github.webhook.event", 1, {
+          attributes: {
+            "github.event": eventName,
+            "github.action": p.action ?? "",
+            outcome: "error",
+          },
+        });
         return NextResponse.json({ error: "Handler error" }, { status: 500 });
       }
+
+      Sentry.metrics.count("github.webhook.event", 1, {
+        attributes: {
+          "github.event": eventName,
+          "github.action": p.action ?? "",
+          outcome: "ok",
+        },
+      });
+      Sentry.metrics.distribution("github.webhook.duration", Date.now() - t0, {
+        unit: "millisecond",
+        attributes: {
+          "github.event": eventName,
+          "github.action": p.action ?? "",
+        },
+      });
 
       return NextResponse.json({ ok: true });
     }
