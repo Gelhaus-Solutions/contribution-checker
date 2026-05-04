@@ -6,6 +6,7 @@ Sentry.init({
   tracesSampleRate: 1.0,
   sendDefaultPii: true,
   enableLogs: true,
+  debug: process.env.NODE_ENV !== "production",
 });
 
 Sentry.getGlobalScope().setAttributes({
