@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import * as Sentry from "@sentry/nextjs";
 import { z } from "zod";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
@@ -118,6 +119,14 @@ export async function POST(req: Request) {
   }
   const body = parsed.data;
 
+  Sentry.getCurrentScope().setAttributes({
+    "ci.project_slug": body.projectSlug,
+    "ci.action": body.action,
+    "github.pr_number": body.pull_request.number,
+    "github.pr_author": body.pull_request.user.login,
+    "github.pr_author_id": body.pull_request.user.id,
+  });
+
   let claims;
   try {
     claims = await verifyGhActionsToken({
@@ -153,6 +162,16 @@ export async function POST(req: Request) {
   if (!project) {
     return NextResponse.json({ error: "project not found" }, { status: 404 });
   }
+
+  Sentry.getCurrentScope().setAttributes({
+    "project.id": project.id,
+    "project.name": project.name,
+    "github.repo": claims.repository,
+    "github.repo_owner": claims.repository_owner,
+    "ci.workflow": claims.workflow,
+    "ci.event_name": claims.event_name,
+    "ci.actor": claims.actor,
+  });
 
   const repo = await prisma.repo.findUnique({
     where: {
@@ -213,6 +232,17 @@ export async function POST(req: Request) {
     prAuthorGhId: body.pull_request.user.id,
     isCollaboratorHint: body.isCollaborator,
   });
+
+  const decisionAttrs: Record<string, string> = {
+    "decision.outcome": decision.status,
+  };
+  if ("reason" in decision && decision.reason) {
+    decisionAttrs["decision.reason"] = String(decision.reason);
+  }
+  if ("bypassReason" in decision && decision.bypassReason) {
+    decisionAttrs["decision.bypass_reason"] = decision.bypassReason;
+  }
+  Sentry.getCurrentScope().setAttributes(decisionAttrs);
 
   if (decision.status === "IGNORED") {
     return NextResponse.json(

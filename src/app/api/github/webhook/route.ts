@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
+import { withSentryScope } from "@/lib/observability/with-sentry-scope";
 import {
   handleInstallationEvent,
   handleInstallationReposEvent,
@@ -49,31 +50,52 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  // Dispatch by event. Each handler is wrapped so a single failing event
-  // never stalls the GitHub webhook delivery (which would back off and retry).
-  try {
-    switch (eventName) {
-      case "pull_request":
-        await handlePullRequestEvent(payload as never);
-        break;
-      case "installation":
-        await handleInstallationEvent(payload as never);
-        break;
-      case "installation_repositories":
-        await handleInstallationReposEvent(payload as never);
-        break;
-      case "ping":
-        return NextResponse.json({ pong: true });
-      default:
-        logger.debug({ eventName, deliveryId }, "unhandled GH event");
-    }
-  } catch (e) {
-    logger.error(
-      { err: e, eventName, deliveryId },
-      "webhook handler threw"
-    );
-    return NextResponse.json({ error: "Handler error" }, { status: 500 });
-  }
+  const p = payload as {
+    action?: string;
+    repository?: { full_name?: string; id?: number };
+    installation?: { id?: number };
+    pull_request?: { number?: number; user?: { login?: string } };
+  };
 
-  return NextResponse.json({ ok: true });
+  return withSentryScope(
+    {
+      "github.delivery_id": deliveryId,
+      "github.event": eventName,
+      "github.action": p.action,
+      "github.installation_id": p.installation?.id,
+      "github.repo": p.repository?.full_name,
+      "github.repo_id": p.repository?.id,
+      "github.pr_number": p.pull_request?.number,
+      "github.pr_author": p.pull_request?.user?.login,
+    },
+    async () => {
+      // Dispatch by event. Each handler is wrapped so a single failing event
+      // never stalls the GitHub webhook delivery (which would back off and retry).
+      try {
+        switch (eventName) {
+          case "pull_request":
+            await handlePullRequestEvent(payload as never);
+            break;
+          case "installation":
+            await handleInstallationEvent(payload as never);
+            break;
+          case "installation_repositories":
+            await handleInstallationReposEvent(payload as never);
+            break;
+          case "ping":
+            return NextResponse.json({ pong: true });
+          default:
+            logger.debug({ eventName, deliveryId }, "unhandled GH event");
+        }
+      } catch (e) {
+        logger.error(
+          { err: e, eventName, deliveryId },
+          "webhook handler threw"
+        );
+        return NextResponse.json({ error: "Handler error" }, { status: 500 });
+      }
+
+      return NextResponse.json({ ok: true });
+    }
+  );
 }

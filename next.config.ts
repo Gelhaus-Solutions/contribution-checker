@@ -1,5 +1,6 @@
 import type { NextConfig } from "next";
 import { createHash } from "node:crypto";
+import { withSentryConfig } from "@sentry/nextjs";
 
 // Pin the Server Actions encryption key to a deterministic value derived from
 // AUTH_SECRET. Without this, every restart/rebuild rotates action IDs and any
@@ -22,6 +23,25 @@ const config: NextConfig = {
       { protocol: "https", hostname: "avatars.githubusercontent.com" },
     ],
   },
+  // Required for Sentry browser profiling — without this header the profiler
+  // silently no-ops in the browser.
+  async headers() {
+    return [
+      {
+        source: "/:path*",
+        headers: [{ key: "Document-Policy", value: "js-profiling" }],
+      },
+    ];
+  },
 };
 
-export default config;
+export default withSentryConfig(config, {
+  org: process.env.SENTRY_ORG,
+  project: process.env.SENTRY_PROJECT,
+  silent: !process.env.CI,
+  widenClientFileUpload: true,
+  webpack: {
+    treeshake: { removeDebugLogging: true },
+    automaticVercelMonitors: false,
+  },
+});

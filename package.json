@@ -32,6 +32,8 @@
     "@radix-ui/react-switch": "^1.1.2",
     "@radix-ui/react-tabs": "^1.1.2",
     "@radix-ui/react-toast": "^1.2.4",
+    "@sentry/nextjs": "^10.51.0",
+    "@sentry/profiling-node": "^10.51.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "jose": "^5.10.0",
@@ -64,5 +66,11 @@
     "typescript": "^5.7.3",
     "vitest": "^2.1.8"
   },
-  "packageManager": "pnpm@10.24.0"
+  "packageManager": "pnpm@10.24.0",
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@sentry-internal/node-cpu-profiler",
+      "@sentry/cli"
+    ]
+  }
 }

@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { env } from "@/lib/env";
+import * as Sentry from "@sentry/nextjs";
 import { decideForPR, type PrDecision } from "@/lib/applications/decide-pr";
 import { buildDecisionMessage } from "@/lib/applications/decision-message";
 import { enqueueProjectWebhook } from "@/lib/notifications/webhooks";
@@ -197,6 +198,18 @@ export async function handlePullRequestEvent(payload: WebhookPayload) {
     prAuthorGhLogin: author.login,
     prAuthorGhId: author.id,
   });
+
+  const decisionAttrs: Record<string, string> = {
+    "decision.outcome": decision.status,
+  };
+  if ("reason" in decision && decision.reason) {
+    decisionAttrs["decision.reason"] = String(decision.reason);
+  }
+  if ("bypassReason" in decision && decision.bypassReason) {
+    decisionAttrs["decision.bypass_reason"] = decision.bypassReason;
+  }
+  if (decision.projectId) decisionAttrs["project.id"] = decision.projectId;
+  Sentry.getCurrentScope().setAttributes(decisionAttrs);
 
   if (decision.status === "IGNORED") {
     logger.debug({ ghRepoId, prNumber, reason: decision.reason }, "PR ignored");
