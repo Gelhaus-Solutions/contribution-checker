@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { useActionFeedback } from "@/components/ui/use-action-feedback";
 import {
   getPrOverview,
   rescanPrQuality,
@@ -386,8 +387,8 @@ function PrOverviewDialog({
 }) {
   const [data, setData] = useState<PrOverview | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState<null | "rescan" | "reeval">(null);
   const [flash, setFlash] = useState<string | null>(null);
+  const feedback = useActionFeedback<"rescan" | "reeval">();
 
   const reload = () => {
     setError(null);
@@ -422,53 +423,47 @@ function PrOverviewDialog({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  const onRescan = async () => {
-    if (!data || busy) return;
-    setBusy("rescan");
+  const onRescan = () => {
+    if (!data || feedback.isAnyLoading) return;
     setFlash(null);
-    try {
-      const res = await rescanPrQuality({
-        projectId,
-        prCheckIds: [data.id],
-      });
-      if (res.scored > 0) {
-        setFlash("Quality rescanned.");
-      } else if (res.skipped > 0) {
-        setFlash("Skipped — quality cannot run for this PR.");
-      } else {
-        setFlash("Rescan failed.");
-      }
-      await reload();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(null);
-    }
+    feedback
+      .run("rescan", async () => {
+        const res = await rescanPrQuality({
+          projectId,
+          prCheckIds: [data.id],
+        });
+        if (res.scored > 0) {
+          setFlash("Quality rescanned.");
+        } else if (res.skipped > 0) {
+          setFlash("Skipped — quality cannot run for this PR.");
+        } else {
+          setFlash("Rescan failed.");
+        }
+        await reload();
+      })
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)));
   };
 
-  const onReevaluate = async () => {
-    if (!data || busy) return;
-    setBusy("reeval");
+  const onReevaluate = () => {
+    if (!data || feedback.isAnyLoading) return;
     setFlash(null);
-    try {
-      const res = await reEvaluatePrs({
-        projectId,
-        prCheckIds: [data.id],
-      });
-      if (res.triggered > 0) {
-        setFlash(
-          `Re-evaluation triggered (label \"${data.evaluateLabel}\" added). The webhook will apply the new decision shortly.`
-        );
-      } else if (res.skipped > 0) {
-        setFlash("Skipped — repo is not connected via the GitHub App.");
-      } else {
-        setFlash("Re-evaluate failed.");
-      }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(null);
-    }
+    feedback
+      .run("reeval", async () => {
+        const res = await reEvaluatePrs({
+          projectId,
+          prCheckIds: [data.id],
+        });
+        if (res.triggered > 0) {
+          setFlash(
+            `Re-evaluation triggered (label \"${data.evaluateLabel}\" added). The webhook will apply the new decision shortly.`
+          );
+        } else if (res.skipped > 0) {
+          setFlash("Skipped — repo is not connected via the GitHub App.");
+        } else {
+          setFlash("Re-evaluate failed.");
+        }
+      })
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)));
   };
 
   return (
@@ -665,7 +660,9 @@ function PrOverviewDialog({
                 <Button
                   size="sm"
                   variant="outline"
-                  disabled={busy !== null || data.mode !== "app"}
+                  loading={feedback.isLoading("rescan")}
+                  success={feedback.isSuccess("rescan")}
+                  disabled={feedback.isAnyLoading || data.mode !== "app"}
                   onClick={onRescan}
                   title={
                     data.mode !== "app"
@@ -673,13 +670,15 @@ function PrOverviewDialog({
                       : undefined
                   }
                 >
-                  {busy === "rescan" ? "Rescanning…" : "Rescan quality"}
+                  Rescan quality
                 </Button>
               )}
               <Button
                 size="sm"
                 variant="outline"
-                disabled={busy !== null || data.mode !== "app"}
+                loading={feedback.isLoading("reeval")}
+                success={feedback.isSuccess("reeval")}
+                disabled={feedback.isAnyLoading || data.mode !== "app"}
                 onClick={onReevaluate}
                 title={
                   data.mode !== "app"
@@ -687,7 +686,7 @@ function PrOverviewDialog({
                     : undefined
                 }
               >
-                {busy === "reeval" ? "Triggering…" : "Re-evaluate"}
+                Re-evaluate
               </Button>
               <a
                 className="ml-auto text-xs underline"

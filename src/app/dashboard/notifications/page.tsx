@@ -8,7 +8,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
+import { SubmitButton } from "@/components/ui/submit-button";
 import { markAllReadAction } from "./actions";
 
 const KIND_LABELS: Record<string, string> = {
@@ -32,9 +32,9 @@ export default async function NotificationsPage() {
         <div className="flex items-center justify-between">
           <h1 className="text-2xl font-semibold">Notifications</h1>
           <form action={markAllReadAction}>
-            <Button type="submit" size="sm" variant="outline">
+            <SubmitButton size="sm" variant="outline">
               Mark all read
-            </Button>
+            </SubmitButton>
           </form>
         </div>
         <Card>

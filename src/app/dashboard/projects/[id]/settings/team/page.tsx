@@ -10,7 +10,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Button } from "@/components/ui/button";
+import { SubmitButton } from "@/components/ui/submit-button";
 import { Badge } from "@/components/ui/badge";
 import { inviteMember, removeMemberAction, changeRoleAction } from "./actions";
 import { RoleSelect } from "./role-select";
@@ -54,7 +54,7 @@ export default async function ProjectTeam({
                 {viewerRole === "OWNER" && <option value="OWNER">Owner (transfer)</option>}
               </select>
             </div>
-            <Button type="submit">Invite</Button>
+            <SubmitButton>Invite</SubmitButton>
           </form>
         </CardContent>
       </Card>
@@ -101,14 +101,13 @@ export default async function ProjectTeam({
                       <form action={removeMemberAction}>
                         <input type="hidden" name="projectId" value={id} />
                         <input type="hidden" name="memberId" value={m.id} />
-                        <Button
-                          type="submit"
+                        <SubmitButton
                           size="sm"
                           variant="ghost"
                           className="text-destructive hover:bg-destructive/10"
                         >
                           Remove
-                        </Button>
+                        </SubmitButton>
                       </form>
                     </>
                   )}

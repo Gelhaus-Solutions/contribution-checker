@@ -8,7 +8,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
+import { SubmitButton } from "@/components/ui/submit-button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -59,7 +59,7 @@ export default async function TemplatesPage() {
                   className="font-mono text-xs"
                 />
               </div>
-              <Button type="submit">Save template</Button>
+              <SubmitButton>Save template</SubmitButton>
             </form>
           </CardContent>
         </Card>
@@ -95,14 +95,13 @@ export default async function TemplatesPage() {
                           ))}
                           <form action={deleteTemplate}>
                             <input type="hidden" name="templateId" value={t.id} />
-                            <Button
-                              type="submit"
+                            <SubmitButton
                               size="sm"
                               variant="ghost"
                               className="text-destructive hover:bg-destructive/10"
                             >
                               Delete
-                            </Button>
+                            </SubmitButton>
                           </form>
                         </div>
                       </div>

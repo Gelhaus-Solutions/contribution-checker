@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { SubmitButton } from "@/components/ui/submit-button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { addRepoByName, removeRepo } from "./actions";
@@ -233,7 +234,7 @@ export default async function ProjectRepos({
                 required
               />
             </div>
-            <Button type="submit">Add</Button>
+            <SubmitButton>Add</SubmitButton>
           </form>
           {installUrl && (
             <div className="text-xs text-muted-foreground">
@@ -282,14 +283,13 @@ export default async function ProjectRepos({
                     <form action={removeRepo}>
                       <input type="hidden" name="projectId" value={id} />
                       <input type="hidden" name="repoId" value={r.id} />
-                      <Button
-                        type="submit"
+                      <SubmitButton
                         size="sm"
                         variant="ghost"
                         className="text-destructive hover:bg-destructive/10"
                       >
                         Remove
-                      </Button>
+                      </SubmitButton>
                     </form>
                   </div>
                 </li>

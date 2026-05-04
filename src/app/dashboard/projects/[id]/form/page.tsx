@@ -2,7 +2,7 @@ import { prisma } from "@/lib/db";
 import { requireProjectRole } from "@/lib/authz";
 import { parseFormSchema } from "@/lib/applications/schema";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
+import { SubmitButton } from "@/components/ui/submit-button";
 import { Badge } from "@/components/ui/badge";
 import { FormBuilder } from "./builder";
 import { saveFormSchema, applyTemplate, saveAsTemplate } from "./actions";
@@ -79,9 +79,9 @@ export default async function ProjectFormPage({
                   <form action={applyTemplate}>
                     <input type="hidden" name="projectId" value={project.id} />
                     <input type="hidden" name="templateId" value={t.id} />
-                    <Button type="submit" size="sm" variant="outline">
+                    <SubmitButton size="sm" variant="outline">
                       Apply
-                    </Button>
+                    </SubmitButton>
                   </form>
                 </li>
               ))}
@@ -101,9 +101,9 @@ export default async function ProjectFormPage({
                 className="flex h-9 w-full rounded-md border border-border bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
               />
             </div>
-            <Button type="submit" variant="outline" size="sm">
+            <SubmitButton variant="outline" size="sm">
               Save as template
-            </Button>
+            </SubmitButton>
           </form>
         </CardContent>
       </Card>
