@@ -7,13 +7,29 @@ import { prisma } from "@/lib/db";
 import { rateLimit } from "@/lib/ratelimit";
 import { submitApplication } from "@/lib/applications/lifecycle";
 import { notifyAdminsOfNewApplication } from "@/lib/applications/decide";
-import { parseFormSchema } from "@/lib/applications/schema";
+import { parseFormSchema, type FormSchema } from "@/lib/applications/schema";
 import type { ApplyState } from "./apply-form";
 
 function clientIp(headerList: Headers): string {
   const xff = headerList.get("x-forwarded-for");
   if (xff) return xff.split(",")[0].trim();
   return headerList.get("x-real-ip") ?? "unknown";
+}
+
+function collectAnswers(
+  formData: FormData,
+  fields: FormSchema
+): Record<string, string | boolean> {
+  const out: Record<string, string | boolean> = {};
+  for (const f of fields) {
+    if (f.type === "checkbox") {
+      out[f.id] = formData.get(f.id) !== null;
+    } else {
+      const v = formData.get(f.id);
+      out[f.id] = typeof v === "string" ? v : "";
+    }
+  }
+  return out;
 }
 
 export async function applyAction(
@@ -36,6 +52,11 @@ export async function applyAction(
   });
   if (!project) return { status: "error", reason: "Project not found." };
 
+  const fields = parseFormSchema(project.formSchema);
+  // Echo what the user submitted on every error path so the form can
+  // re-populate without losing input on validation failure.
+  const submitted = collectAnswers(formData, fields);
+
   // Rate limit by user (5/hr) and IP (20/hr).
   const userLimit = await rateLimit({
     key: `apply:user:${session.user.id}`,
@@ -46,6 +67,7 @@ export async function applyAction(
     return {
       status: "error",
       reason: "Too many submissions. Try again later.",
+      values: submitted,
     };
   }
   const ip = clientIp(await headers());
@@ -58,29 +80,18 @@ export async function applyAction(
     return {
       status: "error",
       reason: "Too many submissions from your network. Try again later.",
+      values: submitted,
     };
-  }
-
-  // Build raw answers from FormData based on the project's current form schema.
-  const fields = parseFormSchema(project.formSchema);
-  const raw: Record<string, unknown> = {};
-  for (const f of fields) {
-    if (f.type === "checkbox") {
-      raw[f.id] = formData.get(f.id) !== null;
-    } else {
-      const v = formData.get(f.id);
-      raw[f.id] = typeof v === "string" ? v : "";
-    }
   }
 
   const result = await submitApplication({
     userId: session.user.id,
     projectId: project.id,
-    rawAnswers: raw,
+    rawAnswers: submitted,
   });
 
   if (!result.ok) {
-    return { status: "error", reason: result.reason };
+    return { status: "error", reason: result.reason, values: submitted };
   }
 
   await notifyAdminsOfNewApplication({ applicationId: result.applicationId });

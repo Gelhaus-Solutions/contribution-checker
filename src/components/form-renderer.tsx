@@ -3,21 +3,28 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 
+export type FormValue = string | boolean | undefined;
+
 export function FormRenderer({
   fields,
   values,
+  onChange,
   disabled,
 }: {
   fields: FormSchema;
-  values?: Record<string, string | boolean | undefined>;
+  values?: Record<string, FormValue>;
+  onChange?: (id: string, value: string | boolean) => void;
   disabled?: boolean;
 }) {
+  const controlled = onChange != null;
   return (
     <div className="space-y-5">
       {fields.map((field) => {
         const inputId = `f_${field.id}`;
         const required = field.required;
         const value = values?.[field.id];
+        const stringValue = typeof value === "string" ? value : "";
+        const boolValue = value === true;
 
         return (
           <div key={field.id} className="space-y-2">
@@ -33,8 +40,13 @@ export function FormRenderer({
                 placeholder={field.placeholder}
                 maxLength={field.maxLength}
                 required={required}
-                defaultValue={typeof value === "string" ? value : ""}
                 disabled={disabled}
+                {...(controlled
+                  ? {
+                      value: stringValue,
+                      onChange: (e) => onChange(field.id, e.target.value),
+                    }
+                  : { defaultValue: stringValue })}
               />
             ) : field.type === "textarea" ? (
               <Textarea
@@ -44,17 +56,27 @@ export function FormRenderer({
                 maxLength={field.maxLength}
                 required={required}
                 rows={4}
-                defaultValue={typeof value === "string" ? value : ""}
                 disabled={disabled}
+                {...(controlled
+                  ? {
+                      value: stringValue,
+                      onChange: (e) => onChange(field.id, e.target.value),
+                    }
+                  : { defaultValue: stringValue })}
               />
             ) : field.type === "select" ? (
               <select
                 id={inputId}
                 name={field.id}
                 required={required}
-                defaultValue={typeof value === "string" ? value : ""}
                 disabled={disabled}
                 className="flex h-9 w-full rounded-md border border-border bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                {...(controlled
+                  ? {
+                      value: stringValue,
+                      onChange: (e) => onChange(field.id, e.target.value),
+                    }
+                  : { defaultValue: stringValue })}
               >
                 <option value="">— select —</option>
                 {field.options.map((o) => (
@@ -70,9 +92,14 @@ export function FormRenderer({
                   name={field.id}
                   type="checkbox"
                   required={required}
-                  defaultChecked={value === true}
                   disabled={disabled}
                   className="h-4 w-4 rounded border-border"
+                  {...(controlled
+                    ? {
+                        checked: boolValue,
+                        onChange: (e) => onChange(field.id, e.target.checked),
+                      }
+                    : { defaultChecked: boolValue })}
                 />
                 <span>{field.helpText ?? "I confirm."}</span>
               </label>
