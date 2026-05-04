@@ -172,6 +172,7 @@ export async function POST(req: Request) {
       qualityConfig: true,
       qualityCommentMin: true,
       prTemplateHoneypots: true,
+      qualityTemplateMatchPct: true,
     },
   });
   if (!project) {

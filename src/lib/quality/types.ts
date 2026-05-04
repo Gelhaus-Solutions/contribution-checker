@@ -49,6 +49,11 @@ export type PrContext = {
     id: string;
     qualityConfig: Record<string, HeuristicSetting>;
     prTemplateHoneypots: string[];
+    /**
+     * Strictness (0–100) for `pr.uses_template` checkbox matching. 100 means
+     * exact substring; lower values tolerate typos and edits via token-overlap.
+     */
+    templateMatchPct: number;
   };
   pr: {
     number: number;

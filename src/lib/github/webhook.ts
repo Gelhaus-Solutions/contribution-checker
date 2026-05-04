@@ -68,6 +68,7 @@ type ProjectForSideEffects = {
   qualityConfig: string;
   qualityCommentMin: number;
   prTemplateHoneypots: string;
+  qualityTemplateMatchPct: number;
   trackWhenDisabled: boolean;
   checkerEnabled: boolean;
 };
@@ -242,6 +243,7 @@ export async function handlePullRequestEvent(payload: WebhookPayload) {
           qualityConfig: true,
           qualityCommentMin: true,
           prTemplateHoneypots: true,
+          qualityTemplateMatchPct: true,
         },
       })
     : null;
