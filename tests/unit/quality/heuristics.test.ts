@@ -334,9 +334,9 @@ describe("registry sanity", () => {
     const ids = ALL_HEURISTICS.map((h) => h.id);
     expect(new Set(ids).size).toBe(ids.length);
   });
-  it("every heuristic has a positive integer weight 1..3", () => {
+  it("every heuristic has a positive integer weight 1..4", () => {
     for (const h of ALL_HEURISTICS) {
-      expect([1, 2, 3]).toContain(h.weight);
+      expect([1, 2, 3, 4]).toContain(h.weight);
     }
   });
 });

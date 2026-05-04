@@ -8,7 +8,7 @@
  * are NOT user-editable.
  */
 
-export type HeuristicSeverity = 1 | 2 | 3; // 1=mild, 2=major, 3=critical
+export type HeuristicSeverity = 1 | 2 | 3 | 4; // 1=mild, 2=major, 3=critical, 4=blocker
 
 export type PrFile = {
   filename: string;
