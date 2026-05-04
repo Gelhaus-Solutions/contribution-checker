@@ -57,6 +57,13 @@ export type PrContext = {
     headSha: string;
     authorLogin: string;
   };
+  /**
+   * Raw contents of the repo's PR template (e.g.
+   * `.github/PULL_REQUEST_TEMPLATE.md`). Null when the repo has none, or
+   * when the template was not fetched (e.g. CI mode without a workflow
+   * update). Heuristics that need it must treat null as "not applicable".
+   */
+  prTemplate: string | null;
   files: PrFile[];
   // True when the file list was truncated (e.g. >300 files); some heuristics
   // should treat this as an automatic size signal.

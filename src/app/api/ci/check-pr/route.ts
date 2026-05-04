@@ -348,6 +348,7 @@ export async function POST(req: Request) {
         headSha: body.pull_request.head.sha,
         authorLogin: body.pull_request.user.login,
       },
+      prTemplate: null,
       files: (body.qualityContext.files ?? []).map((f) => ({
         filename: f.filename,
         status: f.status,

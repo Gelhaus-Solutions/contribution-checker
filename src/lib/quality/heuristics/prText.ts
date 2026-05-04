@@ -34,6 +34,35 @@ const AI_WATERMARK_RE =
 
 const ISSUE_REF_RE = /(?:#\d+|(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#\d+)/i;
 
+const HTML_COMMENT_RE = /<!--[\s\S]*?-->/g;
+
+/**
+ * Extract distinctive lines from a PR template that, if echoed in the body,
+ * indicate the contributor filled in the template instead of writing freeform.
+ * We pick up markdown headings (`# ...`, `## ...`) and checklist items
+ * (`- [ ]`, `* [x]`) — both are common in real templates and unlikely to
+ * appear by coincidence in a fresh body. HTML comments (the typical "delete
+ * this" instruction blocks) are stripped first.
+ */
+export function extractTemplateMarkers(template: string): string[] {
+  const cleaned = template.replace(HTML_COMMENT_RE, "");
+  const out = new Set<string>();
+  for (const rawLine of cleaned.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    if (/^#{1,6}\s+\S/.test(line)) {
+      out.add(line.replace(/^#{1,6}\s+/, "").toLowerCase());
+      continue;
+    }
+    const checkbox = /^[-*]\s+\[[ xX]\]\s+(.+)$/.exec(line);
+    if (checkbox) {
+      const text = checkbox[1].trim();
+      if (text.length >= 4) out.add(text.toLowerCase());
+    }
+  }
+  return Array.from(out);
+}
+
 export const prTextHeuristics: Heuristic[] = [
   {
     id: "pr.body_empty",
@@ -149,6 +178,38 @@ export const prTextHeuristics: Heuristic[] = [
         .filter(Boolean);
       const hit = honeypots.find((h) => body.includes(h));
       return { failed: Boolean(hit), value: hit ?? null };
+    },
+  },
+  {
+    id: "pr.uses_template",
+    group: "pr",
+    label: "PR doesn't use the repo's PR template",
+    description:
+      "Repo ships a PR template (e.g. .github/PULL_REQUEST_TEMPLATE.md) but the body shows no sign of using it — no template headings or checklist items appear. Skipped when the repo has no template.",
+    weight: 3,
+    defaultEnabled: true,
+    run(ctx) {
+      const template = (ctx.prTemplate ?? "").trim();
+      if (template.length === 0) return { failed: false, reason: "No template in repo" };
+      const markers = extractTemplateMarkers(template);
+      if (markers.length === 0) {
+        return { failed: false, reason: "Template has no distinctive markers" };
+      }
+      const body = (ctx.pr.body ?? "").toLowerCase();
+      if (body.length === 0) {
+        return {
+          failed: true,
+          value: `0/${markers.length}`,
+          reason: "Empty body — template not used",
+        };
+      }
+      const matched = markers.filter((m) => body.includes(m));
+      return {
+        failed: matched.length === 0,
+        value: `${matched.length}/${markers.length} markers`,
+        reason:
+          matched.length === 0 ? "No template headings or checklist items in body" : undefined,
+      };
     },
   },
   {

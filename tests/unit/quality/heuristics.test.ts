@@ -16,6 +16,7 @@ function ctx(partial: Partial<PrContext> = {}): PrContext {
       headSha: "abc",
       authorLogin: "alice",
     },
+    prTemplate: null,
     files: [],
     filesTruncated: false,
     commits: [],
@@ -205,6 +206,53 @@ describe("PR text heuristics", () => {
       h.run(ctx({ pr: { ...ctx().pr, body: "Refactored the queue to be lock-free." } }), undefined)
         .failed
     ).toBe(false);
+  });
+
+  it("pr.uses_template skips when the repo has no template", () => {
+    const h = get("pr.uses_template");
+    const r = h.run(ctx({ prTemplate: null }), undefined);
+    expect(r.failed).toBe(false);
+  });
+
+  it("pr.uses_template fires when the body shows no template markers", () => {
+    const h = get("pr.uses_template");
+    const template = `## Description\n\n## Checklist\n- [ ] Tests added\n- [ ] Docs updated\n`;
+    const r = h.run(
+      ctx({
+        prTemplate: template,
+        pr: { ...ctx().pr, body: "Just a freeform note about the change." },
+      }),
+      undefined
+    );
+    expect(r.failed).toBe(true);
+  });
+
+  it("pr.uses_template passes when the body echoes a template marker", () => {
+    const h = get("pr.uses_template");
+    const template = `## Description\n\n## Checklist\n- [ ] Tests added\n`;
+    const r = h.run(
+      ctx({
+        prTemplate: template,
+        pr: {
+          ...ctx().pr,
+          body: "## Description\nAdds the new widget.\n\n## Checklist\n- [x] Tests added",
+        },
+      }),
+      undefined
+    );
+    expect(r.failed).toBe(false);
+  });
+
+  it("pr.uses_template fires on empty body when a template exists", () => {
+    const h = get("pr.uses_template");
+    const r = h.run(
+      ctx({
+        prTemplate: "## Summary\n- [ ] Tested",
+        pr: { ...ctx().pr, body: "" },
+      }),
+      undefined
+    );
+    expect(r.failed).toBe(true);
   });
 
   it("pr.honeypot_hit only fires when a configured honeypot string is in the body", () => {
