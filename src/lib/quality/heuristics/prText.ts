@@ -169,7 +169,7 @@ export const prTextHeuristics: Heuristic[] = [
     label: "Honeypot keyword hit",
     description:
       "PR body contains hidden honeypot text from the project's PR template — typically copy-pasted by AI bots.",
-    weight: 3,
+    weight: 4,
     defaultEnabled: true,
     run(ctx) {
       const body = (ctx.pr.body ?? "").toLowerCase();
@@ -186,7 +186,7 @@ export const prTextHeuristics: Heuristic[] = [
     label: "PR doesn't use the repo's PR template",
     description:
       "Repo ships a PR template (e.g. .github/PULL_REQUEST_TEMPLATE.md) but the body shows no sign of using it — no template headings or checklist items appear. Skipped when the repo has no template.",
-    weight: 3,
+    weight: 4,
     defaultEnabled: true,
     run(ctx) {
       const template = (ctx.prTemplate ?? "").trim();
@@ -218,7 +218,7 @@ export const prTextHeuristics: Heuristic[] = [
     label: "AI watermark phrase",
     description:
       'Body contains a phrase commonly emitted by language models (e.g. "as an AI", "Here is the updated").',
-    weight: 3,
+    weight: 4,
     defaultEnabled: true,
     run(ctx) {
       const body = ctx.pr.body ?? "";

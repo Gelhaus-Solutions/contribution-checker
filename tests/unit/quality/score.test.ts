@@ -95,6 +95,99 @@ describe("computeScore", () => {
     expect(computeScore(signals, config).score).toBe(0); // raw 0%, cap 25 — min wins
   });
 
+  it("caps the score at 50 when one w4 heuristic fires", () => {
+    const config = configWithOnly(
+      "pr.ai_watermark",
+      "size.file_count",
+      "size.line_count",
+      "size.mega_pr"
+    );
+    const signals = {
+      "pr.ai_watermark": { failed: true },
+      "size.file_count": { failed: false },
+      "size.line_count": { failed: false },
+      "size.mega_pr": { failed: false },
+    };
+    expect(computeScore(signals, config).score).toBe(50);
+  });
+
+  it("caps the score at 35 when two w4 heuristics fire", () => {
+    const config = configWithOnly(
+      "pr.ai_watermark",
+      "pr.uses_template",
+      "size.file_count",
+      "size.line_count"
+    );
+    const signals = {
+      "pr.ai_watermark": { failed: true },
+      "pr.uses_template": { failed: true },
+      "size.file_count": { failed: false },
+      "size.line_count": { failed: false },
+    };
+    expect(computeScore(signals, config).score).toBe(35);
+  });
+
+  it("caps the score at 20 when three or more w4 heuristics fire", () => {
+    const config = configWithOnly(
+      "pr.ai_watermark",
+      "pr.uses_template",
+      "pr.honeypot_hit",
+      "size.file_count"
+    );
+    const signals = {
+      "pr.ai_watermark": { failed: true },
+      "pr.uses_template": { failed: true },
+      "pr.honeypot_hit": { failed: true },
+      "size.file_count": { failed: false },
+    };
+    expect(computeScore(signals, config).score).toBe(20);
+  });
+
+  it("further reduces the w4 cap when lower-weight heuristics also fail", () => {
+    // 1 w4 fires (cap 50). Of the non-w4 heuristics, file_count (w2) passes
+    // and line_count (w2) fails — non-w4 pass-rate = 2/4 = 0.5.
+    // Expected score = round(50 * 0.5) = 25.
+    const config = configWithOnly(
+      "pr.ai_watermark",
+      "size.file_count",
+      "size.line_count"
+    );
+    const signals = {
+      "pr.ai_watermark": { failed: true },
+      "size.file_count": { failed: false },
+      "size.line_count": { failed: true },
+    };
+    expect(computeScore(signals, config).score).toBe(25);
+  });
+
+  it("drops to 0 when w4 fires and every lower-weight heuristic fails", () => {
+    const config = configWithOnly(
+      "pr.ai_watermark",
+      "size.file_count",
+      "size.line_count"
+    );
+    const signals = {
+      "pr.ai_watermark": { failed: true },
+      "size.file_count": { failed: true },
+      "size.line_count": { failed: true },
+    };
+    expect(computeScore(signals, config).score).toBe(0);
+  });
+
+  it("keeps the w4 cap as the score when all non-w4 heuristics pass", () => {
+    const config = configWithOnly(
+      "pr.ai_watermark",
+      "size.file_count",
+      "size.line_count"
+    );
+    const signals = {
+      "pr.ai_watermark": { failed: true },
+      "size.file_count": { failed: false },
+      "size.line_count": { failed: false },
+    };
+    expect(computeScore(signals, config).score).toBe(50);
+  });
+
   it("does not apply scoreCap from a passing signal", () => {
     const config = configWithOnly("size.file_count", "size.line_count");
     const signals = {
