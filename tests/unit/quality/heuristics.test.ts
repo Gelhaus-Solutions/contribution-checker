@@ -8,6 +8,7 @@ function ctx(partial: Partial<PrContext> = {}): PrContext {
       id: "p1",
       qualityConfig: {},
       prTemplateHoneypots: [],
+      templateMatchPct: 100,
     },
     pr: {
       number: 1,
@@ -340,7 +341,12 @@ describe("PR text heuristics", () => {
   it("pr.honeypot_hit only fires when a configured honeypot string is in the body", () => {
     const h = get("pr.honeypot_hit");
     const c = ctx({
-      project: { id: "p1", qualityConfig: {}, prTemplateHoneypots: ["bait-token-xyz"] },
+      project: {
+        id: "p1",
+        qualityConfig: {},
+        prTemplateHoneypots: ["bait-token-xyz"],
+        templateMatchPct: 100,
+      },
       pr: { ...ctx().pr, body: "Notes... bait-token-xyz" },
     });
     expect(h.run(c, undefined).failed).toBe(true);

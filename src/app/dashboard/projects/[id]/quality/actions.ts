@@ -13,6 +13,7 @@ const enabledSchema = z.object({
   projectId: z.string().min(1),
   qualityEnabled: z.string().optional(),
   qualityCommentMin: z.coerce.number().int().min(0).max(100),
+  qualityTemplateMatchPct: z.coerce.number().int().min(0).max(100),
   prTemplateHoneypots: z.string().max(8000).optional(),
 });
 
@@ -21,6 +22,7 @@ export async function updateQualityCore(formData: FormData) {
     projectId: formData.get("projectId"),
     qualityEnabled: formData.get("qualityEnabled") ?? undefined,
     qualityCommentMin: formData.get("qualityCommentMin"),
+    qualityTemplateMatchPct: formData.get("qualityTemplateMatchPct"),
     prTemplateHoneypots: formData.get("prTemplateHoneypots") ?? undefined,
   });
   const { session } = await requireProjectRole(parsed.projectId, "ADMIN");
@@ -36,6 +38,7 @@ export async function updateQualityCore(formData: FormData) {
     data: {
       qualityEnabled: !!parsed.qualityEnabled,
       qualityCommentMin: parsed.qualityCommentMin,
+      qualityTemplateMatchPct: parsed.qualityTemplateMatchPct,
       prTemplateHoneypots: JSON.stringify(honeypots),
     },
   });
@@ -120,6 +123,7 @@ export async function backfillQuality(formData: FormData) {
       qualityConfig: true,
       qualityCommentMin: true,
       prTemplateHoneypots: true,
+      qualityTemplateMatchPct: true,
       checkerEnabled: true,
       trackWhenDisabled: true,
     },

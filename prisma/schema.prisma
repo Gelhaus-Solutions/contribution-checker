@@ -124,6 +124,9 @@ model Project {
   // JSON array of strings: hidden honeypot tokens injected into the project's
   // PR template; PRs whose body contains any of these score `pr.honeypot_hit`.
   prTemplateHoneypots String  @default("[]")
+  // Fuzzy match strictness (0–100) for `pr.uses_template` checkbox matching.
+  // 100 = exact substring match; lower = tolerate typos/edits. Default 80.
+  qualityTemplateMatchPct Int @default(80)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

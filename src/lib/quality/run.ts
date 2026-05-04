@@ -29,6 +29,7 @@ type ProjectForQuality = {
   qualityConfig: string;
   qualityCommentMin: number;
   prTemplateHoneypots: string;
+  qualityTemplateMatchPct: number;
   trackWhenDisabled: boolean;
   checkerEnabled: boolean;
 };
@@ -53,6 +54,7 @@ export async function runQualityFromContext(args: {
       id: args.project.id,
       qualityConfig: config,
       prTemplateHoneypots: honeypots,
+      templateMatchPct: args.project.qualityTemplateMatchPct,
     },
     pr: args.fetched.pr,
     prTemplate: args.fetched.prTemplate,
@@ -162,6 +164,7 @@ export async function runQualityForPrCheck(args: {
       id: args.project.id,
       qualityConfig: config,
       prTemplateHoneypots: honeypots,
+      templateMatchPct: args.project.qualityTemplateMatchPct,
     },
     pr: fetched.pr,
     prTemplate: fetched.prTemplate,

@@ -49,6 +49,7 @@ export default async function ProjectQualityPage({
       qualityConfig: true,
       qualityCommentMin: true,
       prTemplateHoneypots: true,
+      qualityTemplateMatchPct: true,
     },
   });
   if (!project) return null;
@@ -109,6 +110,25 @@ export default async function ProjectQualityPage({
                 </p>
               </div>
               <div className="space-y-2">
+                <Label htmlFor="qualityTemplateMatchPct">
+                  Template match strictness (%)
+                </Label>
+                <Input
+                  id="qualityTemplateMatchPct"
+                  name="qualityTemplateMatchPct"
+                  type="number"
+                  min={0}
+                  max={100}
+                  defaultValue={project.qualityTemplateMatchPct}
+                />
+                <p className="text-xs text-muted-foreground">
+                  How strict the <code>pr.uses_template</code> heuristic is
+                  when matching checkbox / heading text against the body.
+                  100 = exact substring; 80 (default) tolerates typos and
+                  edits via word-overlap.
+                </p>
+              </div>
+              <div className="space-y-2 sm:col-span-2">
                 <Label htmlFor="prTemplateHoneypots">PR template honeypots</Label>
                 <Textarea
                   id="prTemplateHoneypots"

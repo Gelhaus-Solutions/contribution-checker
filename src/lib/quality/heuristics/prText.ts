@@ -71,6 +71,37 @@ export function extractTemplateStructure(template: string): TemplateStructure {
   };
 }
 
+/**
+ * Tokenize for fuzzy matching: strip markdown link syntax to plain text,
+ * drop punctuation, collapse whitespace, lowercase, and split into words of
+ * length >= 2. Stop-words and parenthetical asides are kept — what matters
+ * is the proportion of the template's words that survive into the body.
+ */
+function fuzzyTokens(s: string): string[] {
+  const noLinks = s.replace(/\[([^\]]+)\]\([^)]*\)/g, "$1");
+  const lowered = noLinks.toLowerCase();
+  const words = lowered
+    .replace(/[^a-z0-9\s]+/g, " ")
+    .split(/\s+/)
+    .filter((w) => w.length >= 2);
+  return words;
+}
+
+/**
+ * Returns the percentage of the template label's tokens that also appear in
+ * the body's tokens (0–100). 100 means every word of the template label is
+ * present somewhere in the body; lower means progressively more words missing.
+ * Empty templates return 100 (vacuously matched).
+ */
+export function templateLabelMatchPct(label: string, body: string): number {
+  const want = fuzzyTokens(label);
+  if (want.length === 0) return 100;
+  const have = new Set(fuzzyTokens(body));
+  let hits = 0;
+  for (const w of want) if (have.has(w)) hits += 1;
+  return Math.round((hits / want.length) * 100);
+}
+
 /** Extract markdown headings (any level) from the body, lowercased. */
 export function extractBodyHeadings(body: string): string[] {
   const out: string[] = [];
@@ -206,7 +237,7 @@ export const prTextHeuristics: Heuristic[] = [
     group: "pr",
     label: "PR doesn't use the repo's PR template",
     description:
-      "Repo ships a PR template (e.g. .github/PULL_REQUEST_TEMPLATE.md). When the template has checklist items, the body must include them — threshold sets how many checkboxes may be missing (default 0). When the template has no checkboxes, at least one heading must appear. Skipped when the repo has no template.",
+      "Repo ships a PR template (e.g. .github/PULL_REQUEST_TEMPLATE.md). When the template has checklist items, the body must include them — threshold sets how many checkboxes may be missing (default 0). Match strictness is set project-wide (Quality core settings, default 80%). When the template has no checkboxes, at least one heading must appear. Skipped when the repo has no template.",
     weight: 4,
     defaultEnabled: true,
     defaultThreshold: 0,
@@ -218,28 +249,36 @@ export const prTextHeuristics: Heuristic[] = [
       if (headings.length === 0 && checkboxes.length === 0) {
         return { failed: false, reason: "Template has no distinctive markers" };
       }
-      const body = (ctx.pr.body ?? "").toLowerCase();
-      if (body.length === 0) {
+      const body = ctx.pr.body ?? "";
+      const bodyLower = body.toLowerCase();
+      if (body.trim().length === 0) {
         return {
           failed: true,
           value: `0/${checkboxes.length || headings.length}`,
           reason: "Empty body — template not used",
         };
       }
+      const matchPct = Math.max(0, Math.min(100, ctx.project.templateMatchPct));
       if (checkboxes.length > 0) {
         const allowedMissing = asNumber(threshold, 0);
-        const missing = checkboxes.filter((c) => !body.includes(c));
+        const missing = checkboxes.filter((c) => {
+          if (matchPct >= 100) return !bodyLower.includes(c);
+          return templateLabelMatchPct(c, body) < matchPct;
+        });
         const present = checkboxes.length - missing.length;
         const failed = missing.length > allowedMissing;
         return {
           failed,
           value: `${present}/${checkboxes.length} checkboxes`,
           reason: failed
-            ? `${missing.length} required checkbox item${missing.length === 1 ? "" : "s"} missing (max ${allowedMissing})`
+            ? `${missing.length} required checkbox item${missing.length === 1 ? "" : "s"} missing (max ${allowedMissing}, match ≥${matchPct}%)`
             : undefined,
         };
       }
-      const matched = headings.filter((h) => body.includes(h));
+      const matched = headings.filter((h) => {
+        if (matchPct >= 100) return bodyLower.includes(h);
+        return templateLabelMatchPct(h, body) >= matchPct;
+      });
       return {
         failed: matched.length === 0,
         value: `${matched.length}/${headings.length} headings`,
