@@ -19,8 +19,9 @@ Sentry.init({
   environment,
   integrations: [
     Sentry.replayIntegration({
-      maskAllText: true,
-      blockAllMedia: true,
+      maskAllText: false,
+      blockAllMedia: false,
+      maskAllInputs: false,
     }),
     Sentry.browserProfilingIntegration(),
   ],
