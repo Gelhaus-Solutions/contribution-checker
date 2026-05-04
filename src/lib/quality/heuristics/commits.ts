@@ -66,6 +66,7 @@ export const commitHeuristics: Heuristic[] = [
         failed: violators.length > 0,
         value: violators.length,
         reason: violators.length > 0 ? `${violators.length} non-conv commits` : undefined,
+        penaltyPoints: violators.length * 5,
       };
     },
   },
