@@ -11,7 +11,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { SubmitButton } from "@/components/ui/submit-button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { approveAction, denyAction, revokeAction, addNoteAction } from "./actions";
@@ -78,10 +78,17 @@ export default async function ApplicationDetail({
       : [];
   const qualityConfig = parseQualityConfig(app.project.qualityConfig);
   const userPrSummaries = userPrChecks.map((c) => {
-    if (!c.quality) return { repoFullName: c.repo.fullName, prNumber: c.prNumber, score: null as number | null };
+    if (!c.quality)
+      return {
+        prCheckId: c.id,
+        repoFullName: c.repo.fullName,
+        prNumber: c.prNumber,
+        score: null as number | null,
+      };
     const signals = JSON.parse(c.quality.signalsRaw) as SignalsRaw;
     const summary = computeScore(signals, qualityConfig);
     return {
+      prCheckId: c.id,
       repoFullName: c.repo.fullName,
       prNumber: c.prNumber,
       status: c.status,
@@ -219,9 +226,7 @@ export default async function ApplicationDetail({
                     rows={2}
                     placeholder="Welcome aboard…"
                   />
-                  <Button type="submit" variant="success">
-                    Approve
-                  </Button>
+                  <SubmitButton variant="success">Approve</SubmitButton>
                 </form>
                 <form action={denyAction} className="space-y-2">
                   <input type="hidden" name="projectId" value={id} />
@@ -249,9 +254,7 @@ export default async function ApplicationDetail({
                       </span>
                     </span>
                   </label>
-                  <Button type="submit" variant="destructive">
-                    Deny
-                  </Button>
+                  <SubmitButton variant="destructive">Deny</SubmitButton>
                 </form>
               </>
             ) : isApproved ? (
@@ -286,9 +289,7 @@ export default async function ApplicationDetail({
                   Revoking will close any of their currently open PRs across
                   this project&apos;s repos.
                 </p>
-                <Button type="submit" variant="destructive">
-                  Revoke approval
-                </Button>
+                <SubmitButton variant="destructive">Revoke approval</SubmitButton>
               </form>
             ) : (
               <form action={approveAction} className="space-y-2">
@@ -307,9 +308,7 @@ export default async function ApplicationDetail({
                   Re-approving will reopen any PRs that were closed when this
                   application was denied.
                 </p>
-                <Button type="submit" variant="success">
-                  Re-approve
-                </Button>
+                <SubmitButton variant="success">Re-approve</SubmitButton>
               </form>
             )}
           </CardContent>
@@ -344,14 +343,12 @@ export default async function ApplicationDetail({
                       className="px-3 py-2 text-sm"
                     >
                       <div className="flex flex-wrap items-center gap-2">
-                        <a
+                        <Link
                           className="font-mono text-xs underline"
-                          href={`https://github.com/${p.repoFullName}/pull/${p.prNumber}`}
-                          target="_blank"
-                          rel="noreferrer"
+                          href={`/dashboard/projects/${id}/prs?open=${p.prCheckId}`}
                         >
                           {p.repoFullName}#{p.prNumber}
-                        </a>
+                        </Link>
                         <Badge
                           variant={
                             p.score === null
@@ -417,9 +414,9 @@ export default async function ApplicationDetail({
               required
               placeholder="Add a note for the team…"
             />
-            <Button type="submit" size="sm" variant="outline">
+            <SubmitButton size="sm" variant="outline">
               Post note
-            </Button>
+            </SubmitButton>
           </form>
         </CardContent>
       </Card>

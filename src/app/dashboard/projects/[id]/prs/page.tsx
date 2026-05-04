@@ -20,6 +20,7 @@ type SearchParams = {
   closedByApp?: string;
   minScore?: string;
   maxScore?: string;
+  open?: string;
 };
 
 const STATUS_VALUES = ["PENDING", "APPROVED", "DENIED", "BYPASSED"] as const;
@@ -119,6 +120,9 @@ export default async function ProjectPRs({
           repos={repoOptions}
           qualityEnabled={project.qualityEnabled}
           initialFilters={initialFilters}
+          initialOpenId={
+            sp.open && rows.some((r) => r.id === sp.open) ? sp.open : null
+          }
         />
       </CardContent>
     </Card>
