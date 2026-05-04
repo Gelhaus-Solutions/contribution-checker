@@ -112,11 +112,25 @@ export async function setLabels(
   labels: string[]
 ): Promise<void> {
   const octokit = await getInstallationOctokit(ref.installationId);
+  // Preserve any labels not managed by the bot. The bot only ever owns
+  // `contribution:*` labels, so we drop those from the existing set and
+  // re-apply the requested ones — leaving user/team labels untouched.
+  const existing = await octokit
+    .request("GET /repos/{owner}/{repo}/issues/{issue_number}/labels", {
+      owner: ref.owner,
+      repo: ref.repo,
+      issue_number: prNumber,
+      per_page: 100,
+    })
+    .then((r) => r.data.map((l) => l.name))
+    .catch(() => [] as string[]);
+  const preserved = existing.filter((n) => !n.startsWith("contribution:"));
+  const merged = Array.from(new Set([...preserved, ...labels]));
   await octokit.request("PUT /repos/{owner}/{repo}/issues/{issue_number}/labels", {
     owner: ref.owner,
     repo: ref.repo,
     issue_number: prNumber,
-    labels,
+    labels: merged,
   });
 }
 
