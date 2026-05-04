@@ -39,6 +39,17 @@ const schema = z.object({
   SMTP_FROM: z.string().optional(),
 
   LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace"]).default("info"),
+
+  // Sentry — observability. Sample rates are hardcoded to 1.0 in
+  // sentry.server.config.ts / instrumentation-client.ts; the SDK no-ops
+  // when DSN is missing so all of these stay optional.
+  SENTRY_DSN: z.string().url().optional(),
+  NEXT_PUBLIC_SENTRY_DSN: z.string().url().optional(),
+  SENTRY_ENVIRONMENT: z.string().optional(),
+  NEXT_PUBLIC_SENTRY_ENVIRONMENT: z.string().optional(),
+  SENTRY_AUTH_TOKEN: z.string().optional(),
+  SENTRY_ORG: z.string().optional(),
+  SENTRY_PROJECT: z.string().optional(),
 });
 
 // During `next build`, Next.js executes server modules to collect page data
