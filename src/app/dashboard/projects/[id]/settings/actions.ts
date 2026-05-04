@@ -7,10 +7,18 @@ import { requireProjectRole } from "@/lib/authz";
 import { recordAudit } from "@/lib/audit";
 import { slugSchema } from "@/lib/slug";
 import { enqueueProjectWebhook } from "@/lib/notifications/webhooks";
+import {
+  assertSafeOutboundUrl,
+  UnsafeOutboundUrlError,
+} from "@/lib/http/safe-url";
 
 const settingsSchema = z.object({
   projectId: z.string().min(1),
-  name: z.string().min(2).max(80),
+  name: z
+    .string()
+    .min(2)
+    .max(80)
+    .refine((v) => !/[\r\n]/.test(v), "name cannot contain line breaks"),
   slug: slugSchema,
   description: z.string().max(500).optional(),
   cooldownDays: z
@@ -188,6 +196,13 @@ export async function addProjectWebhook(formData: FormData) {
   });
   const { session } = await requireProjectRole(parsed.projectId, "ADMIN");
 
+  try {
+    await assertSafeOutboundUrl(parsed.url);
+  } catch (e) {
+    if (e instanceof UnsafeOutboundUrlError) throw new Error(e.message);
+    throw e;
+  }
+
   await prisma.projectWebhook.create({
     data: {
       projectId: parsed.projectId,
@@ -240,6 +255,13 @@ export async function updateProjectWebhook(formData: FormData) {
   });
   if (!existing || existing.projectId !== parsed.projectId) {
     throw new Error("Webhook endpoint not found");
+  }
+
+  try {
+    await assertSafeOutboundUrl(parsed.url);
+  } catch (e) {
+    if (e instanceof UnsafeOutboundUrlError) throw new Error(e.message);
+    throw e;
   }
 
   await prisma.projectWebhook.update({

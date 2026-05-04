@@ -50,6 +50,11 @@ const schema = z.object({
   SENTRY_AUTH_TOKEN: z.string().optional(),
   SENTRY_ORG: z.string().optional(),
   SENTRY_PROJECT: z.string().optional(),
+  // Sentry CSP/Expect-CT report ingest URL (project Settings → Security
+  // Headers → CSP Reports). When set, included in the response CSP as
+  // `report-uri` / `report-to` so violations stream to Sentry. NOT used for
+  // event/replay uploads (those go to the SDK's transport, separately).
+  SENTRY_CSP_ENDPOINT: z.string().url().optional(),
 });
 
 // During `next build`, Next.js executes server modules to collect page data

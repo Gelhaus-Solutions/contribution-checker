@@ -390,6 +390,20 @@ model WebhookDelivery {
   @@index([status, nextAttemptAt])
 }
 
+// Idempotency record for GitHub webhook deliveries. Keyed on the GitHub
+// `x-github-delivery` UUID. Inserted on first receipt; the unique-constraint
+// violation on retry short-circuits the handler so side effects (audit rows,
+// outbound webhooks, label calls) don't multiply across GitHub's retry policy.
+// Pruned periodically (24h retention is plenty — GitHub retries within a
+// much shorter window).
+model ProcessedWebhookDelivery {
+  id        String   @id
+  eventName String
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}
+
 // In-process job queue persisted to DB (PR close/reopen/comment/label)
 model JobQueue {
   id            String   @id @default(cuid())

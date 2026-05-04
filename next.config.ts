@@ -23,13 +23,67 @@ const config: NextConfig = {
       { protocol: "https", hostname: "avatars.githubusercontent.com" },
     ],
   },
-  // Required for Sentry browser profiling — without this header the profiler
-  // silently no-ops in the browser.
   async headers() {
+    const isHttps = (process.env.PUBLIC_BASE_URL ?? "").startsWith("https://");
+    const cspReportEndpoint = (() => {
+      const raw = process.env.SENTRY_CSP_ENDPOINT;
+      if (!raw) return null;
+      try {
+        return new URL(raw).toString();
+      } catch {
+        return null;
+      }
+    })();
+    const directives = [
+      "default-src 'self'",
+      "img-src 'self' https://avatars.githubusercontent.com data: blob:",
+      "media-src 'self' blob:",
+      "script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:",
+      "worker-src 'self' blob:",
+      "style-src 'self' 'unsafe-inline'",
+      "font-src 'self' data:",
+      "connect-src 'self' https://*.sentry.io https://*.ingest.sentry.io https://*.ingest.us.sentry.io https://*.ingest.de.sentry.io",
+      "frame-ancestors 'none'",
+      "base-uri 'self'",
+      "form-action 'self'",
+      "object-src 'none'",
+    ];
+    if (cspReportEndpoint) {
+      directives.push(`report-uri ${cspReportEndpoint}`);
+      directives.push(`report-to csp-endpoint`);
+    }
+    const csp = directives.join("; ");
     return [
       {
         source: "/:path*",
-        headers: [{ key: "Document-Policy", value: "js-profiling" }],
+        headers: [
+          // Required for Sentry browser profiling.
+          { key: "Document-Policy", value: "js-profiling" },
+          { key: "X-Frame-Options", value: "DENY" },
+          { key: "X-Content-Type-Options", value: "nosniff" },
+          { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+          { key: "Content-Security-Policy", value: csp },
+          ...(cspReportEndpoint
+            ? [
+                {
+                  key: "Report-To",
+                  value: JSON.stringify({
+                    group: "csp-endpoint",
+                    max_age: 10886400,
+                    endpoints: [{ url: cspReportEndpoint }],
+                  }),
+                },
+              ]
+            : []),
+          ...(isHttps
+            ? [
+                {
+                  key: "Strict-Transport-Security",
+                  value: "max-age=63072000; includeSubDomains",
+                },
+              ]
+            : []),
+        ],
       },
     ];
   },
