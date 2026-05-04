@@ -19,6 +19,7 @@ export type FetchedPrContext = {
     headSha: string;
     authorLogin: string;
   };
+  prTemplate: string | null;
   files: PrFile[];
   filesTruncated: boolean;
   commits: PrCommit[];
@@ -30,6 +31,21 @@ const accountCache = new Map<
   { snapshot: AccountSnapshot; expiresAt: number }
 >();
 const ACCOUNT_TTL_MS = 24 * 60 * 60 * 1000;
+
+const templateCache = new Map<
+  string,
+  { template: string | null; expiresAt: number }
+>();
+const TEMPLATE_TTL_MS = 6 * 60 * 60 * 1000;
+
+const TEMPLATE_PATHS = [
+  ".github/PULL_REQUEST_TEMPLATE.md",
+  ".github/pull_request_template.md",
+  "docs/PULL_REQUEST_TEMPLATE.md",
+  "docs/pull_request_template.md",
+  "PULL_REQUEST_TEMPLATE.md",
+  "pull_request_template.md",
+];
 
 /**
  * Fetch everything quality heuristics need from GitHub: PR object, files,
@@ -131,6 +147,10 @@ export async function fetchPrContext(args: {
       })
     : ({ login: "" } as AccountSnapshot);
 
+  const prTemplate = want?.has("pr.uses_template")
+    ? await getPrTemplate({ octokit, owner, repo })
+    : null;
+
   return {
     pr: {
       number: pr.number,
@@ -139,11 +159,46 @@ export async function fetchPrContext(args: {
       headSha: pr.head?.sha ?? "",
       authorLogin,
     },
+    prTemplate,
     files,
     filesTruncated,
     commits,
     account,
   };
+}
+
+async function getPrTemplate(args: {
+  octokit: OctokitLike;
+  owner: string;
+  repo: string;
+}): Promise<string | null> {
+  const key = `${args.owner.toLowerCase()}/${args.repo.toLowerCase()}`;
+  const cached = templateCache.get(key);
+  const now = Date.now();
+  if (cached && cached.expiresAt > now) return cached.template;
+
+  let template: string | null = null;
+  for (const path of TEMPLATE_PATHS) {
+    try {
+      const res = await args.octokit.request(
+        "GET /repos/{owner}/{repo}/contents/{path}",
+        { owner: args.owner, repo: args.repo, path }
+      );
+      const data = res.data as { content?: string; encoding?: string };
+      if (data.content && data.encoding === "base64") {
+        template = Buffer.from(data.content, "base64").toString("utf8");
+        break;
+      }
+    } catch (e) {
+      const status = (e as { status?: number }).status;
+      if (status !== 404) {
+        logger.debug({ err: e, owner: args.owner, repo: args.repo, path }, "pr template fetch failed");
+      }
+    }
+  }
+
+  templateCache.set(key, { template, expiresAt: now + TEMPLATE_TTL_MS });
+  return template;
 }
 
 type OctokitLike = Awaited<ReturnType<typeof getInstallationOctokit>>;
