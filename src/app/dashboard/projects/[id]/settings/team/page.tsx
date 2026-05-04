@@ -13,6 +13,7 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { inviteMember, removeMemberAction, changeRoleAction } from "./actions";
+import { RoleSelect } from "./role-select";
 
 export default async function ProjectTeam({
   params,
@@ -95,15 +96,7 @@ export default async function ProjectTeam({
                       <form action={changeRoleAction}>
                         <input type="hidden" name="projectId" value={id} />
                         <input type="hidden" name="memberId" value={m.id} />
-                        <select
-                          name="role"
-                          defaultValue={m.role}
-                          className="h-7 rounded-md border border-border bg-background px-2 text-xs"
-                          onChange={(e) => e.currentTarget.form?.requestSubmit()}
-                        >
-                          <option value="REVIEWER">Reviewer</option>
-                          <option value="ADMIN">Admin</option>
-                        </select>
+                        <RoleSelect defaultValue={m.role} />
                       </form>
                       <form action={removeMemberAction}>
                         <input type="hidden" name="projectId" value={id} />
