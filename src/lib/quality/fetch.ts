@@ -147,9 +147,10 @@ export async function fetchPrContext(args: {
       })
     : ({ login: "" } as AccountSnapshot);
 
-  const prTemplate = want?.has("pr.uses_template")
-    ? await getPrTemplate({ octokit, owner, repo })
-    : null;
+  const prTemplate =
+    want?.has("pr.uses_template") || want?.has("pr.template_extra_headers")
+      ? await getPrTemplate({ octokit, owner, repo })
+      : null;
 
   return {
     pr: {

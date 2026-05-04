@@ -37,30 +37,50 @@ const ISSUE_REF_RE = /(?:#\d+|(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#\d+)/
 const HTML_COMMENT_RE = /<!--[\s\S]*?-->/g;
 
 /**
- * Extract distinctive lines from a PR template that, if echoed in the body,
- * indicate the contributor filled in the template instead of writing freeform.
- * We pick up markdown headings (`# ...`, `## ...`) and checklist items
- * (`- [ ]`, `* [x]`) — both are common in real templates and unlikely to
- * appear by coincidence in a fresh body. HTML comments (the typical "delete
- * this" instruction blocks) are stripped first.
+ * Extract the structural pieces of a PR template — headings and checklist
+ * items — separately, so heuristics can reason about each. HTML comments
+ * (typical "delete this" instruction blocks) are stripped first.
  */
-export function extractTemplateMarkers(template: string): string[] {
+export type TemplateStructure = {
+  /** Markdown heading text (any level), lowercased and trimmed, deduped. */
+  headings: string[];
+  /** Checkbox label text (`- [ ] X`, `* [x] X`), lowercased, deduped. */
+  checkboxes: string[];
+};
+
+export function extractTemplateStructure(template: string): TemplateStructure {
   const cleaned = template.replace(HTML_COMMENT_RE, "");
-  const out = new Set<string>();
+  const headings = new Set<string>();
+  const checkboxes = new Set<string>();
   for (const rawLine of cleaned.split(/\r?\n/)) {
     const line = rawLine.trim();
     if (!line) continue;
     if (/^#{1,6}\s+\S/.test(line)) {
-      out.add(line.replace(/^#{1,6}\s+/, "").toLowerCase());
+      headings.add(line.replace(/^#{1,6}\s+/, "").toLowerCase());
       continue;
     }
     const checkbox = /^[-*]\s+\[[ xX]\]\s+(.+)$/.exec(line);
     if (checkbox) {
       const text = checkbox[1].trim();
-      if (text.length >= 4) out.add(text.toLowerCase());
+      if (text.length >= 4) checkboxes.add(text.toLowerCase());
     }
   }
-  return Array.from(out);
+  return {
+    headings: Array.from(headings),
+    checkboxes: Array.from(checkboxes),
+  };
+}
+
+/** Extract markdown headings (any level) from the body, lowercased. */
+export function extractBodyHeadings(body: string): string[] {
+  const out: string[] = [];
+  for (const rawLine of body.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    const m = /^#{1,6}\s+(\S.*)$/.exec(line);
+    if (m) out.push(m[1].trim().toLowerCase());
+  }
+  return out;
 }
 
 export const prTextHeuristics: Heuristic[] = [
@@ -186,30 +206,79 @@ export const prTextHeuristics: Heuristic[] = [
     group: "pr",
     label: "PR doesn't use the repo's PR template",
     description:
-      "Repo ships a PR template (e.g. .github/PULL_REQUEST_TEMPLATE.md) but the body shows no sign of using it — no template headings or checklist items appear. Skipped when the repo has no template.",
+      "Repo ships a PR template (e.g. .github/PULL_REQUEST_TEMPLATE.md). When the template has checklist items, the body must include them — threshold sets how many checkboxes may be missing (default 0). When the template has no checkboxes, at least one heading must appear. Skipped when the repo has no template.",
     weight: 4,
     defaultEnabled: true,
-    run(ctx) {
+    defaultThreshold: 0,
+    thresholdKind: "number",
+    run(ctx, threshold) {
       const template = (ctx.prTemplate ?? "").trim();
       if (template.length === 0) return { failed: false, reason: "No template in repo" };
-      const markers = extractTemplateMarkers(template);
-      if (markers.length === 0) {
+      const { headings, checkboxes } = extractTemplateStructure(template);
+      if (headings.length === 0 && checkboxes.length === 0) {
         return { failed: false, reason: "Template has no distinctive markers" };
       }
       const body = (ctx.pr.body ?? "").toLowerCase();
       if (body.length === 0) {
         return {
           failed: true,
-          value: `0/${markers.length}`,
+          value: `0/${checkboxes.length || headings.length}`,
           reason: "Empty body — template not used",
         };
       }
-      const matched = markers.filter((m) => body.includes(m));
+      if (checkboxes.length > 0) {
+        const allowedMissing = asNumber(threshold, 0);
+        const missing = checkboxes.filter((c) => !body.includes(c));
+        const present = checkboxes.length - missing.length;
+        const failed = missing.length > allowedMissing;
+        return {
+          failed,
+          value: `${present}/${checkboxes.length} checkboxes`,
+          reason: failed
+            ? `${missing.length} required checkbox item${missing.length === 1 ? "" : "s"} missing (max ${allowedMissing})`
+            : undefined,
+        };
+      }
+      const matched = headings.filter((h) => body.includes(h));
       return {
         failed: matched.length === 0,
-        value: `${matched.length}/${markers.length} markers`,
-        reason:
-          matched.length === 0 ? "No template headings or checklist items in body" : undefined,
+        value: `${matched.length}/${headings.length} headings`,
+        reason: matched.length === 0 ? "No template headings in body" : undefined,
+      };
+    },
+  },
+  {
+    id: "pr.template_extra_headers",
+    group: "pr",
+    label: "Body adds too many extra headers beyond the template",
+    description:
+      "Counts headers in the body whose text doesn't appear in the repo's PR template. Threshold is the maximum number of extra headers admins allow (default 0). Skipped when the repo has no template.",
+    weight: 3,
+    defaultEnabled: true,
+    defaultThreshold: 0,
+    thresholdKind: "number",
+    run(ctx, threshold) {
+      const template = (ctx.prTemplate ?? "").trim();
+      if (template.length === 0) return { failed: false, reason: "No template in repo" };
+      const { headings } = extractTemplateStructure(template);
+      if (headings.length === 0) {
+        return { failed: false, reason: "Template has no headings" };
+      }
+      const max = asNumber(threshold, 0);
+      const allowed = new Set(headings);
+      const bodyHeadings = extractBodyHeadings(ctx.pr.body ?? "");
+      let extra = 0;
+      for (const h of bodyHeadings) {
+        if (!allowed.has(h)) extra += 1;
+      }
+      const failed = extra > max;
+      return {
+        failed,
+        value: extra,
+        reason: failed
+          ? `${extra} extra header${extra === 1 ? "" : "s"} (>${max})`
+          : undefined,
+        penaltyPoints: failed ? extra - max : 0,
       };
     },
   },
