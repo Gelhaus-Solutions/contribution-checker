@@ -30,27 +30,45 @@ describe("computeScore", () => {
     expect(summary.passedIds.length).toBe(2);
   });
 
-  it("returns 0 when all enabled heuristics failed", () => {
+  it("deducts weight*10 per failed non-w4 heuristic", () => {
+    // Two w2 heuristics fail → 100 - 2*10 - 2*10 = 60.
     const config = configWithOnly("size.file_count", "size.line_count");
     const signals = {
       "size.file_count": { failed: true },
       "size.line_count": { failed: true },
     };
     const summary = computeScore(signals, config);
-    expect(summary.score).toBe(0);
+    expect(summary.score).toBe(60);
     expect(summary.failedIds.length).toBe(2);
   });
 
-  it("uses heuristic weight, not equal-weight", () => {
+  it("scales penalty by heuristic weight, not equal-weight", () => {
     // size.mega_pr is weight 3; size.file_count is weight 2.
-    // Pass mega_pr, fail file_count → earned=3, total=5 → 60%.
+    // Pass mega_pr, fail file_count → 100 - 2*10 = 80.
     const config = configWithOnly("size.file_count", "size.mega_pr");
     const signals = {
       "size.file_count": { failed: true },
       "size.mega_pr": { failed: false },
     };
     const summary = computeScore(signals, config);
-    expect(summary.score).toBe(60);
+    expect(summary.score).toBe(80);
+  });
+
+  it("floors at 0 when accumulated deductions exceed the ceiling", () => {
+    // 4x w3 fails = -120. score = max(0, 100 - 120) = 0.
+    const config = configWithOnly(
+      "size.mega_pr",
+      "size.trivial_patch",
+      "code.lockfile_only",
+      "account.mass_forking"
+    );
+    const signals = {
+      "size.mega_pr": { failed: true },
+      "size.trivial_patch": { failed: true },
+      "code.lockfile_only": { failed: true },
+      "account.mass_forking": { failed: true },
+    };
+    expect(computeScore(signals, config).score).toBe(0);
   });
 
   it("ignores heuristics that have no recorded signal even if enabled", () => {
@@ -75,15 +93,15 @@ describe("computeScore", () => {
     expect(summary.failedIds).toEqual([]);
   });
 
-  it("applies scoreCap from a failed signal", () => {
-    // size.line_count fails (weight 2) — pre-cap score = 60% (3/5).
-    // size.mega_pr passes (weight 3). Cap from line_count signal = 25.
+  it("applies scoreCap from a failed signal as a ceiling, then deducts", () => {
+    // line_count(w2) fails with cap 25. mega_pr(w3) passes.
+    // ceiling = 25, deductions = 2*10 = 20 → score = 5.
     const config = configWithOnly("size.line_count", "size.mega_pr");
     const signals = {
       "size.line_count": { failed: true, scoreCap: 25 },
       "size.mega_pr": { failed: false },
     };
-    expect(computeScore(signals, config).score).toBe(25);
+    expect(computeScore(signals, config).score).toBe(5);
   });
 
   it("takes the lowest cap when multiple failed signals set one", () => {
@@ -92,7 +110,8 @@ describe("computeScore", () => {
       "size.file_count": { failed: true, scoreCap: 50 },
       "size.line_count": { failed: true, scoreCap: 25 },
     };
-    expect(computeScore(signals, config).score).toBe(0); // raw 0%, cap 25 — min wins
+    // ceiling = min(50, 25) = 25; deductions = 4*10 = 40 → max(0, -15) = 0.
+    expect(computeScore(signals, config).score).toBe(0);
   });
 
   it("caps the score at 50 when one w4 heuristic fires", () => {
@@ -144,9 +163,7 @@ describe("computeScore", () => {
   });
 
   it("further reduces the w4 cap when lower-weight heuristics also fail", () => {
-    // 1 w4 fires (cap 50). Of the non-w4 heuristics, file_count (w2) passes
-    // and line_count (w2) fails — non-w4 pass-rate = 2/4 = 0.5.
-    // Expected score = round(50 * 0.5) = 25.
+    // 1 w4 fires → ceiling = 50. line_count(w2) also fails → -20. score = 30.
     const config = configWithOnly(
       "pr.ai_watermark",
       "size.file_count",
@@ -157,19 +174,22 @@ describe("computeScore", () => {
       "size.file_count": { failed: false },
       "size.line_count": { failed: true },
     };
-    expect(computeScore(signals, config).score).toBe(25);
+    expect(computeScore(signals, config).score).toBe(30);
   });
 
-  it("drops to 0 when w4 fires and every lower-weight heuristic fails", () => {
+  it("drops to 0 when w4 fires and enough lower-weight heuristics fail to exhaust the cap", () => {
+    // ceiling = 50. Three w2 fails = -60 → max(0, -10) = 0.
     const config = configWithOnly(
       "pr.ai_watermark",
       "size.file_count",
-      "size.line_count"
+      "size.line_count",
+      "code.test_to_code_ratio"
     );
     const signals = {
       "pr.ai_watermark": { failed: true },
       "size.file_count": { failed: true },
       "size.line_count": { failed: true },
+      "code.test_to_code_ratio": { failed: true },
     };
     expect(computeScore(signals, config).score).toBe(0);
   });
@@ -195,5 +215,33 @@ describe("computeScore", () => {
       "size.line_count": { failed: false },
     };
     expect(computeScore(signals, config).score).toBe(100);
+  });
+
+  it("scores PRs with multiple small fails meaningfully below 100", () => {
+    // Real-world scenario: 4 minor-to-medium fails should not score 92%.
+    // body_inline_code_refs(w1) + commit.author_mismatch(w2) +
+    // commit.conv_commits(w1) + account.no_email(w1) →
+    // deductions = 10 + 20 + 10 + 10 = 50. score = 50.
+    const config = configWithOnly(
+      "pr.body_inline_code_refs",
+      "commit.author_mismatch",
+      "commit.conv_commits",
+      "account.no_email",
+      "size.file_count",
+      "size.line_count",
+      "pr.body_empty",
+      "pr.title_vague"
+    );
+    const signals = {
+      "pr.body_inline_code_refs": { failed: true },
+      "commit.author_mismatch": { failed: true },
+      "commit.conv_commits": { failed: true },
+      "account.no_email": { failed: true },
+      "size.file_count": { failed: false },
+      "size.line_count": { failed: false },
+      "pr.body_empty": { failed: false },
+      "pr.title_vague": { failed: false },
+    };
+    expect(computeScore(signals, config).score).toBe(50);
   });
 });
