@@ -9,7 +9,9 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
   updateProjectSettings,
-  updateWebhookSettings,
+  addProjectWebhook,
+  updateProjectWebhook,
+  deleteProjectWebhook,
   sendTestWebhook,
   updateLabelSettings,
   updateBypassSettings,
@@ -27,11 +29,17 @@ export default async function ProjectSettings({
   const project = await prisma.project.findUnique({ where: { id } });
   if (!project) return null;
 
-  const recentDeliveries = await prisma.webhookDelivery.findMany({
-    where: { projectId: id },
-    orderBy: { createdAt: "desc" },
-    take: 5,
-  });
+  const [recentDeliveries, webhookEndpoints] = await Promise.all([
+    prisma.webhookDelivery.findMany({
+      where: { projectId: id },
+      orderBy: { createdAt: "desc" },
+      take: 5,
+    }),
+    prisma.projectWebhook.findMany({
+      where: { projectId: id },
+      orderBy: { createdAt: "asc" },
+    }),
+  ]);
 
   const bypassHandles = (() => {
     try {
@@ -274,46 +282,181 @@ export default async function ProjectSettings({
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Outbound webhook</CardTitle>
+          <CardTitle className="text-base">Outbound webhooks</CardTitle>
           <CardDescription>
-            Receive a JSON POST on application + PR events. Payloads are signed
-            with HMAC-SHA256 in the <code>X-ContribCheck-Signature</code> header.
+            Fan out application + PR events to one or more endpoints. Generic
+            endpoints receive a JSON POST signed with HMAC-SHA256 in{" "}
+            <code>X-ContribCheck-Signature</code>. Discord endpoints receive a
+            Discord-formatted message; paste the channel webhook URL.
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <form action={updateWebhookSettings} className="space-y-3">
+        <CardContent className="space-y-6">
+          {webhookEndpoints.length > 0 && (
+            <ul className="space-y-3">
+              {webhookEndpoints.map((ep) => (
+                <li
+                  key={ep.id}
+                  className="rounded-md border border-border p-3"
+                >
+                  <form
+                    action={updateProjectWebhook}
+                    className="grid grid-cols-1 gap-3 md:grid-cols-2"
+                  >
+                    <input type="hidden" name="projectId" value={project.id} />
+                    <input type="hidden" name="endpointId" value={ep.id} />
+                    <div className="space-y-1">
+                      <Label htmlFor={`name-${ep.id}`}>Name (optional)</Label>
+                      <Input
+                        id={`name-${ep.id}`}
+                        name="name"
+                        defaultValue={ep.name ?? ""}
+                        placeholder="e.g. #contributions"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor={`kind-${ep.id}`}>Type</Label>
+                      <select
+                        id={`kind-${ep.id}`}
+                        name="kind"
+                        defaultValue={ep.kind}
+                        className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm"
+                      >
+                        <option value="generic">Generic JSON</option>
+                        <option value="discord">Discord</option>
+                      </select>
+                    </div>
+                    <div className="space-y-1 md:col-span-2">
+                      <Label htmlFor={`url-${ep.id}`}>URL</Label>
+                      <Input
+                        id={`url-${ep.id}`}
+                        name="url"
+                        type="url"
+                        required
+                        defaultValue={ep.url}
+                      />
+                    </div>
+                    <div className="space-y-1 md:col-span-2">
+                      <Label htmlFor={`secret-${ep.id}`}>
+                        Secret (generic only — used to sign payloads)
+                      </Label>
+                      <Input
+                        id={`secret-${ep.id}`}
+                        name="secret"
+                        defaultValue={ep.secret ?? ""}
+                        placeholder="random-string-you-also-store-on-receiver"
+                      />
+                    </div>
+                    <label className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        name="enabled"
+                        defaultChecked={ep.enabled}
+                      />
+                      Enabled
+                    </label>
+                    <div className="flex flex-wrap items-center justify-end gap-2">
+                      <Button type="submit" size="sm">
+                        Save
+                      </Button>
+                    </div>
+                  </form>
+                  <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-border pt-3">
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <Badge variant={ep.enabled ? "success" : "warning"}>
+                        {ep.enabled ? "active" : "disabled"}
+                      </Badge>
+                      <span className="font-mono">{ep.kind}</span>
+                    </div>
+                    <div className="flex gap-2">
+                      <form action={sendTestWebhook}>
+                        <input
+                          type="hidden"
+                          name="projectId"
+                          value={project.id}
+                        />
+                        <input
+                          type="hidden"
+                          name="endpointId"
+                          value={ep.id}
+                        />
+                        <Button type="submit" variant="outline" size="sm">
+                          Send test
+                        </Button>
+                      </form>
+                      <form action={deleteProjectWebhook}>
+                        <input
+                          type="hidden"
+                          name="projectId"
+                          value={project.id}
+                        />
+                        <input
+                          type="hidden"
+                          name="endpointId"
+                          value={ep.id}
+                        />
+                        <Button
+                          type="submit"
+                          variant="outline"
+                          size="sm"
+                        >
+                          Delete
+                        </Button>
+                      </form>
+                    </div>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          <form
+            action={addProjectWebhook}
+            className="grid grid-cols-1 gap-3 rounded-md border border-dashed border-border p-3 md:grid-cols-2"
+          >
             <input type="hidden" name="projectId" value={project.id} />
-            <div className="space-y-2">
-              <Label htmlFor="webhookUrl">URL</Label>
+            <div className="space-y-1">
+              <Label htmlFor="new-name">Name (optional)</Label>
+              <Input id="new-name" name="name" placeholder="e.g. ops Slack" />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="new-kind">Type</Label>
+              <select
+                id="new-kind"
+                name="kind"
+                defaultValue="generic"
+                className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm"
+              >
+                <option value="generic">Generic JSON</option>
+                <option value="discord">Discord</option>
+              </select>
+            </div>
+            <div className="space-y-1 md:col-span-2">
+              <Label htmlFor="new-url">URL</Label>
               <Input
-                id="webhookUrl"
-                name="webhookUrl"
+                id="new-url"
+                name="url"
                 type="url"
-                defaultValue={project.webhookUrl ?? ""}
-                placeholder="https://your-server.example/hook"
+                required
+                placeholder="https://your-server.example/hook  or  https://discord.com/api/webhooks/..."
               />
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="webhookSecret">Secret (used to sign payloads)</Label>
+            <div className="space-y-1 md:col-span-2">
+              <Label htmlFor="new-secret">
+                Secret (generic only — leave blank for Discord)
+              </Label>
               <Input
-                id="webhookSecret"
-                name="webhookSecret"
-                defaultValue={project.webhookSecret ?? ""}
+                id="new-secret"
+                name="secret"
                 placeholder="random-string-you-also-store-on-receiver"
               />
             </div>
-            <div className="flex gap-2">
-              <Button type="submit">Save webhook</Button>
+            <div className="flex md:col-span-2">
+              <Button type="submit" size="sm">
+                Add endpoint
+              </Button>
             </div>
           </form>
-          {project.webhookUrl && (
-            <form action={sendTestWebhook}>
-              <input type="hidden" name="projectId" value={project.id} />
-              <Button type="submit" variant="outline" size="sm">
-                Send test event
-              </Button>
-            </form>
-          )}
+
           {recentDeliveries.length > 0 && (
             <div className="space-y-2">
               <h4 className="text-xs font-medium text-muted-foreground">
@@ -338,6 +481,9 @@ export default async function ProjectSettings({
                         {d.status}
                       </Badge>
                       <span className="font-mono">{d.event}</span>
+                      <span className="text-muted-foreground">
+                        ({d.kind})
+                      </span>
                       {d.responseCode != null && (
                         <span className="text-muted-foreground">
                           → {d.responseCode}
