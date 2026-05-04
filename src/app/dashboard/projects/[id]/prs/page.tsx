@@ -14,6 +14,7 @@ import { PrsList, type PrRow, type RepoOption } from "./prs-list";
 
 type SearchParams = {
   author?: string;
+  prNumber?: string;
   status?: string;
   repo?: string;
   closedByApp?: string;
@@ -91,6 +92,7 @@ export default async function ProjectPRs({
 
   const initialFilters = {
     author: sp.author ?? "",
+    prNumber: (sp.prNumber ?? "").replace(/[^0-9]/g, ""),
     status: STATUS_VALUES.includes(sp.status as (typeof STATUS_VALUES)[number])
       ? (sp.status as (typeof STATUS_VALUES)[number])
       : ("ALL" as const),
