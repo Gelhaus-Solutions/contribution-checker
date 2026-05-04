@@ -9,6 +9,7 @@ import {
   rescanPrQuality,
   reEvaluatePrs,
   type PrOverview,
+  type PrOverviewHeuristic,
 } from "./actions";
 
 export type PrStatus = "PENDING" | "APPROVED" | "DENIED" | "BYPASSED";
@@ -58,16 +59,18 @@ export function PrsList({
   repos,
   qualityEnabled,
   initialFilters,
+  initialOpenId,
 }: {
   projectId: string;
   rows: PrRow[];
   repos: RepoOption[];
   qualityEnabled: boolean;
   initialFilters: Filters;
+  initialOpenId?: string | null;
 }) {
   const [filters, setFilters] = useState<Filters>(initialFilters);
   const [page, setPage] = useState(1);
-  const [openId, setOpenId] = useState<string | null>(null);
+  const [openId, setOpenId] = useState<string | null>(initialOpenId ?? null);
 
   const filtered = useMemo(() => {
     const author = filters.author.trim().toLowerCase();
@@ -647,42 +650,7 @@ function PrOverviewDialog({
                       {data.quality.filesTruncated && " (truncated)"} •{" "}
                       {data.quality.commits} commit(s)
                     </div>
-                    <ul className="mt-3 space-y-1 text-xs">
-                      {data.quality.heuristics
-                        .filter((h) => h.enabled || h.ran)
-                        .sort((a, b) => {
-                          if (a.failed !== b.failed) return a.failed ? -1 : 1;
-                          return b.weight - a.weight;
-                        })
-                        .map((h) => (
-                          <li
-                            key={h.id}
-                            className="flex flex-wrap items-center gap-2"
-                          >
-                            <Badge
-                              variant={
-                                !h.ran
-                                  ? "outline"
-                                  : h.failed
-                                    ? "destructive"
-                                    : "success"
-                              }
-                              className="text-[10px]"
-                            >
-                              {!h.ran ? "off" : h.failed ? "fail" : "pass"}
-                            </Badge>
-                            <span className="font-medium">{h.label}</span>
-                            <span className="text-[10px] text-muted-foreground">
-                              w{h.weight} • {h.group}
-                            </span>
-                            {h.reason && (
-                              <span className="text-[11px] text-muted-foreground">
-                                — {h.reason}
-                              </span>
-                            )}
-                          </li>
-                        ))}
-                    </ul>
+                    <HeuristicsList heuristics={data.quality.heuristics} />
                   </div>
                 )}
               </section>
@@ -758,5 +726,75 @@ function Field({
       <dt className="text-[10px] uppercase text-muted-foreground">{label}</dt>
       <dd className={mono ? "font-mono text-xs" : "text-xs"}>{value}</dd>
     </div>
+  );
+}
+
+function HeuristicsList({ heuristics }: { heuristics: PrOverviewHeuristic[] }) {
+  const [showPassed, setShowPassed] = useState(false);
+
+  const ran = heuristics.filter((h) => h.ran);
+  const failed = ran
+    .filter((h) => h.failed)
+    .sort((a, b) => b.weight - a.weight);
+  const passed = ran
+    .filter((h) => !h.failed)
+    .sort((a, b) => b.weight - a.weight);
+
+  if (ran.length === 0) {
+    return (
+      <p className="mt-3 text-xs text-muted-foreground">
+        No heuristics ran for this PR.
+      </p>
+    );
+  }
+
+  return (
+    <div className="mt-3 space-y-2">
+      {failed.length > 0 && (
+        <ul className="space-y-1 text-xs">
+          {failed.map((h) => (
+            <HeuristicRow key={h.id} h={h} />
+          ))}
+        </ul>
+      )}
+      {passed.length > 0 && (
+        <div>
+          <button
+            type="button"
+            onClick={() => setShowPassed((v) => !v)}
+            className="text-[11px] text-muted-foreground hover:text-foreground"
+          >
+            {showPassed ? "▾" : "▸"} {passed.length} passing
+          </button>
+          {showPassed && (
+            <ul className="mt-1 space-y-1 text-xs">
+              {passed.map((h) => (
+                <HeuristicRow key={h.id} h={h} />
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function HeuristicRow({ h }: { h: PrOverviewHeuristic }) {
+  return (
+    <li className="flex flex-wrap items-center gap-2">
+      <Badge
+        variant={h.failed ? "destructive" : "success"}
+        className="text-[10px]"
+      >
+        {h.failed ? "fail" : "pass"}
+      </Badge>
+      <span className="font-medium">{h.label}</span>
+      <span className="text-[10px] text-muted-foreground">
+        w{h.weight} • {h.group}
+      </span>
+      {h.reason && (
+        <span className="text-[11px] text-muted-foreground">— {h.reason}</span>
+      )}
+    </li>
   );
 }

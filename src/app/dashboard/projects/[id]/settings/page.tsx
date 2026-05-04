@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
+import { SubmitButton } from "@/components/ui/submit-button";
 import { Badge } from "@/components/ui/badge";
 import {
   updateProjectSettings,
@@ -93,7 +94,7 @@ export default async function ProjectSettings({
                 Whether resubmitting is allowed at all is a per-denial choice in the deny dialog.
               </p>
             </div>
-            <Button type="submit">Save</Button>
+            <SubmitButton>Save</SubmitButton>
           </form>
         </CardContent>
       </Card>
@@ -172,7 +173,7 @@ export default async function ProjectSettings({
                 </span>
               </span>
             </label>
-            <Button type="submit">Save gating</Button>
+            <SubmitButton>Save gating</SubmitButton>
           </form>
         </CardContent>
       </Card>
@@ -209,7 +210,7 @@ export default async function ProjectSettings({
               />
               Also auto-bypass repository collaborators (checked via GitHub API)
             </label>
-            <Button type="submit">Save bypass settings</Button>
+            <SubmitButton>Save bypass settings</SubmitButton>
           </form>
         </CardContent>
       </Card>
@@ -275,7 +276,7 @@ export default async function ProjectSettings({
                 after processing &mdash; even when labels are otherwise off.
               </p>
             </div>
-            <Button type="submit">Save labels</Button>
+            <SubmitButton>Save labels</SubmitButton>
           </form>
         </CardContent>
       </Card>
@@ -355,9 +356,7 @@ export default async function ProjectSettings({
                       Enabled
                     </label>
                     <div className="flex flex-wrap items-center justify-end gap-2">
-                      <Button type="submit" size="sm">
-                        Save
-                      </Button>
+                      <SubmitButton size="sm">Save</SubmitButton>
                     </div>
                   </form>
                   <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-border pt-3">
@@ -379,9 +378,9 @@ export default async function ProjectSettings({
                           name="endpointId"
                           value={ep.id}
                         />
-                        <Button type="submit" variant="outline" size="sm">
+                        <SubmitButton variant="outline" size="sm">
                           Send test
-                        </Button>
+                        </SubmitButton>
                       </form>
                       <form action={deleteProjectWebhook}>
                         <input
@@ -394,13 +393,9 @@ export default async function ProjectSettings({
                           name="endpointId"
                           value={ep.id}
                         />
-                        <Button
-                          type="submit"
-                          variant="outline"
-                          size="sm"
-                        >
+                        <SubmitButton variant="outline" size="sm">
                           Delete
-                        </Button>
+                        </SubmitButton>
                       </form>
                     </div>
                   </div>
@@ -451,9 +446,7 @@ export default async function ProjectSettings({
               />
             </div>
             <div className="flex md:col-span-2">
-              <Button type="submit" size="sm">
-                Add endpoint
-              </Button>
+              <SubmitButton size="sm">Add endpoint</SubmitButton>
             </div>
           </form>
 
