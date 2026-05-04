@@ -1,9 +1,22 @@
 import * as Sentry from "@sentry/nextjs";
 
+// Read from the runtime-injected window.__ENV__ first (set by the
+// RuntimeEnvScript in the root layout from server-side process.env at request
+// time), then fall back to build-time NEXT_PUBLIC_* if any. This lets a
+// single Docker image be deployed with per-environment Sentry config.
+const runtimeEnv =
+  typeof window !== "undefined" ? window.__ENV__ ?? {} : {};
+
+const dsn =
+  runtimeEnv.SENTRY_DSN ?? process.env.NEXT_PUBLIC_SENTRY_DSN ?? undefined;
+const environment =
+  runtimeEnv.SENTRY_ENVIRONMENT ??
+  process.env.NEXT_PUBLIC_SENTRY_ENVIRONMENT ??
+  process.env.NODE_ENV;
+
 Sentry.init({
-  dsn: process.env.NEXT_PUBLIC_SENTRY_DSN,
-  environment:
-    process.env.NEXT_PUBLIC_SENTRY_ENVIRONMENT ?? process.env.NODE_ENV,
+  dsn,
+  environment,
   integrations: [
     Sentry.replayIntegration({
       maskAllText: true,
@@ -20,19 +33,19 @@ Sentry.init({
   debug: process.env.NODE_ENV !== "production",
 });
 
-if (!process.env.NEXT_PUBLIC_SENTRY_DSN) {
-  console.warn(
-    "[instrumentation-client] NEXT_PUBLIC_SENTRY_DSN is not set — browser SDK is no-op",
-  );
-}
+console.info(
+  "[instrumentation-client] dsn =",
+  dsn
+    ? `${dsn.slice(0, 12)}…(len=${dsn.length})`
+    : "<undefined — neither window.__ENV__ nor NEXT_PUBLIC_SENTRY_DSN was set>",
+  "env =",
+  environment ?? "<unset>",
+);
 
 Sentry.getGlobalScope().setAttributes({
   "service.name": "contribution-checker",
   "service.runtime": "browser",
-  "deploy.env":
-    process.env.NEXT_PUBLIC_SENTRY_ENVIRONMENT ??
-    process.env.NODE_ENV ??
-    "unknown",
+  "deploy.env": environment ?? "unknown",
 });
 
 export const onRouterTransitionStart = Sentry.captureRouterTransitionStart;

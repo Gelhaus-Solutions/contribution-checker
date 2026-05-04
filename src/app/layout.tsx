@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { RuntimeEnvScript } from "./runtime-env";
 
 export const metadata: Metadata = {
   title: "Contribution Checker",
@@ -13,6 +14,9 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
+      <head>
+        <RuntimeEnvScript />
+      </head>
       <body className="min-h-screen antialiased">{children}</body>
     </html>
   );
