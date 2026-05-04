@@ -13,10 +13,29 @@ export const baseFieldSchema = z.object({
   helpText: z.string().max(500).optional(),
 });
 
+const urlPatternSchema = z
+  .object({
+    pattern: z.string().min(1).max(500).refine(
+      (s) => {
+        try {
+          new RegExp(s);
+          return true;
+        } catch {
+          return false;
+        }
+      },
+      { message: "must be a valid regular expression" }
+    ),
+    mode: z.enum(["must-match", "must-not-match"]).default("must-match"),
+    message: z.string().max(200).optional(),
+  })
+  .optional();
+
 export const textFieldSchema = baseFieldSchema.extend({
   type: z.enum(["text", "textarea", "url"]),
   placeholder: z.string().max(120).optional(),
   maxLength: z.number().int().positive().max(10000).optional(),
+  urlPattern: urlPatternSchema,
 });
 
 export const selectFieldSchema = baseFieldSchema.extend({
@@ -67,10 +86,25 @@ export function buildAnswersSchema(fields: FormSchema) {
         s = z.string().max(f.maxLength ?? 4000);
         if (f.required) s = (s as z.ZodString).min(1, "required");
         break;
-      case "url":
-        s = z.string().url();
+      case "url": {
+        let urlString: z.ZodTypeAny = z.string().url();
+        if (f.urlPattern) {
+          const re = new RegExp(f.urlPattern.pattern);
+          const mustMatch = f.urlPattern.mode !== "must-not-match";
+          const msg =
+            f.urlPattern.message ??
+            (mustMatch
+              ? "URL does not match the required pattern"
+              : "URL matches a disallowed pattern");
+          urlString = (urlString as z.ZodString).refine(
+            (v) => (mustMatch ? re.test(v) : !re.test(v)),
+            { message: msg }
+          );
+        }
+        s = urlString;
         if (!f.required) s = s.optional().or(z.literal(""));
         break;
+      }
       case "select":
         s = z.enum(f.options.map((o) => o.value) as [string, ...string[]]);
         if (!f.required) s = s.optional();

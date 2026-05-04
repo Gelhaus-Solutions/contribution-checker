@@ -191,6 +191,78 @@ export function FormBuilder({
                 </div>
               )}
 
+              {f.type === "url" && (
+                <div className="space-y-3 rounded-md border border-dashed border-border p-3">
+                  <Label className="text-xs">URL pattern (optional)</Label>
+                  <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
+                    <div className="space-y-1">
+                      <Label className="text-xs text-muted-foreground">
+                        Regular expression
+                      </Label>
+                      <Input
+                        value={f.urlPattern?.pattern ?? ""}
+                        placeholder="^https://github\\.com/"
+                        onChange={(e) => {
+                          const pattern = e.target.value;
+                          if (!pattern) {
+                            updateField(i, { urlPattern: undefined });
+                            return;
+                          }
+                          updateField(i, {
+                            urlPattern: {
+                              pattern,
+                              mode: f.urlPattern?.mode ?? "must-match",
+                              message: f.urlPattern?.message,
+                            },
+                          });
+                        }}
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs text-muted-foreground">Mode</Label>
+                      <select
+                        className="flex h-9 w-full rounded-md border border-border bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
+                        value={f.urlPattern?.mode ?? "must-match"}
+                        disabled={!f.urlPattern?.pattern}
+                        onChange={(e) => {
+                          if (!f.urlPattern?.pattern) return;
+                          updateField(i, {
+                            urlPattern: {
+                              ...f.urlPattern,
+                              mode: e.target.value as
+                                | "must-match"
+                                | "must-not-match",
+                            },
+                          });
+                        }}
+                      >
+                        <option value="must-match">Must match</option>
+                        <option value="must-not-match">Must not match</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">
+                      Validation message (optional)
+                    </Label>
+                    <Input
+                      value={f.urlPattern?.message ?? ""}
+                      disabled={!f.urlPattern?.pattern}
+                      placeholder="Must be a GitHub URL"
+                      onChange={(e) => {
+                        if (!f.urlPattern?.pattern) return;
+                        updateField(i, {
+                          urlPattern: {
+                            ...f.urlPattern,
+                            message: e.target.value || undefined,
+                          },
+                        });
+                      }}
+                    />
+                  </div>
+                </div>
+              )}
+
               {f.type === "select" && (
                 <div className="space-y-2">
                   <Label className="text-xs">Options (one per line, value|label)</Label>
