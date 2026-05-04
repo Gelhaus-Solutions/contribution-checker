@@ -3,6 +3,11 @@ import type { Heuristic } from "@/lib/quality/types";
 const asNumber = (v: unknown, fallback: number): number =>
   typeof v === "number" && Number.isFinite(v) ? v : fallback;
 
+const asStringList = (v: unknown, fallback: string[]): string[] =>
+  Array.isArray(v) && v.every((s) => typeof s === "string")
+    ? (v as string[])
+    : fallback;
+
 const CONV_COMMITS_RE =
   /^(feat|fix|chore|docs|refactor|test|perf|build|ci|style|revert)(\([^)]+\))?!?:\s.+/;
 
@@ -34,12 +39,26 @@ export const commitHeuristics: Heuristic[] = [
     group: "commit",
     label: "Author mismatch across commits",
     description:
-      "Commits authored by multiple identities — usually cherry-picked work.",
+      "Commits authored by multiple identities — usually cherry-picked work. Threshold is an allowlist of author emails or logins (one per line) that don't count toward the distinct-author tally — e.g. bot accounts like dependabot[bot] or noreply@github.com.",
     weight: 2,
     defaultEnabled: true,
-    run(ctx) {
+    defaultThreshold: [],
+    thresholdKind: "stringList",
+    run(ctx, threshold) {
+      const allow = new Set(
+        asStringList(threshold, [])
+          .map((s) => s.toLowerCase().trim())
+          .filter(Boolean)
+      );
       const authors = new Set(
         ctx.commits
+          .filter((c) => {
+            const email = c.authorEmail?.toLowerCase();
+            const login = c.authorLogin?.toLowerCase();
+            if (email && allow.has(email)) return false;
+            if (login && allow.has(login)) return false;
+            return true;
+          })
           .map((c) => c.authorEmail?.toLowerCase() ?? c.authorLogin?.toLowerCase())
           .filter(Boolean) as string[]
       );
