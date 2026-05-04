@@ -1,4 +1,5 @@
 import * as Sentry from "@sentry/nextjs";
+import { scrubSensitive } from "@/lib/observability/scrub";
 
 Sentry.init({
   dsn: process.env.SENTRY_DSN,
@@ -6,6 +7,12 @@ Sentry.init({
   tracesSampleRate: 1.0,
   sendDefaultPii: true,
   enableLogs: true,
+  beforeSend(event) {
+    return scrubSensitive(event);
+  },
+  beforeBreadcrumb(crumb) {
+    return scrubSensitive(crumb);
+  },
 });
 
 Sentry.getGlobalScope().setAttributes({

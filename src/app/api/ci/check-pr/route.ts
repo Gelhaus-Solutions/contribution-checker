@@ -23,9 +23,15 @@ import { runQualityFromContext } from "@/lib/quality/run";
 import { computeScore } from "@/lib/quality/score";
 import { parseQualityConfig } from "@/lib/quality/registry";
 import type { FetchedPrContext } from "@/lib/quality/fetch";
+import {
+  BodyTooLargeError,
+  readLimitedBody,
+} from "@/lib/http/read-limited-body";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+const MAX_CI_BODY_BYTES = 2_097_152;
 
 const fileSchema = z.object({
   filename: z.string(),
@@ -104,9 +110,18 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "missing bearer token" }, { status: 401 });
   }
 
+  let rawBody: string;
+  try {
+    rawBody = await readLimitedBody(req, MAX_CI_BODY_BYTES);
+  } catch (e) {
+    if (e instanceof BodyTooLargeError) {
+      return NextResponse.json({ error: "payload too large" }, { status: 413 });
+    }
+    throw e;
+  }
   let raw: unknown;
   try {
-    raw = await req.json();
+    raw = JSON.parse(rawBody);
   } catch {
     return NextResponse.json({ error: "invalid JSON" }, { status: 400 });
   }

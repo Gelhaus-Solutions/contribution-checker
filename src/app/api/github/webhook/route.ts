@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import * as Sentry from "@sentry/nextjs";
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { Prisma } from "@prisma/client";
+import { prisma } from "@/lib/db";
 import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
 import { withSentryScope } from "@/lib/observability/with-sentry-scope";
@@ -9,9 +11,49 @@ import {
   handleInstallationReposEvent,
   handlePullRequestEvent,
 } from "@/lib/github/webhook";
+import {
+  BodyTooLargeError,
+  readLimitedBody,
+} from "@/lib/http/read-limited-body";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+const MAX_WEBHOOK_BODY_BYTES = 1_048_576;
+const DELIVERY_RETENTION_MS = 24 * 60 * 60 * 1000;
+let lastDeliveryPruneAt = 0;
+
+async function claimDelivery(deliveryId: string, eventName: string): Promise<boolean> {
+  if (!deliveryId) return true;
+  try {
+    await prisma.processedWebhookDelivery.create({
+      data: { id: deliveryId, eventName },
+    });
+    void pruneStaleDeliveries();
+    return true;
+  } catch (e) {
+    if (
+      e instanceof Prisma.PrismaClientKnownRequestError &&
+      e.code === "P2002"
+    ) {
+      return false;
+    }
+    throw e;
+  }
+}
+
+async function pruneStaleDeliveries(): Promise<void> {
+  const now = Date.now();
+  if (now - lastDeliveryPruneAt < 60 * 60 * 1000) return;
+  lastDeliveryPruneAt = now;
+  try {
+    await prisma.processedWebhookDelivery.deleteMany({
+      where: { createdAt: { lt: new Date(now - DELIVERY_RETENTION_MS) } },
+    });
+  } catch (e) {
+    logger.warn({ err: e }, "processed-delivery prune failed");
+  }
+}
 
 function verifySignature(rawBody: string, signature: string | null): boolean {
   if (!signature || !env.GITHUB_APP_WEBHOOK_SECRET) return false;
@@ -34,7 +76,15 @@ export async function POST(req: Request) {
     );
   }
 
-  const rawBody = await req.text();
+  let rawBody: string;
+  try {
+    rawBody = await readLimitedBody(req, MAX_WEBHOOK_BODY_BYTES);
+  } catch (e) {
+    if (e instanceof BodyTooLargeError) {
+      return NextResponse.json({ error: "Payload too large" }, { status: 413 });
+    }
+    throw e;
+  }
   const signature = req.headers.get("x-hub-signature-256");
   const eventName = req.headers.get("x-github-event") ?? "";
   const deliveryId = req.headers.get("x-github-delivery") ?? "";
@@ -42,6 +92,15 @@ export async function POST(req: Request) {
   if (!verifySignature(rawBody, signature)) {
     logger.warn({ deliveryId, eventName }, "webhook signature invalid");
     return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
+  }
+
+  // Idempotency: GitHub retries deliveries whenever it doesn't see a 2xx
+  // quickly enough. Without this guard, every retry replays the full pipeline
+  // (PrCheck upsert, label calls, decision comment, outbound webhook fanout).
+  const claimed = await claimDelivery(deliveryId, eventName);
+  if (!claimed) {
+    logger.info({ deliveryId, eventName }, "duplicate webhook delivery; skipping");
+    return NextResponse.json({ ok: true, duplicate: true });
   }
 
   let payload: unknown;

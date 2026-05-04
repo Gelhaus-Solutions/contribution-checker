@@ -1,6 +1,12 @@
 import { createHmac } from "node:crypto";
 import { prisma } from "@/lib/db";
 import { logger } from "@/lib/logger";
+import {
+  assertSafeOutboundUrl,
+  UnsafeOutboundUrlError,
+} from "@/lib/http/safe-url";
+
+const MAX_RESPONSE_BODY_BYTES = 256;
 
 export type OutboundEvent =
   | "application.submitted"
@@ -158,7 +164,9 @@ export async function deliverWebhook(id: string): Promise<void> {
   });
 
   let resp: Response | null = null;
+  let preflightError: Error | null = null;
   try {
+    await assertSafeOutboundUrl(delivery.url);
     resp = await fetch(delivery.url, {
       method: "POST",
       headers: {
@@ -171,13 +179,19 @@ export async function deliverWebhook(id: string): Promise<void> {
       },
       body: delivery.payload,
       signal: AbortSignal.timeout(10_000),
+      redirect: "manual",
     });
   } catch (e) {
+    if (e instanceof UnsafeOutboundUrlError) preflightError = e;
     logger.warn({ err: e, id }, "webhook delivery threw");
   }
 
   const ok = resp?.ok === true;
-  const responseBody = resp ? (await resp.text().catch(() => null))?.slice(0, 2000) ?? null : null;
+  const responseBody = preflightError
+    ? `[blocked] ${preflightError.message}`.slice(0, MAX_RESPONSE_BODY_BYTES)
+    : resp
+      ? (await resp.text().catch(() => null))?.slice(0, MAX_RESPONSE_BODY_BYTES) ?? null
+      : null;
   const attempts = delivery.attempts + 1;
 
   if (ok) {
@@ -186,6 +200,19 @@ export async function deliverWebhook(id: string): Promise<void> {
       data: {
         status: "DELIVERED",
         responseCode: resp?.status ?? null,
+        responseBody,
+        nextAttemptAt: null,
+      },
+    });
+    return;
+  }
+
+  if (preflightError) {
+    await prisma.webhookDelivery.update({
+      where: { id },
+      data: {
+        status: "FAILED",
+        responseCode: null,
         responseBody,
         nextAttemptAt: null,
       },

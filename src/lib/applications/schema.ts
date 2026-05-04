@@ -1,4 +1,8 @@
 import { z } from "zod";
+import { RegexTimeoutError, safeRegexTest } from "@/lib/safe-regex";
+
+const URL_FIELD_DEFAULT_MAX = 2000;
+const URL_FIELD_HARD_MAX = 4000;
 
 export const fieldIdSchema = z
   .string()
@@ -87,9 +91,13 @@ export function buildAnswersSchema(fields: FormSchema) {
         if (f.required) s = (s as z.ZodString).min(1, "required");
         break;
       case "url": {
-        let urlString: z.ZodTypeAny = z.string().url();
+        const urlMax = Math.min(
+          f.maxLength ?? URL_FIELD_DEFAULT_MAX,
+          URL_FIELD_HARD_MAX
+        );
+        let urlString: z.ZodTypeAny = z.string().url().max(urlMax);
         if (f.urlPattern) {
-          const re = new RegExp(f.urlPattern.pattern);
+          const pattern = f.urlPattern.pattern;
           const mustMatch = f.urlPattern.mode !== "must-not-match";
           const msg =
             f.urlPattern.message ??
@@ -97,7 +105,15 @@ export function buildAnswersSchema(fields: FormSchema) {
               ? "URL does not match the required pattern"
               : "URL matches a disallowed pattern");
           urlString = (urlString as z.ZodString).refine(
-            (v) => (mustMatch ? re.test(v) : !re.test(v)),
+            (v) => {
+              try {
+                const matched = safeRegexTest({ pattern, input: v });
+                return mustMatch ? matched : !matched;
+              } catch (e) {
+                if (e instanceof RegexTimeoutError) return false;
+                throw e;
+              }
+            },
             { message: msg }
           );
         }
