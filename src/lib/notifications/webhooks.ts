@@ -9,6 +9,8 @@ export type OutboundEvent =
   | "application.revoked"
   | "pr.blocked";
 
+export type WebhookKind = "generic" | "discord";
+
 const RETRY_BACKOFFS_MS = [60_000, 5 * 60_000, 30 * 60_000];
 
 function signPayload(secret: string, body: string): string {
@@ -17,54 +19,138 @@ function signPayload(secret: string, body: string): string {
   );
 }
 
-export async function enqueueProjectWebhook(args: {
+function genericBody(args: {
   projectId: string;
   event: OutboundEvent;
   payload: Record<string, unknown>;
-  triggeredById?: string | null;
-}): Promise<void> {
-  const project = await prisma.project.findUnique({
-    where: { id: args.projectId },
-    select: { webhookUrl: true, webhookSecret: true },
-  });
-  if (!project?.webhookUrl) return;
-
-  const body = JSON.stringify({
+}): string {
+  return JSON.stringify({
     event: args.event,
     project: { id: args.projectId },
     data: args.payload,
     deliveredAt: new Date().toISOString(),
   });
+}
 
-  const delivery = await prisma.webhookDelivery.create({
-    data: {
+const DISCORD_COLOR: Record<OutboundEvent, number> = {
+  "application.submitted": 0x3b82f6, // blue
+  "application.approved": 0x22c55e, // green
+  "application.denied": 0xef4444, // red
+  "application.revoked": 0xf59e0b, // amber
+  "pr.blocked": 0xef4444, // red
+};
+
+const DISCORD_TITLE: Record<OutboundEvent, string> = {
+  "application.submitted": "Application submitted",
+  "application.approved": "Application approved",
+  "application.denied": "Application denied",
+  "application.revoked": "Application revoked",
+  "pr.blocked": "Pull request blocked",
+};
+
+function discordBody(args: {
+  projectId: string;
+  event: OutboundEvent;
+  payload: Record<string, unknown>;
+}): string {
+  const fields: { name: string; value: string; inline?: boolean }[] = [];
+  for (const [k, v] of Object.entries(args.payload)) {
+    if (v == null) continue;
+    let value: string;
+    if (typeof v === "string") value = v;
+    else if (typeof v === "number" || typeof v === "boolean") value = String(v);
+    else value = "```json\n" + JSON.stringify(v).slice(0, 900) + "\n```";
+    if (value.length > 1024) value = value.slice(0, 1021) + "...";
+    fields.push({ name: k, value, inline: typeof v !== "object" });
+  }
+
+  return JSON.stringify({
+    username: "contribution-checker",
+    embeds: [
+      {
+        title: DISCORD_TITLE[args.event],
+        description: `Project \`${args.projectId}\``,
+        color: DISCORD_COLOR[args.event],
+        fields: fields.slice(0, 25),
+        timestamp: new Date().toISOString(),
+      },
+    ],
+  });
+}
+
+function formatBody(
+  kind: WebhookKind,
+  args: {
+    projectId: string;
+    event: OutboundEvent;
+    payload: Record<string, unknown>;
+  }
+): string {
+  return kind === "discord" ? discordBody(args) : genericBody(args);
+}
+
+function isDiscordKind(k: string): k is WebhookKind {
+  return k === "discord" || k === "generic";
+}
+
+export async function enqueueProjectWebhook(args: {
+  projectId: string;
+  event: OutboundEvent;
+  payload: Record<string, unknown>;
+  triggeredById?: string | null;
+  /** Optional: only enqueue to this specific endpoint (used by "send test"). */
+  endpointId?: string | null;
+}): Promise<void> {
+  const endpoints = await prisma.projectWebhook.findMany({
+    where: {
+      projectId: args.projectId,
+      enabled: true,
+      ...(args.endpointId ? { id: args.endpointId } : {}),
+    },
+    select: { id: true, kind: true, url: true },
+  });
+  if (endpoints.length === 0) return;
+
+  for (const ep of endpoints) {
+    const kind: WebhookKind = isDiscordKind(ep.kind) ? ep.kind : "generic";
+    const body = formatBody(kind, {
       projectId: args.projectId,
       event: args.event,
-      payload: body,
-      url: project.webhookUrl,
-      status: "PENDING",
-      triggeredById: args.triggeredById ?? null,
-      nextAttemptAt: new Date(),
-    },
-  });
+      payload: args.payload,
+    });
 
-  ensureRetryWorker();
-  // Try once inline. The retry worker handles failures.
-  void deliverWebhook(delivery.id).catch(() => undefined);
+    const delivery = await prisma.webhookDelivery.create({
+      data: {
+        projectId: args.projectId,
+        endpointId: ep.id,
+        kind,
+        event: args.event,
+        payload: body,
+        url: ep.url,
+        status: "PENDING",
+        triggeredById: args.triggeredById ?? null,
+        nextAttemptAt: new Date(),
+      },
+    });
+
+    ensureRetryWorker();
+    void deliverWebhook(delivery.id).catch(() => undefined);
+  }
 }
 
 export async function deliverWebhook(id: string): Promise<void> {
-  const delivery = await prisma.webhookDelivery.findUnique({ where: { id } });
+  const delivery = await prisma.webhookDelivery.findUnique({
+    where: { id },
+    include: { endpoint: { select: { secret: true } } },
+  });
   if (!delivery) return;
   if (delivery.status === "DELIVERED") return;
 
-  const project = await prisma.project.findUnique({
-    where: { id: delivery.projectId },
-    select: { webhookSecret: true },
-  });
-  const signature = project?.webhookSecret
-    ? signPayload(project.webhookSecret, delivery.payload)
-    : null;
+  const kind: WebhookKind = isDiscordKind(delivery.kind) ? delivery.kind : "generic";
+  const signature =
+    kind === "generic" && delivery.endpoint?.secret
+      ? signPayload(delivery.endpoint.secret, delivery.payload)
+      : null;
 
   await prisma.webhookDelivery.update({
     where: { id },
@@ -78,7 +164,9 @@ export async function deliverWebhook(id: string): Promise<void> {
       headers: {
         "Content-Type": "application/json",
         "User-Agent": "contribution-checker",
-        "X-ContribCheck-Event": delivery.event,
+        ...(kind === "generic"
+          ? { "X-ContribCheck-Event": delivery.event }
+          : {}),
         ...(signature ? { "X-ContribCheck-Signature": signature } : {}),
       },
       body: delivery.payload,

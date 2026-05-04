@@ -96,10 +96,6 @@ model Project {
   bypassHandles String  @default("[]")
   bypassCollabs Boolean @default(true)
 
-  // Outbound webhook
-  webhookUrl    String?
-  webhookSecret String?
-
   // PR labels
   labelsEnabled Boolean @default(true)
   labelPending  String  @default("contribution:pending")
@@ -137,8 +133,34 @@ model Project {
   applications Application[]
   audits       AuditEvent[]
   webhookDeliveries WebhookDelivery[]
+  webhookEndpoints  ProjectWebhook[]
   manualDecisions  ManualDecision[]
   template     FormTemplate?    @relation(fields: [templateId], references: [id], onDelete: SetNull)
+}
+
+/**
+ * Outbound webhook endpoint. Each project can have any number of these.
+ * `kind` controls payload formatting and signing:
+ *   - "generic" — JSON body identical to the legacy single-webhook contract,
+ *     signed with HMAC-SHA256 in `X-ContribCheck-Signature` when `secret` is set.
+ *   - "discord" — body transformed to a Discord-compatible message (content +
+ *     embed). No signing; `secret` is ignored.
+ */
+model ProjectWebhook {
+  id        String  @id @default(cuid())
+  projectId String
+  name      String?
+  kind      String  @default("generic") // "generic" | "discord"
+  url       String
+  secret    String?
+  enabled   Boolean @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  project    Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  deliveries WebhookDelivery[]
+
+  @@index([projectId])
 }
 
 /**
@@ -343,8 +365,12 @@ model RateLimitBucket {
 model WebhookDelivery {
   id            String   @id @default(cuid())
   projectId     String
+  endpointId    String?
   event         String
-  // JSON-stringified payload
+  // Endpoint kind at the time of enqueue ("generic" | "discord"). Denormalized
+  // so historic deliveries are interpretable even if the endpoint is deleted.
+  kind          String   @default("generic")
+  // JSON-stringified payload, pre-formatted for the endpoint kind.
   payload       String
   url           String
   status        String   @default("PENDING") // "PENDING" | "DELIVERED" | "FAILED"
@@ -356,8 +382,9 @@ model WebhookDelivery {
   createdAt     DateTime @default(now())
   triggeredById String?
 
-  project     Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  triggeredBy User?   @relation(fields: [triggeredById], references: [id], onDelete: SetNull)
+  project     Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  endpoint    ProjectWebhook? @relation(fields: [endpointId], references: [id], onDelete: SetNull)
+  triggeredBy User?           @relation(fields: [triggeredById], references: [id], onDelete: SetNull)
 
   @@index([projectId, createdAt])
   @@index([status, nextAttemptAt])

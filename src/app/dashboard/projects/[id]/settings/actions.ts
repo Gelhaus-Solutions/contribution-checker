@@ -166,29 +166,37 @@ export async function updateLabelSettings(formData: FormData) {
   revalidatePath(`/dashboard/projects/${parsed.projectId}/settings`);
 }
 
-const webhookSchema = z.object({
+const webhookKindSchema = z.enum(["generic", "discord"]);
+
+const addWebhookSchema = z.object({
   projectId: z.string().min(1),
-  webhookUrl: z
-    .union([z.literal(""), z.string().url()])
-    .transform((v) => (v ? v : null)),
-  webhookSecret: z
+  name: z.string().max(80).optional(),
+  kind: webhookKindSchema,
+  url: z.string().url().max(2000),
+  secret: z
     .union([z.literal(""), z.string().min(8).max(120)])
     .transform((v) => (v ? v : null)),
 });
 
-export async function updateWebhookSettings(formData: FormData) {
-  const parsed = webhookSchema.parse({
+export async function addProjectWebhook(formData: FormData) {
+  const parsed = addWebhookSchema.parse({
     projectId: formData.get("projectId"),
-    webhookUrl: String(formData.get("webhookUrl") ?? "").trim(),
-    webhookSecret: String(formData.get("webhookSecret") ?? "").trim(),
+    name: String(formData.get("name") ?? "").trim() || undefined,
+    kind: formData.get("kind"),
+    url: String(formData.get("url") ?? "").trim(),
+    secret: String(formData.get("secret") ?? "").trim(),
   });
   const { session } = await requireProjectRole(parsed.projectId, "ADMIN");
 
-  await prisma.project.update({
-    where: { id: parsed.projectId },
+  await prisma.projectWebhook.create({
     data: {
-      webhookUrl: parsed.webhookUrl,
-      webhookSecret: parsed.webhookSecret,
+      projectId: parsed.projectId,
+      name: parsed.name ?? null,
+      kind: parsed.kind,
+      url: parsed.url,
+      // Secret is meaningless for Discord — drop it.
+      secret: parsed.kind === "discord" ? null : parsed.secret,
+      enabled: true,
     },
   });
 
@@ -196,7 +204,92 @@ export async function updateWebhookSettings(formData: FormData) {
     projectId: parsed.projectId,
     actorId: session.user.id,
     kind: "settings.updated",
-    payload: { section: "webhook", urlSet: !!parsed.webhookUrl },
+    payload: { section: "webhook", action: "added", kind: parsed.kind },
+  });
+
+  revalidatePath(`/dashboard/projects/${parsed.projectId}/settings`);
+}
+
+const updateWebhookSchema = z.object({
+  projectId: z.string().min(1),
+  endpointId: z.string().min(1),
+  name: z.string().max(80).optional(),
+  kind: webhookKindSchema,
+  url: z.string().url().max(2000),
+  secret: z
+    .union([z.literal(""), z.string().min(8).max(120)])
+    .transform((v) => (v ? v : null)),
+  enabled: z.string().optional(),
+});
+
+export async function updateProjectWebhook(formData: FormData) {
+  const parsed = updateWebhookSchema.parse({
+    projectId: formData.get("projectId"),
+    endpointId: formData.get("endpointId"),
+    name: String(formData.get("name") ?? "").trim() || undefined,
+    kind: formData.get("kind"),
+    url: String(formData.get("url") ?? "").trim(),
+    secret: String(formData.get("secret") ?? "").trim(),
+    enabled: formData.get("enabled") ?? undefined,
+  });
+  const { session } = await requireProjectRole(parsed.projectId, "ADMIN");
+
+  const existing = await prisma.projectWebhook.findUnique({
+    where: { id: parsed.endpointId },
+    select: { projectId: true },
+  });
+  if (!existing || existing.projectId !== parsed.projectId) {
+    throw new Error("Webhook endpoint not found");
+  }
+
+  await prisma.projectWebhook.update({
+    where: { id: parsed.endpointId },
+    data: {
+      name: parsed.name ?? null,
+      kind: parsed.kind,
+      url: parsed.url,
+      secret: parsed.kind === "discord" ? null : parsed.secret,
+      enabled: !!parsed.enabled,
+    },
+  });
+
+  await recordAudit({
+    projectId: parsed.projectId,
+    actorId: session.user.id,
+    kind: "settings.updated",
+    payload: { section: "webhook", action: "updated", kind: parsed.kind },
+  });
+
+  revalidatePath(`/dashboard/projects/${parsed.projectId}/settings`);
+}
+
+const deleteWebhookSchema = z.object({
+  projectId: z.string().min(1),
+  endpointId: z.string().min(1),
+});
+
+export async function deleteProjectWebhook(formData: FormData) {
+  const parsed = deleteWebhookSchema.parse({
+    projectId: formData.get("projectId"),
+    endpointId: formData.get("endpointId"),
+  });
+  const { session } = await requireProjectRole(parsed.projectId, "ADMIN");
+
+  const existing = await prisma.projectWebhook.findUnique({
+    where: { id: parsed.endpointId },
+    select: { projectId: true },
+  });
+  if (!existing || existing.projectId !== parsed.projectId) {
+    throw new Error("Webhook endpoint not found");
+  }
+
+  await prisma.projectWebhook.delete({ where: { id: parsed.endpointId } });
+
+  await recordAudit({
+    projectId: parsed.projectId,
+    actorId: session.user.id,
+    kind: "settings.updated",
+    payload: { section: "webhook", action: "deleted" },
   });
 
   revalidatePath(`/dashboard/projects/${parsed.projectId}/settings`);
@@ -257,23 +350,41 @@ export async function updateGatingSettings(formData: FormData) {
   revalidatePath(`/dashboard/projects/${parsed.projectId}/settings`);
 }
 
-const testSchema = z.object({ projectId: z.string().min(1) });
+const testSchema = z.object({
+  projectId: z.string().min(1),
+  endpointId: z.string().min(1).optional(),
+});
 
 export async function sendTestWebhook(formData: FormData) {
-  const parsed = testSchema.parse({ projectId: formData.get("projectId") });
+  const parsed = testSchema.parse({
+    projectId: formData.get("projectId"),
+    endpointId: String(formData.get("endpointId") ?? "") || undefined,
+  });
   const { session } = await requireProjectRole(parsed.projectId, "ADMIN");
+
+  if (parsed.endpointId) {
+    const ep = await prisma.projectWebhook.findUnique({
+      where: { id: parsed.endpointId },
+      select: { projectId: true },
+    });
+    if (!ep || ep.projectId !== parsed.projectId) {
+      throw new Error("Webhook endpoint not found");
+    }
+  }
 
   await enqueueProjectWebhook({
     projectId: parsed.projectId,
     event: "application.submitted",
     payload: { test: true, sentBy: session.user.ghLogin },
     triggeredById: session.user.id,
+    endpointId: parsed.endpointId ?? null,
   });
 
   await recordAudit({
     projectId: parsed.projectId,
     actorId: session.user.id,
     kind: "webhook.test_sent",
+    payload: parsed.endpointId ? { endpointId: parsed.endpointId } : undefined,
   });
 
   revalidatePath(`/dashboard/projects/${parsed.projectId}/settings`);
