@@ -24,7 +24,7 @@ export function buildDecisionMessage(args: {
     // "no-application" or "cooldown-elapsed" → invite the user to apply.
     return (
       `Hi @${ghLogin}! Thanks for the PR. ` +
-      `Contributions to **${projectName}** are gated behind a short application. ` +
+      `Contributions to **${projectName}** are gated behind an application. ` +
       `Please apply at ${applyUrl} and we'll reopen this PR once you're approved.`
     );
   }
