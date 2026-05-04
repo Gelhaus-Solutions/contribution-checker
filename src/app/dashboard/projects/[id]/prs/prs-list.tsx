@@ -1,8 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 
 export type PrStatus = "PENDING" | "APPROVED" | "DENIED" | "BYPASSED";
 
@@ -25,12 +26,15 @@ export type RepoOption = { id: string; fullName: string };
 
 type Filters = {
   author: string;
+  prNumber: string;
   status: "ALL" | PrStatus;
   repoId: string;
   closedByApp: boolean | null;
   minScore: number | null;
   maxScore: number | null;
 };
+
+const PAGE_SIZE = 20;
 
 const STATUS_VARIANT: Record<
   PrStatus,
@@ -55,11 +59,14 @@ export function PrsList({
   initialFilters: Filters;
 }) {
   const [filters, setFilters] = useState<Filters>(initialFilters);
+  const [page, setPage] = useState(1);
 
   const filtered = useMemo(() => {
     const author = filters.author.trim().toLowerCase();
+    const prNumberQuery = filters.prNumber.trim();
     return rows.filter((r) => {
       if (author && !r.authorGhLogin.toLowerCase().includes(author)) return false;
+      if (prNumberQuery && !String(r.prNumber).includes(prNumberQuery)) return false;
       if (filters.status !== "ALL" && r.status !== filters.status) return false;
       if (filters.repoId !== "ALL" && r.repoId !== filters.repoId) return false;
       if (filters.closedByApp !== null && r.closedByApp !== filters.closedByApp)
@@ -76,6 +83,17 @@ export function PrsList({
       return true;
     });
   }, [rows, filters, qualityEnabled]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const pageRows = useMemo(
+    () => filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE),
+    [filtered, currentPage]
+  );
+
+  useEffect(() => {
+    setPage(1);
+  }, [filters]);
 
   const counts = useMemo(
     () => ({
@@ -99,6 +117,20 @@ export function PrsList({
             value={filters.author}
             onChange={(e) =>
               setFilters((f) => ({ ...f, author: e.target.value }))
+            }
+          />
+        </div>
+        <div className="space-y-1">
+          <label className="text-xs text-muted-foreground">PR number</label>
+          <Input
+            placeholder="123"
+            inputMode="numeric"
+            value={filters.prNumber}
+            onChange={(e) =>
+              setFilters((f) => ({
+                ...f,
+                prNumber: e.target.value.replace(/[^0-9]/g, ""),
+              }))
             }
           />
         </div>
@@ -202,8 +234,15 @@ export function PrsList({
         )}
       </div>
 
-      <div className="text-xs text-muted-foreground">
-        {filtered.length} of {rows.length} PR(s)
+      <div className="flex items-center justify-between text-xs text-muted-foreground">
+        <span>
+          {filtered.length} of {rows.length} PR(s)
+        </span>
+        {filtered.length > 0 && (
+          <span>
+            Page {currentPage} of {totalPages}
+          </span>
+        )}
       </div>
 
       {filtered.length === 0 ? (
@@ -212,7 +251,7 @@ export function PrsList({
         </div>
       ) : (
         <ul className="divide-y divide-border rounded-md border border-border">
-          {filtered.map((pr) => (
+          {pageRows.map((pr) => (
             <li key={pr.id} className="px-4 py-3 text-sm">
               <div className="flex flex-wrap items-center gap-2">
                 <a
@@ -271,6 +310,32 @@ export function PrsList({
             </li>
           ))}
         </ul>
+      )}
+
+      {filtered.length > PAGE_SIZE && (
+        <div className="flex items-center justify-between">
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={currentPage <= 1}
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+          >
+            Previous
+          </Button>
+          <span className="text-xs text-muted-foreground">
+            Showing {(currentPage - 1) * PAGE_SIZE + 1}–
+            {Math.min(currentPage * PAGE_SIZE, filtered.length)} of{" "}
+            {filtered.length}
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={currentPage >= totalPages}
+            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+          >
+            Next
+          </Button>
+        </div>
       )}
     </div>
   );
