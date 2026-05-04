@@ -243,6 +243,9 @@ export async function POST(req: Request) {
     decisionAttrs["decision.bypass_reason"] = decision.bypassReason;
   }
   Sentry.getCurrentScope().setAttributes(decisionAttrs);
+  Sentry.metrics.count("pr.decision", 1, {
+    attributes: { ...decisionAttrs, mode: "ci" },
+  });
 
   if (decision.status === "IGNORED") {
     return NextResponse.json(

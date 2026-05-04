@@ -30,17 +30,7 @@ Sentry.init({
   profilesSampleRate: 1.0,
   sendDefaultPii: true,
   enableLogs: true,
-  debug: process.env.NODE_ENV !== "production",
 });
-
-console.info(
-  "[instrumentation-client] dsn =",
-  dsn
-    ? `${dsn.slice(0, 12)}…(len=${dsn.length})`
-    : "<undefined — neither window.__ENV__ nor NEXT_PUBLIC_SENTRY_DSN was set>",
-  "env =",
-  environment ?? "<unset>",
-);
 
 Sentry.getGlobalScope().setAttributes({
   "service.name": "contribution-checker",

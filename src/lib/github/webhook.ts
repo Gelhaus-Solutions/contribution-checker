@@ -210,6 +210,12 @@ export async function handlePullRequestEvent(payload: WebhookPayload) {
   }
   if (decision.projectId) decisionAttrs["project.id"] = decision.projectId;
   Sentry.getCurrentScope().setAttributes(decisionAttrs);
+  Sentry.metrics.count("pr.decision", 1, {
+    attributes: {
+      ...decisionAttrs,
+      mode: "app",
+    },
+  });
 
   if (decision.status === "IGNORED") {
     logger.debug({ ghRepoId, prNumber, reason: decision.reason }, "PR ignored");
