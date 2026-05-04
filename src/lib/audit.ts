@@ -25,7 +25,9 @@ export type AuditKind =
   | "settings.gating_changed"
   | "settings.quality_changed"
   | "quality.backfill_started"
-  | "quality.backfill_completed";
+  | "quality.backfill_completed"
+  | "pr.quality_rescanned"
+  | "pr.reevaluate_triggered";
 
 export async function recordAudit(args: {
   projectId: string;

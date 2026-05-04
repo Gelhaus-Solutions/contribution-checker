@@ -4,6 +4,12 @@ import { useEffect, useMemo, useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  getPrOverview,
+  rescanPrQuality,
+  reEvaluatePrs,
+  type PrOverview,
+} from "./actions";
 
 export type PrStatus = "PENDING" | "APPROVED" | "DENIED" | "BYPASSED";
 
@@ -47,6 +53,7 @@ const STATUS_VARIANT: Record<
 };
 
 export function PrsList({
+  projectId,
   rows,
   repos,
   qualityEnabled,
@@ -60,6 +67,7 @@ export function PrsList({
 }) {
   const [filters, setFilters] = useState<Filters>(initialFilters);
   const [page, setPage] = useState(1);
+  const [openId, setOpenId] = useState<string | null>(null);
 
   const filtered = useMemo(() => {
     const author = filters.author.trim().toLowerCase();
@@ -290,7 +298,15 @@ export function PrsList({
                     {pr.quality.score === null ? "—" : `${pr.quality.score}%`}
                   </Badge>
                 )}
-                <span className="ml-auto text-xs text-muted-foreground">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="ml-auto h-7 px-2 text-[11px]"
+                  onClick={() => setOpenId(pr.id)}
+                >
+                  Overview
+                </Button>
+                <span className="text-xs text-muted-foreground">
                   {pr.updatedAt.slice(0, 10)}
                 </span>
               </div>
@@ -337,6 +353,14 @@ export function PrsList({
           </Button>
         </div>
       )}
+
+      {openId && (
+        <PrOverviewDialog
+          projectId={projectId}
+          prCheckId={openId}
+          onClose={() => setOpenId(null)}
+        />
+      )}
     </div>
   );
 }
@@ -346,4 +370,393 @@ function parseScore(v: string): number | null {
   const n = Number(v);
   if (!Number.isFinite(n)) return null;
   return Math.max(0, Math.min(100, Math.round(n)));
+}
+
+function PrOverviewDialog({
+  projectId,
+  prCheckId,
+  onClose,
+}: {
+  projectId: string;
+  prCheckId: string;
+  onClose: () => void;
+}) {
+  const [data, setData] = useState<PrOverview | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState<null | "rescan" | "reeval">(null);
+  const [flash, setFlash] = useState<string | null>(null);
+
+  const reload = () => {
+    setError(null);
+    return getPrOverview({ projectId, prCheckId })
+      .then((d) => setData(d))
+      .catch((e: unknown) =>
+        setError(e instanceof Error ? e.message : String(e))
+      );
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    setData(null);
+    setError(null);
+    getPrOverview({ projectId, prCheckId })
+      .then((d) => {
+        if (!cancelled) setData(d);
+      })
+      .catch((e: unknown) => {
+        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, prCheckId]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const onRescan = async () => {
+    if (!data || busy) return;
+    setBusy("rescan");
+    setFlash(null);
+    try {
+      const res = await rescanPrQuality({
+        projectId,
+        prCheckIds: [data.id],
+      });
+      if (res.scored > 0) {
+        setFlash("Quality rescanned.");
+      } else if (res.skipped > 0) {
+        setFlash("Skipped — quality cannot run for this PR.");
+      } else {
+        setFlash("Rescan failed.");
+      }
+      await reload();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const onReevaluate = async () => {
+    if (!data || busy) return;
+    setBusy("reeval");
+    setFlash(null);
+    try {
+      const res = await reEvaluatePrs({
+        projectId,
+        prCheckIds: [data.id],
+      });
+      if (res.triggered > 0) {
+        setFlash(
+          `Re-evaluation triggered (label \"${data.evaluateLabel}\" added). The webhook will apply the new decision shortly.`
+        );
+      } else if (res.skipped > 0) {
+        setFlash("Skipped — repo is not connected via the GitHub App.");
+      } else {
+        setFlash("Re-evaluate failed.");
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-3xl max-h-[90vh] overflow-y-auto rounded-md border border-border bg-background p-6 shadow-lg"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="text-lg font-semibold">
+            {data ? (
+              <a
+                href={data.ghUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="font-mono underline"
+              >
+                {data.repoFullName}#{data.prNumber}
+              </a>
+            ) : (
+              "PR overview"
+            )}
+          </h2>
+          <Button size="sm" variant="ghost" onClick={onClose}>
+            Close
+          </Button>
+        </div>
+
+        {error && (
+          <p className="mt-4 text-sm text-destructive">Error: {error}</p>
+        )}
+
+        {!data && !error && (
+          <p className="mt-4 text-sm text-muted-foreground">Loading…</p>
+        )}
+
+        {data && (
+          <div className="mt-4 space-y-5">
+            <section>
+              <div className="flex flex-wrap items-center gap-2 text-sm">
+                <Badge variant={STATUS_VARIANT[data.status]}>{data.status}</Badge>
+                {data.closedByApp && (
+                  <Badge variant="outline" className="text-[10px]">
+                    closed by app
+                  </Badge>
+                )}
+                <Badge variant="outline" className="text-[10px]">
+                  {data.mode === "app" ? "App mode" : "CI mode"}
+                </Badge>
+                {!data.checkerEnabled && (
+                  <Badge variant="secondary" className="text-[10px]">
+                    checker disabled
+                  </Badge>
+                )}
+                <span className="text-xs text-muted-foreground">
+                  by <span className="font-mono">{data.authorGhLogin}</span>
+                </span>
+              </div>
+              <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 text-xs sm:grid-cols-3">
+                <Field label="First seen" value={data.createdAt.slice(0, 10)} />
+                <Field label="Last update" value={data.updatedAt.slice(0, 10)} />
+                <Field
+                  label="Head SHA"
+                  value={data.headSha ? data.headSha.slice(0, 7) : "—"}
+                  mono
+                />
+                <Field
+                  label="Check Run"
+                  value={data.checkRunId ? data.checkRunId : "—"}
+                  mono
+                />
+                <Field
+                  label="Author GH id"
+                  value={String(data.authorGhId)}
+                  mono
+                />
+                <Field
+                  label="PR node id"
+                  value={data.prNodeId.slice(0, 14) + "…"}
+                  mono
+                />
+              </dl>
+            </section>
+
+            {data.currentDecision && (
+              <section>
+                <h3 className="text-sm font-medium">Current decision</h3>
+                <div
+                  className={
+                    "mt-2 rounded-md border p-3 text-sm " +
+                    (data.currentDecision.drifts
+                      ? "border-warning/40 bg-warning/5"
+                      : "border-border")
+                  }
+                >
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge
+                      variant={
+                        data.currentDecision.status === "APPROVED" ||
+                        data.currentDecision.status === "BYPASSED"
+                          ? "success"
+                          : data.currentDecision.status === "DENIED"
+                            ? "destructive"
+                            : data.currentDecision.status === "PENDING"
+                              ? "warning"
+                              : "secondary"
+                      }
+                    >
+                      {data.currentDecision.status}
+                    </Badge>
+                    {data.currentDecision.bypassReason && (
+                      <span className="text-xs text-muted-foreground">
+                        bypass: {data.currentDecision.bypassReason}
+                      </span>
+                    )}
+                    {data.currentDecision.reason && (
+                      <span className="text-xs text-muted-foreground">
+                        {data.currentDecision.reason}
+                      </span>
+                    )}
+                  </div>
+                  {data.currentDecision.drifts && (
+                    <p className="mt-2 text-xs">
+                      Stored status (<span className="font-mono">{data.status}</span>)
+                      differs from what the rules say now. Re-evaluate to apply
+                      the new decision on GitHub.
+                    </p>
+                  )}
+                </div>
+              </section>
+            )}
+
+            <section>
+              <h3 className="text-sm font-medium">Author totals</h3>
+              <dl className="mt-2 grid grid-cols-3 gap-2 text-xs sm:grid-cols-5">
+                <Stat label="Total" value={data.authorStats.total} />
+                <Stat label="Pending" value={data.authorStats.pending} />
+                <Stat label="Approved" value={data.authorStats.approved} />
+                <Stat label="Denied" value={data.authorStats.denied} />
+                <Stat
+                  label="Closed by app"
+                  value={data.authorStats.closedByApp}
+                />
+              </dl>
+            </section>
+
+            {data.qualityEnabled && (
+              <section>
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-medium">PR Quality</h3>
+                  {data.quality && (
+                    <span className="text-[10px] text-muted-foreground">
+                      computed {data.quality.computedAt.slice(0, 10)}
+                    </span>
+                  )}
+                </div>
+                {!data.quality ? (
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    Not scored yet. Run a rescan to populate.
+                  </p>
+                ) : (
+                  <div className="mt-2 rounded-md border border-border p-3">
+                    <div className="flex flex-wrap items-baseline gap-2">
+                      <span className="text-2xl font-semibold">
+                        {data.quality.score === null
+                          ? "—"
+                          : `${data.quality.score}%`}
+                      </span>
+                      <span className="text-xs text-muted-foreground">
+                        {data.quality.failedCount} fired /{" "}
+                        {data.quality.totalRan} ran
+                      </span>
+                    </div>
+                    <div className="mt-1 text-[11px] text-muted-foreground">
+                      {data.quality.files} file(s)
+                      {data.quality.filesTruncated && " (truncated)"} •{" "}
+                      {data.quality.commits} commit(s)
+                    </div>
+                    <ul className="mt-3 space-y-1 text-xs">
+                      {data.quality.heuristics
+                        .filter((h) => h.enabled || h.ran)
+                        .sort((a, b) => {
+                          if (a.failed !== b.failed) return a.failed ? -1 : 1;
+                          return b.weight - a.weight;
+                        })
+                        .map((h) => (
+                          <li
+                            key={h.id}
+                            className="flex flex-wrap items-center gap-2"
+                          >
+                            <Badge
+                              variant={
+                                !h.ran
+                                  ? "outline"
+                                  : h.failed
+                                    ? "destructive"
+                                    : "success"
+                              }
+                              className="text-[10px]"
+                            >
+                              {!h.ran ? "off" : h.failed ? "fail" : "pass"}
+                            </Badge>
+                            <span className="font-medium">{h.label}</span>
+                            <span className="text-[10px] text-muted-foreground">
+                              w{h.weight} • {h.group}
+                            </span>
+                            {h.reason && (
+                              <span className="text-[11px] text-muted-foreground">
+                                — {h.reason}
+                              </span>
+                            )}
+                          </li>
+                        ))}
+                    </ul>
+                  </div>
+                )}
+              </section>
+            )}
+
+            {flash && (
+              <p className="text-xs text-muted-foreground">{flash}</p>
+            )}
+
+            <div className="flex flex-wrap items-center gap-2 pt-2">
+              {data.qualityEnabled && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={busy !== null || data.mode !== "app"}
+                  onClick={onRescan}
+                  title={
+                    data.mode !== "app"
+                      ? "CI-mode repos can only be scored from their workflow run."
+                      : undefined
+                  }
+                >
+                  {busy === "rescan" ? "Rescanning…" : "Rescan quality"}
+                </Button>
+              )}
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={busy !== null || data.mode !== "app"}
+                onClick={onReevaluate}
+                title={
+                  data.mode !== "app"
+                    ? "CI-mode repos re-evaluate on the next workflow run."
+                    : undefined
+                }
+              >
+                {busy === "reeval" ? "Triggering…" : "Re-evaluate"}
+              </Button>
+              <a
+                className="ml-auto text-xs underline"
+                href={`/dashboard/projects/${projectId}/prs?author=${encodeURIComponent(data.authorGhLogin)}`}
+              >
+                All PRs from {data.authorGhLogin} →
+              </a>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function Stat({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-md border border-border p-2">
+      <dt className="text-[10px] uppercase text-muted-foreground">{label}</dt>
+      <dd className="text-base font-semibold">{value}</dd>
+    </div>
+  );
+}
+
+function Field({
+  label,
+  value,
+  mono,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+}) {
+  return (
+    <div>
+      <dt className="text-[10px] uppercase text-muted-foreground">{label}</dt>
+      <dd className={mono ? "font-mono text-xs" : "text-xs"}>{value}</dd>
+    </div>
+  );
 }
