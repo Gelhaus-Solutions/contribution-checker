@@ -130,11 +130,12 @@ export const prTextHeuristics: Heuristic[] = [
       // Count single-backtick spans only (skip ``` fenced blocks).
       const stripped = body.replace(/```[\s\S]*?```/g, "");
       const inline = stripped.match(/`[^`\n]+`/g) ?? [];
+      const failed = inline.length > max;
       return {
-        failed: inline.length > max,
+        failed,
         value: inline.length,
-        reason:
-          inline.length > max ? `${inline.length} inline refs (>${max})` : undefined,
+        reason: failed ? `${inline.length} inline refs (>${max})` : undefined,
+        penaltyPoints: failed ? inline.length - max : 0,
       };
     },
   },

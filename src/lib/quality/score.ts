@@ -85,7 +85,12 @@ export function computeScore(
     if (h.weight >= 4) {
       failedW4 += 1;
     } else {
-      deductions += h.weight * PENALTY_PER_WEIGHT;
+      const override = sig?.penaltyPoints;
+      const penalty =
+        typeof override === "number" && Number.isFinite(override) && override >= 0
+          ? override
+          : h.weight * PENALTY_PER_WEIGHT;
+      deductions += penalty;
     }
   }
 

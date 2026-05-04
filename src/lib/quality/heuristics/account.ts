@@ -115,7 +115,8 @@ export const accountHeuristics: Heuristic[] = [
     weight: 1,
     defaultEnabled: false,
     run(ctx) {
-      return { failed: !ctx.account.email };
+      const failed = !ctx.account.email;
+      return { failed, penaltyPoints: failed ? 5 : 0 };
     },
   },
 ];

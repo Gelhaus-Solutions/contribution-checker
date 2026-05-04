@@ -120,7 +120,7 @@ export const codeHeuristics: Heuristic[] = [
         comments += c.comments;
       }
       const ratio = code > 0 ? comments / code : comments > 0 ? Infinity : 0;
-      const failed = comments > absoluteMax || ratio > 0.4;
+      const failed = comments > absoluteMax;
       return {
         failed,
         value: comments,

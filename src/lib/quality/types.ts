@@ -91,6 +91,13 @@ export type HeuristicResult = {
    * fundamentally suspect regardless of other passes.
    */
   scoreCap?: number;
+  /**
+   * Override the default `weight * PENALTY_PER_WEIGHT` deduction with a
+   * heuristic-computed value (in score points, 0–100). Use when the penalty
+   * should scale with the measured value (e.g. per violating commit, per
+   * excess reference). Ignored for w4 heuristics, which use the cap model.
+   */
+  penaltyPoints?: number;
 };
 
 export type Heuristic = {
