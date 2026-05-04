@@ -255,6 +255,88 @@ describe("PR text heuristics", () => {
     expect(r.failed).toBe(true);
   });
 
+  it("pr.uses_template fires when the template has checkboxes but the body has only headings", () => {
+    const h = get("pr.uses_template");
+    const template =
+      "## What\nFoo\n## Why\nBar\n## Checklist\n- [ ] I read CONTRIBUTING\n- [ ] No AI used\n";
+    const r = h.run(
+      ctx({
+        prTemplate: template,
+        pr: {
+          ...ctx().pr,
+          body: "## What\nBug fix\n## Why\nFixes #1\n",
+        },
+      }),
+      0
+    );
+    expect(r.failed).toBe(true);
+  });
+
+  it("pr.uses_template threshold lets admins allow N missing checkboxes", () => {
+    const h = get("pr.uses_template");
+    const template =
+      "## Checklist\n- [ ] I read CONTRIBUTING\n- [ ] No AI used\n- [ ] Single concern\n";
+    const body = "## Checklist\n- [x] I read CONTRIBUTING\n- [x] No AI used\n";
+    const c = ctx({ prTemplate: template, pr: { ...ctx().pr, body } });
+    expect(h.run(c, 0).failed).toBe(true);
+    expect(h.run(c, 1).failed).toBe(false);
+  });
+
+  it("pr.uses_template falls back to heading match when template has no checkboxes", () => {
+    const h = get("pr.uses_template");
+    const template = "## Description\n\n## Why\n";
+    expect(
+      h.run(
+        ctx({ prTemplate: template, pr: { ...ctx().pr, body: "## Description\nFoo" } }),
+        0
+      ).failed
+    ).toBe(false);
+    expect(
+      h.run(
+        ctx({ prTemplate: template, pr: { ...ctx().pr, body: "freeform note" } }),
+        0
+      ).failed
+    ).toBe(true);
+  });
+
+  it("pr.template_extra_headers fires when body adds more headers than the admin allows", () => {
+    const h = get("pr.template_extra_headers");
+    const template =
+      "# What kind of change does this PR introduce?\n\n# Why was this change needed?\n\n# Other information:\n\n# Checklist:\n- [ ] I read CONTRIBUTING\n";
+    const body =
+      "## What kind of change does this PR introduce?\nBug fix\n## Why was this change needed?\nFixes #1\n## What changes were made?\n- a\n## Key fix\n- b\n## Impact\n- c\n";
+    const c = ctx({ prTemplate: template, pr: { ...ctx().pr, body } });
+    // 3 extra headers: "what changes were made?", "key fix", "impact"
+    expect(h.run(c, 0).failed).toBe(true);
+    expect(h.run(c, 2).failed).toBe(true);
+    expect(h.run(c, 3).failed).toBe(false);
+  });
+
+  it("pr.template_extra_headers skips when there's no template", () => {
+    const h = get("pr.template_extra_headers");
+    const r = h.run(
+      ctx({
+        prTemplate: null,
+        pr: { ...ctx().pr, body: "## A\n## B\n## C\n" },
+      }),
+      0
+    );
+    expect(r.failed).toBe(false);
+  });
+
+  it("pr.template_extra_headers passes when body uses only template headings", () => {
+    const h = get("pr.template_extra_headers");
+    const template = "## Description\n## Why\n";
+    const r = h.run(
+      ctx({
+        prTemplate: template,
+        pr: { ...ctx().pr, body: "## Description\nFoo\n## Why\nBar\n" },
+      }),
+      0
+    );
+    expect(r.failed).toBe(false);
+  });
+
   it("pr.honeypot_hit only fires when a configured honeypot string is in the body", () => {
     const h = get("pr.honeypot_hit");
     const c = ctx({
