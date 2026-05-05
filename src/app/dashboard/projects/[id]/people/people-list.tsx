@@ -15,15 +15,30 @@ import {
   type UserOverview,
 } from "./actions";
 
-export type PersonRow = {
-  kind: "manual" | "application";
+type ManualEntry = {
   id: string;
-  ghLogin: string;
+  status: "APPROVED" | "DENIED";
+  reason: string | null;
+  decidedAt: string;
+  decidedByLogin: string | null;
+};
+
+type ApplicationEntry = {
+  id: string;
   status: "APPROVED" | "DENIED" | "PENDING";
   reason: string | null;
   decidedAt: string;
   decidedByLogin: string | null;
-  applicationId?: string;
+};
+
+export type PersonRow = {
+  ghLogin: string;
+  manual?: ManualEntry;
+  application?: ApplicationEntry;
+  // Effective status — manual takes precedence per decide-pr.ts.
+  status: "APPROVED" | "DENIED" | "PENDING";
+  latestDecidedAt: string;
+  latestDecidedByLogin: string | null;
 };
 
 const STATUS_VARIANT = {
@@ -53,11 +68,14 @@ export function PeopleList({
     const q = query.trim().toLowerCase();
     return people.filter((d) => {
       if (filter !== "ALL" && d.status !== filter) return false;
-      if (source !== "ALL" && d.kind !== source) return false;
+      if (source === "manual" && !d.manual) return false;
+      if (source === "application" && !d.application) return false;
       if (!q) return true;
       const login = d.ghLogin.toLowerCase();
-      const reason = (d.reason ?? "").toLowerCase();
-      const reviewer = (d.decidedByLogin ?? "").toLowerCase();
+      const reason = `${d.manual?.reason ?? ""} ${d.application?.reason ?? ""}`
+        .toLowerCase();
+      const reviewer = `${d.manual?.decidedByLogin ?? ""} ${d.application?.decidedByLogin ?? ""}`
+        .toLowerCase();
       switch (searchField) {
         case "login":
           return login.includes(q);
@@ -156,25 +174,41 @@ export function PeopleList({
         <ul className="divide-y divide-border rounded-md border border-border">
           {filtered.map((d) => (
             <li
-              key={`${d.kind}:${d.id}`}
+              key={d.ghLogin}
               className="flex flex-col gap-2 px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between"
             >
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="font-mono">{d.ghLogin}</span>
                   <Badge variant={STATUS_VARIANT[d.status]}>{d.status}</Badge>
-                  <Badge variant="outline" className="text-xs">
-                    {d.kind === "manual" ? "Manual" : "Application"}
-                  </Badge>
+                  {d.manual && (
+                    <Badge variant="outline" className="text-xs">
+                      Manual
+                    </Badge>
+                  )}
+                  {d.application && (
+                    <Badge variant="outline" className="text-xs">
+                      Application
+                    </Badge>
+                  )}
                 </div>
-                {d.reason && (
+                {d.manual?.reason && (
                   <div className="mt-1 text-xs text-muted-foreground">
-                    {d.reason}
+                    {d.application?.reason ? "Manual: " : ""}
+                    {d.manual.reason}
+                  </div>
+                )}
+                {d.application?.reason && (
+                  <div className="mt-1 text-xs text-muted-foreground">
+                    {d.manual?.reason ? "Application: " : ""}
+                    {d.application.reason}
                   </div>
                 )}
                 <div className="mt-1 text-xs text-muted-foreground">
-                  {d.decidedByLogin ? `By ${d.decidedByLogin}` : "By system"} on{" "}
-                  {d.decidedAt.slice(0, 10)}
+                  {d.latestDecidedByLogin
+                    ? `By ${d.latestDecidedByLogin}`
+                    : "By system"}{" "}
+                  on {d.latestDecidedAt.slice(0, 10)}
                 </div>
               </div>
               <div className="flex items-center gap-2">
@@ -185,19 +219,19 @@ export function PeopleList({
                 >
                   View user
                 </Button>
-                {d.kind === "application" && d.applicationId && (
+                {d.application && (
                   <Button asChild size="sm" variant="ghost">
                     <Link
-                      href={`/dashboard/projects/${projectId}/applications/${d.applicationId}`}
+                      href={`/dashboard/projects/${projectId}/applications/${d.application.id}`}
                     >
                       Application
                     </Link>
                   </Button>
                 )}
-                {d.kind === "manual" && (
+                {d.manual && (
                   <form action={removeManualDecision}>
                     <input type="hidden" name="projectId" value={projectId} />
-                    <input type="hidden" name="decisionId" value={d.id} />
+                    <input type="hidden" name="decisionId" value={d.manual.id} />
                     <SubmitButton
                       size="sm"
                       variant="ghost"

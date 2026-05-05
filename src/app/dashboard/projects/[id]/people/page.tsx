@@ -43,35 +43,57 @@ export default async function ProjectPeople({
     }),
   ]);
 
-  const rows: PersonRow[] = [
-    ...manual.map<PersonRow>((d) => ({
-      kind: "manual",
+  type Partial = Pick<PersonRow, "ghLogin" | "manual" | "application">;
+  const byLogin = new Map<string, Partial>();
+  for (const d of manual) {
+    const row = byLogin.get(d.ghLogin) ?? { ghLogin: d.ghLogin };
+    row.manual = {
       id: d.id,
-      ghLogin: d.ghLogin,
       status: d.status as "APPROVED" | "DENIED",
       reason: d.reason,
       decidedAt: d.updatedAt.toISOString(),
       decidedByLogin: d.decidedBy?.ghLogin ?? null,
-    })),
-    ...applications.map<PersonRow>((a) => {
-      const derived: "APPROVED" | "DENIED" | "PENDING" =
-        a.status === "DENIED" &&
-        a.allowResubmit &&
-        (!a.cooldownUntil || a.cooldownUntil <= new Date())
-          ? "PENDING"
-          : (a.status as "APPROVED" | "DENIED");
+    };
+    byLogin.set(d.ghLogin, row);
+  }
+  for (const a of applications) {
+    const login = a.user.ghLogin ?? "(no login)";
+    const row = byLogin.get(login) ?? { ghLogin: login };
+    const derived: "APPROVED" | "DENIED" | "PENDING" =
+      a.status === "DENIED" &&
+      a.allowResubmit &&
+      (!a.cooldownUntil || a.cooldownUntil <= new Date())
+        ? "PENDING"
+        : (a.status as "APPROVED" | "DENIED");
+    row.application = {
+      id: a.id,
+      status: derived,
+      reason: a.reason,
+      decidedAt: (a.decidedAt ?? a.updatedAt).toISOString(),
+      decidedByLogin: a.decidedBy?.ghLogin ?? null,
+    };
+    byLogin.set(login, row);
+  }
+
+  // Manual decisions override applications (see decide-pr.ts precedence).
+  const rows: PersonRow[] = Array.from(byLogin.values())
+    .map((r): PersonRow => {
+      const latest =
+        r.manual && r.application
+          ? r.manual.decidedAt > r.application.decidedAt
+            ? r.manual
+            : r.application
+          : (r.manual ?? r.application!);
       return {
-        kind: "application",
-        id: a.id,
-        ghLogin: a.user.ghLogin ?? "(no login)",
-        status: derived,
-        reason: a.reason,
-        decidedAt: (a.decidedAt ?? a.updatedAt).toISOString(),
-        decidedByLogin: a.decidedBy?.ghLogin ?? null,
-        applicationId: a.id,
+        ghLogin: r.ghLogin,
+        manual: r.manual,
+        application: r.application,
+        status: r.manual?.status ?? r.application!.status,
+        latestDecidedAt: latest.decidedAt,
+        latestDecidedByLogin: latest.decidedByLogin,
       };
-    }),
-  ].sort((a, b) => b.decidedAt.localeCompare(a.decidedAt));
+    })
+    .sort((a, b) => b.latestDecidedAt.localeCompare(a.latestDecidedAt));
 
   return (
     <div className="space-y-6">
