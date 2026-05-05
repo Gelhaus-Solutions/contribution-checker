@@ -72,6 +72,7 @@ model User {
   decidedApps     Application[]      @relation("ApplicationDecidedBy")
   decidedManual   ManualDecision[]   @relation("ManualDecisionDecidedBy")
   appNotes        ApplicationNote[]
+  appReviews      ApplicationReview[]
   auditedEvents   AuditEvent[]
   formTemplates   FormTemplate[]
   webhookDeliveries WebhookDelivery[]
@@ -127,6 +128,11 @@ model Project {
   // Fuzzy match strictness (0–100) for `pr.uses_template` checkbox matching.
   // 100 = exact substring match; lower = tolerate typos/edits. Default 80.
   qualityTemplateMatchPct Int @default(80)
+
+  // PR-style review gate: minimum number of distinct approving reviews
+  // (excluding the actor) required before approveApplication is allowed.
+  // 0 = no gate (legacy behavior).
+  requireApprovalCount Int @default(0)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -246,26 +252,88 @@ model Application {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  project   Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  user      User              @relation(fields: [userId], references: [id], onDelete: Cascade)
-  decidedBy User?             @relation("ApplicationDecidedBy", fields: [decidedById], references: [id], onDelete: SetNull)
+  project   Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user      User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  decidedBy User?               @relation("ApplicationDecidedBy", fields: [decidedById], references: [id], onDelete: SetNull)
   notes     ApplicationNote[]
+  reviews   ApplicationReview[]
 
   @@index([projectId, status])
   @@index([userId])
 }
 
+/**
+ * Comment on an application. Either:
+ *  - a free-form internal note (reviewId=null, fieldId=null, parentId=null)
+ *  - a per-field review comment (fieldId set; matches fieldIdSchema in
+ *    src/lib/applications/schema.ts). Stays a draft until linked to a
+ *    submitted ApplicationReview via reviewId.
+ *  - a threaded reply (parentId set). Visibility inherits from the parent;
+ *    when the parent is APPLICANT-visible, the application's applicant is
+ *    allowed to author replies (no project role required).
+ *
+ * visibility: "INTERNAL" (project members only) | "APPLICANT" (also visible
+ * to the applicant on the apply/status page).
+ *
+ * Edits are in-place: updatedAt > createdAt ⇒ render an "edited" marker.
+ * Deletes are soft (deletedAt set) so threads stay coherent; UI renders a
+ * tombstone in place of the body.
+ */
 model ApplicationNote {
-  id            String   @id @default(cuid())
+  id            String    @id @default(cuid())
   applicationId String
   authorId      String
+  reviewId      String?
+  parentId      String?
+  fieldId       String?
+  visibility    String    @default("INTERNAL")
   body          String
-  createdAt     DateTime @default(now())
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  deletedAt     DateTime?
 
-  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
-  author      User        @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  application Application        @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  author      User               @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  review      ApplicationReview? @relation(fields: [reviewId], references: [id], onDelete: SetNull)
+  parent      ApplicationNote?   @relation("NoteReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies     ApplicationNote[]  @relation("NoteReplies")
 
-  @@index([applicationId])
+  @@index([applicationId, fieldId])
+  @@index([reviewId])
+  @@index([parentId])
+}
+
+/**
+ * A reviewer's submitted review on an application — analogous to a GitHub
+ * pull-request review. Carries an overall state and an optional summary
+ * body (markdown). Per-field comments (ApplicationNote rows with fieldId
+ * set) are linked to a review via ApplicationNote.reviewId at submission
+ * time, and inherit visibility from the review's state:
+ *
+ *   APPROVED          ⇒ INTERNAL (LGTM signal between reviewers)
+ *   CHANGES_REQUESTED ⇒ APPLICANT (feedback the applicant can see + reply to)
+ *   COMMENTED         ⇒ author chooses INTERNAL or APPLICANT per submit
+ *
+ * Reviews can be soft-dismissed (deletedAt set) by an ADMIN — dismissed
+ * reviews don't count toward the approval gate.
+ */
+model ApplicationReview {
+  id            String    @id @default(cuid())
+  applicationId String
+  authorId      String
+  state         String    // "APPROVED" | "CHANGES_REQUESTED" | "COMMENTED"
+  body          String?
+  visibility    String    @default("INTERNAL") // "INTERNAL" | "APPLICANT"
+  submittedAt   DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  deletedAt     DateTime?
+
+  application Application       @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  author      User              @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  comments    ApplicationNote[]
+
+  @@index([applicationId, state])
+  @@index([authorId])
 }
 
 model PrCheck {

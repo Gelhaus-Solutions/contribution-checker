@@ -94,6 +94,26 @@ export default async function ProjectSettings({
                 Whether resubmitting is allowed at all is a per-denial choice in the deny dialog.
               </p>
             </div>
+            <div className="space-y-2">
+              <Label htmlFor="requireApprovalCount">
+                Required approving reviews before approve
+              </Label>
+              <Input
+                id="requireApprovalCount"
+                name="requireApprovalCount"
+                type="number"
+                min={0}
+                max={10}
+                defaultValue={project.requireApprovalCount}
+              />
+              <p className="text-xs text-muted-foreground">
+                PR-style review gate: require this many distinct{" "}
+                <em>Approve</em> reviews from other reviewers before the
+                Approve action is allowed. The reviewer clicking Approve
+                doesn&apos;t count toward their own gate. <strong>0</strong>{" "}
+                disables the gate.
+              </p>
+            </div>
             <SubmitButton>Save</SubmitButton>
           </form>
         </CardContent>

@@ -4,6 +4,39 @@ import { notifyProjectReviewers, notifyUser } from "@/lib/notifications/inbox";
 import { applyUrl, dashboardUrl, sendEmail } from "@/lib/notifications/email";
 import { enqueueProjectWebhook } from "@/lib/notifications/webhooks";
 
+/** Thrown by approveApplication when the project's review gate is not met. */
+export class ApprovalGateError extends Error {
+  constructor(
+    public readonly required: number,
+    public readonly have: number,
+  ) {
+    super(`approval_gate_blocked: have ${have}, need ${required}`);
+    this.name = "ApprovalGateError";
+  }
+}
+
+/**
+ * Count distinct authors who have submitted an APPROVED review on this
+ * application, excluding `excludeUserId` (the actor — reviewers can't
+ * self-approve toward the gate). Soft-dismissed reviews don't count.
+ */
+export async function countApprovingReviewers(args: {
+  applicationId: string;
+  excludeUserId: string;
+}): Promise<number> {
+  const rows = await prisma.applicationReview.findMany({
+    where: {
+      applicationId: args.applicationId,
+      state: "APPROVED",
+      deletedAt: null,
+      authorId: { not: args.excludeUserId },
+    },
+    select: { authorId: true },
+  });
+  const distinct = new Set(rows.map((r) => r.authorId));
+  return distinct.size;
+}
+
 async function emailUser(args: {
   userId: string;
   subject: string;
@@ -48,11 +81,30 @@ export async function approveApplication(args: {
   const app = await prisma.application.findUnique({
     where: { id: args.applicationId },
     include: {
-      project: { select: { id: true, name: true, slug: true } },
+      project: {
+        select: {
+          id: true,
+          name: true,
+          slug: true,
+          requireApprovalCount: true,
+        },
+      },
       user: { select: { ghLogin: true } },
     },
   });
   if (!app) throw new Error("Application not found");
+
+  // PR-style approval gate: require N distinct LGTMs from other reviewers
+  // before this approval is allowed. Skipped when requireApprovalCount=0.
+  if (app.project.requireApprovalCount > 0) {
+    const have = await countApprovingReviewers({
+      applicationId: app.id,
+      excludeUserId: args.decidedById,
+    });
+    if (have < app.project.requireApprovalCount) {
+      throw new ApprovalGateError(app.project.requireApprovalCount, have);
+    }
+  }
 
   const updated = await prisma.application.update({
     where: { id: args.applicationId },

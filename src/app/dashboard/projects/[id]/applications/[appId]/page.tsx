@@ -2,7 +2,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db";
-import { requireProjectRole } from "@/lib/authz";
+import { requireProjectRole, getProjectMembership, roleAtLeast, type Role } from "@/lib/authz";
 import { parseFormSchema } from "@/lib/applications/schema";
 import {
   Card,
@@ -18,6 +18,11 @@ import { approveAction, denyAction, revokeAction, addNoteAction } from "./action
 import { computeScore } from "@/lib/quality/score";
 import { ALL_HEURISTICS, parseQualityConfig } from "@/lib/quality/registry";
 import type { SignalsRaw } from "@/lib/quality/types";
+import { countApprovingReviewers } from "@/lib/applications/decide";
+import { FieldThread, type FieldThreadNote } from "./_components/field-thread";
+import { NoteCard } from "./_components/note-card";
+import { ReviewComposer, type DraftComment } from "./_components/review-composer";
+import { ReviewsList, type ReviewListItem } from "./_components/reviews-list";
 
 const STATUS_VARIANT: Record<
   string,
@@ -48,15 +53,31 @@ export default async function ApplicationDetail({
           cooldownDays: true,
           qualityEnabled: true,
           qualityConfig: true,
+          requireApprovalCount: true,
         },
       },
       notes: {
-        include: { author: { select: { ghLogin: true } } },
+        include: { author: { select: { id: true, ghLogin: true } } },
         orderBy: { createdAt: "asc" },
+      },
+      reviews: {
+        include: { author: { select: { id: true, ghLogin: true } } },
+        orderBy: { submittedAt: "asc" },
       },
     },
   });
   if (!app) notFound();
+
+  const membership = await getProjectMembership(id, session.user.id);
+  const viewerRole = (membership?.role ?? "REVIEWER") as Role;
+  const canModerate = roleAtLeast(viewerRole, "ADMIN");
+
+  const approvingReviewerCount = await countApprovingReviewers({
+    applicationId: app.id,
+    excludeUserId: session.user.id,
+  });
+  const requiredApprovals = app.project.requireApprovalCount;
+  const gateMet = requiredApprovals === 0 || approvingReviewerCount >= requiredApprovals;
 
   // Aggregate this user's PR Quality across all PRs in the project (any
   // status). The averages help reviewers judge a SUBMITTED application by
@@ -115,6 +136,67 @@ export default async function ApplicationDetail({
       return {};
     }
   })();
+
+  // Partition notes by their role:
+  //  - field threads: anchored to a form field (fieldId set)
+  //  - replies: parentId set (rendered nested under their parent)
+  //  - general notes: unattached (legacy "Internal notes" card)
+  // All visible to project members; the applicant only sees the
+  // applicant-visible subset on /p/<slug>.
+  const allNotes = app.notes as FieldThreadNote[];
+  const fieldNotes = allNotes.filter((n) => n.fieldId !== null);
+  const generalNotes = allNotes.filter(
+    (n) => n.fieldId === null && n.parentId === null,
+  );
+  const generalReplies = allNotes.filter(
+    (n) => n.fieldId === null && n.parentId !== null,
+  );
+  const generalRepliesByParent = new Map<string, FieldThreadNote[]>();
+  for (const r of generalReplies) {
+    if (!r.parentId) continue;
+    const list = generalRepliesByParent.get(r.parentId) ?? [];
+    list.push(r);
+    generalRepliesByParent.set(r.parentId, list);
+  }
+
+  // Reviewer's own draft per-field comments (not yet attached to a review).
+  const myDrafts: DraftComment[] = fieldNotes
+    .filter(
+      (n) =>
+        n.author.id === session.user.id &&
+        n.reviewId === null &&
+        n.deletedAt === null &&
+        n.parentId === null,
+    )
+    .map((n) => {
+      const f = fields.find((x) => x.id === n.fieldId);
+      return {
+        id: n.id,
+        fieldId: n.fieldId,
+        fieldLabel: f?.label ?? null,
+        bodyPreview:
+          n.body.length > 80 ? n.body.slice(0, 77) + "…" : n.body,
+      };
+    });
+
+  const reviewsListData: ReviewListItem[] = app.reviews.map((r) => ({
+    id: r.id,
+    state: r.state,
+    body: r.body,
+    visibility: r.visibility,
+    submittedAt: r.submittedAt,
+    deletedAt: r.deletedAt,
+    author: { ghLogin: r.author.ghLogin },
+    commentCount: fieldNotes.filter(
+      (n) => n.reviewId === r.id && n.deletedAt === null,
+    ).length,
+  }));
+
+  const viewer = {
+    userId: session.user.id,
+    canModerate,
+    isApplicant: false,
+  };
 
   const isPending = app.status === "SUBMITTED";
   const isApproved = app.status === "APPROVED";
@@ -188,6 +270,13 @@ export default async function ApplicationDetail({
                         return typeof v === "string" && v.length > 0 ? v : "—";
                       })()}
                 </div>
+                <FieldThread
+                  fieldId={f.id}
+                  notes={fieldNotes}
+                  projectId={id}
+                  appId={app.id}
+                  viewer={viewer}
+                />
               </div>
             ))
           )}
@@ -226,7 +315,26 @@ export default async function ApplicationDetail({
                     rows={2}
                     placeholder="Welcome aboard…"
                   />
-                  <SubmitButton variant="success">Approve</SubmitButton>
+                  {requiredApprovals > 0 && (
+                    <p className="text-xs text-muted-foreground">
+                      Approval gate:{" "}
+                      <Badge
+                        variant={gateMet ? "success" : "warning"}
+                        className="ml-1 text-[10px]"
+                      >
+                        {approvingReviewerCount}/{requiredApprovals} approving review
+                        {requiredApprovals === 1 ? "" : "s"} from other reviewers
+                      </Badge>
+                      {!gateMet && (
+                        <span className="ml-1">
+                          — collect more LGTMs before approving.
+                        </span>
+                      )}
+                    </p>
+                  )}
+                  <SubmitButton variant="success" disabled={!gateMet}>
+                    Approve
+                  </SubmitButton>
                 </form>
                 <form action={denyAction} className="space-y-2">
                   <input type="hidden" name="projectId" value={id} />
@@ -381,25 +489,63 @@ export default async function ApplicationDetail({
 
       <Card>
         <CardHeader>
+          <CardTitle className="text-base">Reviews</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <ReviewsList
+            reviews={reviewsListData}
+            projectId={id}
+            appId={app.id}
+            canDismiss={canModerate}
+          />
+        </CardContent>
+      </Card>
+
+      {isPending && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Submit a review</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ReviewComposer
+              projectId={id}
+              appId={app.id}
+              drafts={myDrafts}
+            />
+          </CardContent>
+        </Card>
+      )}
+
+      <Card>
+        <CardHeader>
           <CardTitle className="text-base">Internal notes</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
-          {app.notes.length === 0 ? (
+          {generalNotes.length === 0 ? (
             <p className="text-sm text-muted-foreground">
-              No notes yet. Notes are visible only to project members.
+              No notes yet. Notes are visible only to project members. Markdown
+              is supported.
             </p>
           ) : (
             <ul className="space-y-3">
-              {app.notes.map((n) => (
-                <li
-                  key={n.id}
-                  className="rounded-md border border-border bg-muted/30 p-3 text-sm"
-                >
-                  <div className="mb-1 text-xs text-muted-foreground">
-                    {n.author.ghLogin} ·{" "}
-                    {n.createdAt.toISOString().replace("T", " ").slice(0, 16)}
-                  </div>
-                  <div className="whitespace-pre-wrap">{n.body}</div>
+              {generalNotes.map((n) => (
+                <li key={n.id} className="space-y-2">
+                  <NoteCard
+                    note={n}
+                    projectId={id}
+                    appId={app.id}
+                    viewer={viewer}
+                  />
+                  {(generalRepliesByParent.get(n.id) ?? []).map((r) => (
+                    <div key={r.id} className="ml-4">
+                      <NoteCard
+                        note={r}
+                        projectId={id}
+                        appId={app.id}
+                        viewer={viewer}
+                      />
+                    </div>
+                  ))}
                 </li>
               ))}
             </ul>
@@ -407,12 +553,11 @@ export default async function ApplicationDetail({
           <form action={addNoteAction} className="space-y-2">
             <input type="hidden" name="projectId" value={id} />
             <input type="hidden" name="appId" value={app.id} />
-            <input type="hidden" name="actorId" value={session.user.id} />
             <Textarea
               name="body"
               rows={2}
               required
-              placeholder="Add a note for the team…"
+              placeholder="Add a note for the team… (markdown supported)"
             />
             <SubmitButton size="sm" variant="outline">
               Post note

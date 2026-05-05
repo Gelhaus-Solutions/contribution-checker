@@ -135,6 +135,72 @@ export function buildAnswersSchema(fields: FormSchema) {
   return z.object(shape);
 }
 
+// ----- Review-process schemas (server-action input validation) -----
+
+const NOTE_BODY_MAX = 4000;
+
+export const reviewStateSchema = z.enum([
+  "APPROVED",
+  "CHANGES_REQUESTED",
+  "COMMENTED",
+]);
+
+export const reviewVisibilitySchema = z.enum(["INTERNAL", "APPLICANT"]);
+
+export const submitReviewSchema = z.object({
+  projectId: z.string().min(1),
+  appId: z.string().min(1),
+  state: reviewStateSchema,
+  body: z.string().max(NOTE_BODY_MAX).optional().default(""),
+  // Only honored when state="COMMENTED"; otherwise derived from state.
+  visibility: reviewVisibilitySchema.optional(),
+  // Draft per-field comments to attach. Authorship + ownership re-checked
+  // server-side before linking.
+  draftCommentIds: z.array(z.string().min(1)).max(40).default([]),
+});
+
+export const fieldCommentSchema = z.object({
+  projectId: z.string().min(1),
+  appId: z.string().min(1),
+  fieldId: fieldIdSchema,
+  body: z.string().min(1).max(NOTE_BODY_MAX),
+});
+
+export const editNoteSchema = z.object({
+  projectId: z.string().min(1),
+  appId: z.string().min(1),
+  noteId: z.string().min(1),
+  body: z.string().min(1).max(NOTE_BODY_MAX),
+});
+
+export const deleteNoteSchema = z.object({
+  projectId: z.string().min(1),
+  appId: z.string().min(1),
+  noteId: z.string().min(1),
+});
+
+export const replyToCommentSchema = z.object({
+  projectId: z.string().min(1),
+  appId: z.string().min(1),
+  parentId: z.string().min(1),
+  body: z.string().min(1).max(NOTE_BODY_MAX),
+});
+
+export const dismissReviewSchema = z.object({
+  projectId: z.string().min(1),
+  appId: z.string().min(1),
+  reviewId: z.string().min(1),
+});
+
+export function visibilityForReviewState(
+  state: z.infer<typeof reviewStateSchema>,
+  chosen: z.infer<typeof reviewVisibilitySchema> | undefined,
+): "INTERNAL" | "APPLICANT" {
+  if (state === "APPROVED") return "INTERNAL";
+  if (state === "CHANGES_REQUESTED") return "APPLICANT";
+  return chosen ?? "INTERNAL";
+}
+
 export const DEFAULT_FORM_SCHEMA: FormSchema = [
   {
     id: "motivation",

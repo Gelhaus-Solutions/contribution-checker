@@ -24,6 +24,9 @@ const settingsSchema = z.object({
   cooldownDays: z
     .union([z.string().length(0), z.coerce.number().int().min(0).max(3650)])
     .optional(),
+  requireApprovalCount: z
+    .union([z.string().length(0), z.coerce.number().int().min(0).max(10)])
+    .optional(),
 });
 
 export async function updateProjectSettings(formData: FormData) {
@@ -33,13 +36,20 @@ export async function updateProjectSettings(formData: FormData) {
     slug: formData.get("slug"),
     description: String(formData.get("description") ?? "").trim() || undefined,
     cooldownDays: formData.get("cooldownDays") ?? undefined,
+    requireApprovalCount: formData.get("requireApprovalCount") ?? undefined,
   });
 
   const { session } = await requireProjectRole(parsed.projectId, "ADMIN");
 
   const before = await prisma.project.findUnique({
     where: { id: parsed.projectId },
-    select: { name: true, slug: true, description: true, cooldownDays: true },
+    select: {
+      name: true,
+      slug: true,
+      description: true,
+      cooldownDays: true,
+      requireApprovalCount: true,
+    },
   });
   if (!before) throw new Error("Project not found");
 
@@ -55,6 +65,10 @@ export async function updateProjectSettings(formData: FormData) {
 
   const cooldown =
     typeof parsed.cooldownDays === "number" ? parsed.cooldownDays : null;
+  const requireApprovalCount =
+    typeof parsed.requireApprovalCount === "number"
+      ? parsed.requireApprovalCount
+      : 0;
 
   await prisma.project.update({
     where: { id: parsed.projectId },
@@ -63,6 +77,7 @@ export async function updateProjectSettings(formData: FormData) {
       slug: parsed.slug,
       description: parsed.description ?? null,
       cooldownDays: cooldown,
+      requireApprovalCount,
     },
   });
 
@@ -77,6 +92,10 @@ export async function updateProjectSettings(formData: FormData) {
           slug: [before.slug, parsed.slug],
           description: [before.description, parsed.description ?? null],
           cooldownDays: [before.cooldownDays, cooldown],
+          requireApprovalCount: [
+            before.requireApprovalCount,
+            requireApprovalCount,
+          ],
         }).filter(([, [a, b]]) => a !== b)
       ),
     },
