@@ -6,6 +6,8 @@ export type NotificationKind =
   | "application.denied"
   | "application.revoked"
   | "application.note_added"
+  | "application.review_submitted"
+  | "application.comment_replied"
   | "project.invited"
   | "pr.blocked";
 
