@@ -1,6 +1,7 @@
 import Link from "next/link";
-import { auth } from "@/auth";
+import { auth, signIn } from "@/auth";
 import { Button } from "@/components/ui/button";
+import { SubmitButton } from "@/components/ui/submit-button";
 import { SiteHeader } from "@/components/site-header";
 
 export default async function Home() {
@@ -24,9 +25,14 @@ export default async function Home() {
               <Link href="/dashboard">Go to dashboard</Link>
             </Button>
           ) : (
-            <Button asChild>
-              <Link href="/api/auth/signin">Sign in with GitHub</Link>
-            </Button>
+            <form
+              action={async () => {
+                "use server";
+                await signIn("github");
+              }}
+            >
+              <SubmitButton>Sign in with GitHub</SubmitButton>
+            </form>
           )}
         </div>
       </main>

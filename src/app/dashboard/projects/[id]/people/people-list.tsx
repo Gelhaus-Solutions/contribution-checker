@@ -52,9 +52,11 @@ type SearchField = "ALL" | "login" | "reason" | "reviewer";
 export function PeopleList({
   projectId,
   people,
+  canEdit,
 }: {
   projectId: string;
   people: PersonRow[];
+  canEdit: boolean;
 }) {
   const [query, setQuery] = useState("");
   const [searchField, setSearchField] = useState<SearchField>("ALL");
@@ -228,7 +230,7 @@ export function PeopleList({
                     </Link>
                   </Button>
                 )}
-                {d.manual && (
+                {d.manual && canEdit && (
                   <form action={removeManualDecision}>
                     <input type="hidden" name="projectId" value={projectId} />
                     <input type="hidden" name="decisionId" value={d.manual.id} />
@@ -251,6 +253,7 @@ export function PeopleList({
         <UserOverviewDialog
           projectId={projectId}
           ghLogin={openLogin}
+          canEdit={canEdit}
           onClose={() => setOpenLogin(null)}
         />
       )}
@@ -285,10 +288,12 @@ function FilterChip({
 function UserOverviewDialog({
   projectId,
   ghLogin,
+  canEdit,
   onClose,
 }: {
   projectId: string;
   ghLogin: string;
+  canEdit: boolean;
   onClose: () => void;
 }) {
   const [data, setData] = useState<UserOverview | null>(null);
@@ -419,27 +424,29 @@ function UserOverviewDialog({
                       {data.application.reason}
                     </p>
                   )}
-                  <div className="mt-3 flex flex-wrap items-center gap-2">
-                    <span className="text-xs text-muted-foreground">
-                      Set state:
-                    </span>
-                    {(
-                      ["PENDING", "SUBMITTED", "APPROVED", "DENIED"] as const
-                    ).map((t) => (
-                      <Button
-                        key={t}
-                        size="sm"
-                        variant="outline"
-                        loading={feedback.isLoading(`status:${t}`)}
-                        success={feedback.isSuccess(`status:${t}`)}
-                        disabled={feedback.isAnyLoading}
-                        onClick={() => setStatus(t)}
-                        className="h-7 px-2 text-[11px]"
-                      >
-                        {t}
-                      </Button>
-                    ))}
-                  </div>
+                  {canEdit && (
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <span className="text-xs text-muted-foreground">
+                        Set state:
+                      </span>
+                      {(
+                        ["PENDING", "SUBMITTED", "APPROVED", "DENIED"] as const
+                      ).map((t) => (
+                        <Button
+                          key={t}
+                          size="sm"
+                          variant="outline"
+                          loading={feedback.isLoading(`status:${t}`)}
+                          success={feedback.isSuccess(`status:${t}`)}
+                          disabled={feedback.isAnyLoading}
+                          onClick={() => setStatus(t)}
+                          className="h-7 px-2 text-[11px]"
+                        >
+                          {t}
+                        </Button>
+                      ))}
+                    </div>
+                  )}
                   <div className="mt-3">
                     <Link
                       className="text-xs underline"
@@ -475,28 +482,30 @@ function UserOverviewDialog({
                       {data.manualDecision.reason}
                     </p>
                   )}
-                  <div className="mt-3 flex flex-wrap items-center gap-2">
-                    <span className="text-xs text-muted-foreground">
-                      Set decision:
-                    </span>
-                    {(["APPROVED", "DENIED"] as const).map((s) => (
-                      <Button
-                        key={s}
-                        size="sm"
-                        variant="outline"
-                        loading={feedback.isLoading(`manual:${s}`)}
-                        success={feedback.isSuccess(`manual:${s}`)}
-                        disabled={
-                          feedback.isAnyLoading ||
-                          data.manualDecision?.status === s
-                        }
-                        onClick={() => setManual(s)}
-                        className="h-7 px-2 text-[11px]"
-                      >
-                        {s}
-                      </Button>
-                    ))}
-                  </div>
+                  {canEdit && (
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <span className="text-xs text-muted-foreground">
+                        Set decision:
+                      </span>
+                      {(["APPROVED", "DENIED"] as const).map((s) => (
+                        <Button
+                          key={s}
+                          size="sm"
+                          variant="outline"
+                          loading={feedback.isLoading(`manual:${s}`)}
+                          success={feedback.isSuccess(`manual:${s}`)}
+                          disabled={
+                            feedback.isAnyLoading ||
+                            data.manualDecision?.status === s
+                          }
+                          onClick={() => setManual(s)}
+                          className="h-7 px-2 text-[11px]"
+                        >
+                          {s}
+                        </Button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </section>
             )}

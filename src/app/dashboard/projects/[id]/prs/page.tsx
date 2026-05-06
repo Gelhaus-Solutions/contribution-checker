@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/db";
-import { requireProjectRole } from "@/lib/authz";
+import { requireProjectRole, roleAtLeast } from "@/lib/authz";
 import {
   Card,
   CardContent,
@@ -34,7 +34,8 @@ export default async function ProjectPRs({
 }) {
   const { id } = await params;
   const sp = await searchParams;
-  await requireProjectRole(id, "ADMIN");
+  const { role } = await requireProjectRole(id, "REVIEWER");
+  const canEdit = roleAtLeast(role, "ADMIN");
 
   const project = await prisma.project.findUnique({
     where: { id },
@@ -119,6 +120,7 @@ export default async function ProjectPRs({
           rows={rows}
           repos={repoOptions}
           qualityEnabled={project.qualityEnabled}
+          canEdit={canEdit}
           initialFilters={initialFilters}
           initialOpenId={
             sp.open && rows.some((r) => r.id === sp.open) ? sp.open : null

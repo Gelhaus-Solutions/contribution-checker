@@ -59,6 +59,7 @@ export function PrsList({
   rows,
   repos,
   qualityEnabled,
+  canEdit,
   initialFilters,
   initialOpenId,
 }: {
@@ -66,6 +67,7 @@ export function PrsList({
   rows: PrRow[];
   repos: RepoOption[];
   qualityEnabled: boolean;
+  canEdit: boolean;
   initialFilters: Filters;
   initialOpenId?: string | null;
 }) {
@@ -362,6 +364,7 @@ export function PrsList({
         <PrOverviewDialog
           projectId={projectId}
           prCheckId={openId}
+          canEdit={canEdit}
           onClose={() => setOpenId(null)}
         />
       )}
@@ -379,10 +382,12 @@ function parseScore(v: string): number | null {
 function PrOverviewDialog({
   projectId,
   prCheckId,
+  canEdit,
   onClose,
 }: {
   projectId: string;
   prCheckId: string;
+  canEdit: boolean;
   onClose: () => void;
 }) {
   const [data, setData] = useState<PrOverview | null>(null);
@@ -656,7 +661,7 @@ function PrOverviewDialog({
             )}
 
             <div className="flex flex-wrap items-center gap-2 pt-2">
-              {data.qualityEnabled && (
+              {canEdit && data.qualityEnabled && (
                 <Button
                   size="sm"
                   variant="outline"
@@ -673,21 +678,23 @@ function PrOverviewDialog({
                   Rescan quality
                 </Button>
               )}
-              <Button
-                size="sm"
-                variant="outline"
-                loading={feedback.isLoading("reeval")}
-                success={feedback.isSuccess("reeval")}
-                disabled={feedback.isAnyLoading || data.mode !== "app"}
-                onClick={onReevaluate}
-                title={
-                  data.mode !== "app"
-                    ? "CI-mode repos re-evaluate on the next workflow run."
-                    : undefined
-                }
-              >
-                Re-evaluate
-              </Button>
+              {canEdit && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  loading={feedback.isLoading("reeval")}
+                  success={feedback.isSuccess("reeval")}
+                  disabled={feedback.isAnyLoading || data.mode !== "app"}
+                  onClick={onReevaluate}
+                  title={
+                    data.mode !== "app"
+                      ? "CI-mode repos re-evaluate on the next workflow run."
+                      : undefined
+                  }
+                >
+                  Re-evaluate
+                </Button>
+              )}
               <a
                 className="ml-auto text-xs underline"
                 href={`/dashboard/projects/${projectId}/prs?author=${encodeURIComponent(data.authorGhLogin)}`}

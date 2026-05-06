@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/db";
-import { requireProjectRole } from "@/lib/authz";
+import { requireProjectRole, roleAtLeast } from "@/lib/authz";
 import {
   Card,
   CardContent,
@@ -39,7 +39,8 @@ export default async function ProjectQualityPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  await requireProjectRole(id, "ADMIN");
+  const { role } = await requireProjectRole(id, "REVIEWER");
+  const canEdit = roleAtLeast(role, "ADMIN");
 
   const project = await prisma.project.findUnique({
     where: { id },
@@ -65,6 +66,12 @@ export default async function ProjectQualityPage({
 
   return (
     <div className="space-y-6">
+      {!canEdit && (
+        <p className="text-sm text-muted-foreground">
+          You have reviewer access. Editing quality settings requires admin
+          permissions.
+        </p>
+      )}
       <Card>
         <CardHeader>
           <CardTitle className="text-base">PR Quality scoring</CardTitle>
@@ -77,6 +84,7 @@ export default async function ProjectQualityPage({
         </CardHeader>
         <CardContent>
           <form action={updateQualityCore} className="space-y-4">
+            <fieldset disabled={!canEdit} className="space-y-4">
             <input type="hidden" name="projectId" value={project.id} />
             <label className="flex items-start gap-3 text-sm">
               <input
@@ -145,7 +153,8 @@ export default async function ProjectQualityPage({
                 </p>
               </div>
             </div>
-            <SubmitButton>Save</SubmitButton>
+            <SubmitButton disabled={!canEdit}>Save</SubmitButton>
+            </fieldset>
           </form>
         </CardContent>
       </Card>
@@ -160,6 +169,7 @@ export default async function ProjectQualityPage({
         </CardHeader>
         <CardContent>
           <form action={updateQualityHeuristics} className="space-y-6">
+            <fieldset disabled={!canEdit} className="space-y-6">
             <input type="hidden" name="projectId" value={project.id} />
             {grouped.map((g) => (
               <section key={g.group} className="space-y-3">
@@ -242,35 +252,38 @@ export default async function ProjectQualityPage({
                 </ul>
               </section>
             ))}
-            <SubmitButton>Save heuristics</SubmitButton>
+            <SubmitButton disabled={!canEdit}>Save heuristics</SubmitButton>
+            </fieldset>
           </form>
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Backfill</CardTitle>
-          <CardDescription>
-            Score every existing PR in this project (max 200 per run). Useful
-            after enabling quality scoring or after large config changes that
-            require re-fetching diffs (e.g. switching account-level
-            heuristics on).
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form action={backfillQuality}>
-            <input type="hidden" name="projectId" value={project.id} />
-            <SubmitButton variant="outline" disabled={!project.qualityEnabled}>
-              Run backfill
-            </SubmitButton>
-            {!project.qualityEnabled && (
-              <p className="mt-2 text-xs text-muted-foreground">
-                Enable quality scoring above before backfilling.
-              </p>
-            )}
-          </form>
-        </CardContent>
-      </Card>
+      {canEdit && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Backfill</CardTitle>
+            <CardDescription>
+              Score every existing PR in this project (max 200 per run). Useful
+              after enabling quality scoring or after large config changes that
+              require re-fetching diffs (e.g. switching account-level
+              heuristics on).
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <form action={backfillQuality}>
+              <input type="hidden" name="projectId" value={project.id} />
+              <SubmitButton variant="outline" disabled={!project.qualityEnabled}>
+                Run backfill
+              </SubmitButton>
+              {!project.qualityEnabled && (
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Enable quality scoring above before backfilling.
+                </p>
+              )}
+            </form>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }
