@@ -9,9 +9,11 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { env } from "@/lib/env";
+import { getAppSlug } from "@/lib/github/app";
 
 export default async function AdminHome() {
   await requireSuperAdmin();
+  const slug = env.githubAppConfigured ? await getAppSlug() : null;
 
   return (
     <>
@@ -44,9 +46,9 @@ export default async function AdminHome() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            {env.githubAppConfigured ? (
+            {slug ? (
               <p className="text-sm text-muted-foreground">
-                Configured: <code>{env.GITHUB_APP_SLUG}</code>
+                Configured: <code>{slug}</code>
               </p>
             ) : (
               <Link

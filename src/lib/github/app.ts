@@ -62,6 +62,17 @@ export function invalidateGitHubAppCache(): void {
   cached = null;
 }
 
+const DEFAULT_APP_SLUG = "contribution-checker";
+
+/**
+ * Resolve the GitHub App slug (Vault → env → built-in default). Used by the
+ * install-URL builder and a few admin display surfaces.
+ */
+export async function getAppSlug(): Promise<string> {
+  const v = await getSecret("GITHUB_APP_SLUG");
+  return v && v.length > 0 ? v : DEFAULT_APP_SLUG;
+}
+
 /**
  * GitHub App private keys are sometimes stored in env (or Vault) as a
  * single-line string with literal "\n" characters. Normalize back to real

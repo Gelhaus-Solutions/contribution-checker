@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
 import { requireProjectRole } from "@/lib/authz";
 import { env } from "@/lib/env";
+import { getAppSlug } from "@/lib/github/app";
 import { notFound } from "next/navigation";
 import {
   Card,
@@ -202,7 +203,7 @@ export default async function ProjectRepos({
 
   const baseUrl = env.PUBLIC_BASE_URL.replace(/\/$/, "");
   const installUrl = env.githubAppConfigured
-    ? `https://github.com/apps/${env.GITHUB_APP_SLUG}/installations/new?state=${encodeURIComponent(id)}`
+    ? `https://github.com/apps/${await getAppSlug()}/installations/new?state=${encodeURIComponent(id)}`
     : null;
   const gateYaml = ciGateYaml(baseUrl, project.slug);
   const reconcileYaml = ciReconcileYaml(baseUrl, project.slug);

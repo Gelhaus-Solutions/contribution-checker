@@ -10,11 +10,13 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { env } from "@/lib/env";
+import { getAppSlug } from "@/lib/github/app";
 
 // Public on purpose: the URLs aren't sensitive, and operators need to see
 // them BEFORE sign-in is configured (chicken-and-egg in single-App mode).
-export default function GitHubAppSetup() {
+export default async function GitHubAppSetup() {
   const base = env.PUBLIC_BASE_URL.replace(/\/$/, "");
+  const slug = env.githubAppConfigured ? await getAppSlug() : null;
   const webhookUrl = `${base}/api/github/webhook`;
   const oauthCallbackUrl = `${base}/api/auth/callback/github`;
   const homepageUrl = base;
@@ -29,12 +31,12 @@ export default function GitHubAppSetup() {
             Manual setup — one App handles both sign-in (user-to-server OAuth)
             and repo automation (installation tokens).
           </p>
-          {env.githubAppConfigured && (
+          {slug && (
             <div className="mt-3 rounded-md border border-success/40 bg-success/10 px-3 py-2 text-sm">
               <Badge variant="success" className="mr-2">
                 Configured
               </Badge>
-              <code>{env.GITHUB_APP_SLUG}</code>
+              <code>{slug}</code>
             </div>
           )}
         </div>

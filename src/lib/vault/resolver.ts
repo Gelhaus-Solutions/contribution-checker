@@ -20,10 +20,14 @@ export const KNOWN_SECRET_NAMES = [
   "GITHUB_APP_WEBHOOK_SECRET",
   "GITHUB_APP_CLIENT_ID",
   "GITHUB_APP_CLIENT_SECRET",
+  "GITHUB_APP_SLUG",
   "AUTH_GITHUB_ID",
   "AUTH_GITHUB_SECRET",
+  "SMTP_HOST",
+  "SMTP_PORT",
   "SMTP_USER",
   "SMTP_PASS",
+  "SMTP_FROM",
 ] as const;
 
 export type SecretName = (typeof KNOWN_SECRET_NAMES)[number] | string;

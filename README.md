@@ -217,11 +217,12 @@ See [`.env.example`](./.env.example). Highlights:
 
 ## Secrets via HashiCorp Vault
 
-When `VAULT_ADDR` is set, the following secrets can be sourced from Vault
+When `VAULT_ADDR` is set, the following values can be sourced from Vault
 instead of plain env vars: `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`,
 `GITHUB_APP_WEBHOOK_SECRET`, `GITHUB_APP_CLIENT_ID`,
-`GITHUB_APP_CLIENT_SECRET`, `AUTH_GITHUB_ID`, `AUTH_GITHUB_SECRET`,
-`SMTP_USER`, `SMTP_PASS`.
+`GITHUB_APP_CLIENT_SECRET`, `GITHUB_APP_SLUG`, `AUTH_GITHUB_ID`,
+`AUTH_GITHUB_SECRET`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`,
+`SMTP_FROM`.
 
 `DATABASE_URL` and `AUTH_SECRET` remain env-only — they're consumed
 synchronously at module load (Prisma client and Auth.js cookie crypto), and
@@ -254,9 +255,13 @@ $ vault kv put secret/cc/github \
     app_id=12345 \
     private_key=@./key.pem \
     webhook_secret=$(openssl rand -hex 32) \
-    client_id=Iv1.xxx client_secret=yyy
+    client_id=Iv1.xxx client_secret=yyy \
+    slug=my-contribution-checker
 
-$ vault kv put secret/cc/smtp user=mailer pass=...
+$ vault kv put secret/cc/smtp \
+    host=smtp.example.com port=587 \
+    user=mailer pass=... \
+    from="Contribution Checker <noreply@example.com>"
 ```
 
 Then in the env:
@@ -267,8 +272,12 @@ VAULT_GITHUB_APP_PRIVATE_KEY_PATH=secret/data/cc/github#private_key
 VAULT_GITHUB_APP_WEBHOOK_SECRET_PATH=secret/data/cc/github#webhook_secret
 VAULT_GITHUB_APP_CLIENT_ID_PATH=secret/data/cc/github#client_id
 VAULT_GITHUB_APP_CLIENT_SECRET_PATH=secret/data/cc/github#client_secret
+VAULT_GITHUB_APP_SLUG_PATH=secret/data/cc/github#slug
+VAULT_SMTP_HOST_PATH=secret/data/cc/smtp#host
+VAULT_SMTP_PORT_PATH=secret/data/cc/smtp#port
 VAULT_SMTP_USER_PATH=secret/data/cc/smtp#user
 VAULT_SMTP_PASS_PATH=secret/data/cc/smtp#password
+VAULT_SMTP_FROM_PATH=secret/data/cc/smtp#from
 ```
 
 ### Resolution rules
