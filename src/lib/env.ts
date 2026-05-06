@@ -121,7 +121,8 @@ export const env = {
     presentInEnvOrVault("GITHUB_APP_ID") &&
     presentInEnvOrVault("GITHUB_APP_PRIVATE_KEY") &&
     presentInEnvOrVault("GITHUB_APP_WEBHOOK_SECRET"),
-  smtpConfigured: !!raw.SMTP_HOST && !!raw.SMTP_FROM,
+  smtpConfigured:
+    presentInEnvOrVault("SMTP_HOST") && presentInEnvOrVault("SMTP_FROM"),
   vaultEnabled: !!raw.VAULT_ADDR,
 };
 
