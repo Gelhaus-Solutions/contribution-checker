@@ -213,6 +213,83 @@ See [`.env.example`](./.env.example). Highlights:
 - `SUPER_ADMINS` — comma-separated GitHub logins, granted super-admin on first sign-in
 - `PROJECT_CREATORS` — comma-separated logins, granted project-creation rights on first sign-in
 - `SMTP_*` — optional, SMTP transport for email notifications
+- `VAULT_*` — optional, source secrets from HashiCorp Vault (see below)
+
+## Secrets via HashiCorp Vault
+
+When `VAULT_ADDR` is set, the following secrets can be sourced from Vault
+instead of plain env vars: `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`,
+`GITHUB_APP_WEBHOOK_SECRET`, `GITHUB_APP_CLIENT_ID`,
+`GITHUB_APP_CLIENT_SECRET`, `AUTH_GITHUB_ID`, `AUTH_GITHUB_SECRET`,
+`SMTP_USER`, `SMTP_PASS`.
+
+`DATABASE_URL` and `AUTH_SECRET` remain env-only — they're consumed
+synchronously at module load (Prisma client and Auth.js cookie crypto), and
+moving them behind Vault would require a wider refactor.
+
+### Auth methods
+
+Set `VAULT_AUTH_METHOD` to one of:
+
+- `token` (default) — provide `VAULT_TOKEN`. Easiest for dev and small deployments.
+- `approle` — provide `VAULT_APPROLE_ROLE_ID` + `VAULT_APPROLE_SECRET_ID`
+  (and optionally `VAULT_APPROLE_MOUNT`, default `approle`).
+
+`VAULT_NAMESPACE` is supported for Vault Enterprise namespaces.
+
+### Per-secret paths
+
+Each secret is mapped via its own env var: `VAULT_<NAME>_PATH`. Format:
+
+```
+secret/data/<path>[#<field>]
+```
+
+If `#field` is omitted, the resolver looks for a key named `value`.
+
+Example KV v2 layout (one path per logical group):
+
+```
+$ vault kv put secret/cc/github \
+    app_id=12345 \
+    private_key=@./key.pem \
+    webhook_secret=$(openssl rand -hex 32) \
+    client_id=Iv1.xxx client_secret=yyy
+
+$ vault kv put secret/cc/smtp user=mailer pass=...
+```
+
+Then in the env:
+
+```
+VAULT_GITHUB_APP_ID_PATH=secret/data/cc/github#app_id
+VAULT_GITHUB_APP_PRIVATE_KEY_PATH=secret/data/cc/github#private_key
+VAULT_GITHUB_APP_WEBHOOK_SECRET_PATH=secret/data/cc/github#webhook_secret
+VAULT_GITHUB_APP_CLIENT_ID_PATH=secret/data/cc/github#client_id
+VAULT_GITHUB_APP_CLIENT_SECRET_PATH=secret/data/cc/github#client_secret
+VAULT_SMTP_USER_PATH=secret/data/cc/smtp#user
+VAULT_SMTP_PASS_PATH=secret/data/cc/smtp#password
+```
+
+### Resolution rules
+
+- A secret with a `VAULT_<NAME>_PATH` set is read from Vault on first access
+  and cached for `VAULT_CACHE_TTL_SECONDS` (default 300).
+- Without a `VAULT_<NAME>_PATH`, the resolver falls back to `process.env[NAME]`.
+- If Vault is unreachable for a secret whose path *is* configured, the
+  consumer fails fast — the webhook handler returns 500 rather than
+  proceeding with stale or missing credentials.
+- `/admin/vault` shows per-secret resolution status (no values displayed).
+
+### Sample policy
+
+A minimal Vault policy granting read on the paths above:
+
+```hcl
+path "secret/data/cc/*" {
+  capabilities = ["read"]
+}
+```
 
 ## Testing
 

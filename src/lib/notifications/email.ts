@@ -1,22 +1,33 @@
 import nodemailer from "nodemailer";
 import { env } from "@/lib/env";
+import { getSecret } from "@/lib/vault/resolver";
 import { logger } from "@/lib/logger";
 
 let transporter: nodemailer.Transporter | null = null;
+let inflight: Promise<nodemailer.Transporter | null> | null = null;
 
-function getTransporter(): nodemailer.Transporter | null {
+async function getTransporter(): Promise<nodemailer.Transporter | null> {
   if (!env.smtpConfigured) return null;
   if (transporter) return transporter;
-  transporter = nodemailer.createTransport({
-    host: env.SMTP_HOST,
-    port: env.SMTP_PORT,
-    secure: env.SMTP_PORT === 465,
-    auth:
-      env.SMTP_USER && env.SMTP_PASS
-        ? { user: env.SMTP_USER, pass: env.SMTP_PASS }
-        : undefined,
+  if (inflight) return inflight;
+
+  inflight = (async () => {
+    const [user, pass] = await Promise.all([
+      getSecret("SMTP_USER"),
+      getSecret("SMTP_PASS"),
+    ]);
+    transporter = nodemailer.createTransport({
+      host: env.SMTP_HOST,
+      port: env.SMTP_PORT,
+      secure: env.SMTP_PORT === 465,
+      auth: user && pass ? { user, pass } : undefined,
+    });
+    return transporter;
+  })().finally(() => {
+    inflight = null;
   });
-  return transporter;
+
+  return inflight;
 }
 
 export async function sendEmail(args: {
@@ -25,7 +36,7 @@ export async function sendEmail(args: {
   text: string;
   html?: string;
 }): Promise<boolean> {
-  const t = getTransporter();
+  const t = await getTransporter();
   if (!t) {
     logger.debug({ to: args.to }, "SMTP not configured, skipping email");
     return false;
@@ -51,4 +62,9 @@ export function applyUrl(slug: string): string {
 
 export function dashboardUrl(path = ""): string {
   return `${env.PUBLIC_BASE_URL.replace(/\/$/, "")}${path.startsWith("/") ? path : `/${path}`}`;
+}
+
+/** Drop the cached transporter so the next sendEmail re-resolves SMTP_USER/PASS. */
+export function invalidateMailTransporter(): void {
+  transporter = null;
 }

@@ -32,10 +32,14 @@ export type AuditKind =
   | "quality.backfill_started"
   | "quality.backfill_completed"
   | "pr.quality_rescanned"
-  | "pr.reevaluate_triggered";
+  | "pr.reevaluate_triggered"
+  // App-level (projectId may be null)
+  | "vault.resolution_failed"
+  | "vault.cache_invalidated";
 
 export async function recordAudit(args: {
-  projectId: string;
+  // Null = app-level event not tied to a project (e.g. Vault failures).
+  projectId: string | null;
   actorId: string | null;
   kind: AuditKind;
   payload?: Record<string, unknown>;

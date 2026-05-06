@@ -1,33 +1,51 @@
 import { App } from "@octokit/app";
-import { env } from "@/lib/env";
+import { getSecret } from "@/lib/vault/resolver";
 
 let cached: App | null = null;
+let inflight: Promise<App> | null = null;
 
 /**
- * Get the configured GitHub App. Throws if env vars aren't set.
- * Octokit's App handles installation token issuance and caching internally.
+ * Get the configured GitHub App. Throws if the GitHub App secrets aren't
+ * resolvable from Vault or env. Octokit's App handles installation token
+ * issuance and caching internally.
+ *
+ * Async because the secrets may live in Vault (resolved on demand).
+ * Concurrent callers share one in-flight construction promise.
  */
-export function getGitHubApp(): App {
+export async function getGitHubApp(): Promise<App> {
   if (cached) return cached;
-  if (!env.githubAppConfigured) {
-    throw new Error(
-      "GitHub App is not configured. Set GITHUB_APP_ID, GITHUB_APP_PRIVATE_KEY, and GITHUB_APP_WEBHOOK_SECRET."
-    );
-  }
-  cached = new App({
-    appId: env.GITHUB_APP_ID!,
-    privateKey: normalizePrivateKey(env.GITHUB_APP_PRIVATE_KEY!),
-    webhooks: { secret: env.GITHUB_APP_WEBHOOK_SECRET! },
-    ...(env.GITHUB_APP_CLIENT_ID && env.GITHUB_APP_CLIENT_SECRET
-      ? {
-          oauth: {
-            clientId: env.GITHUB_APP_CLIENT_ID,
-            clientSecret: env.GITHUB_APP_CLIENT_SECRET,
-          },
-        }
-      : {}),
+  if (inflight) return inflight;
+
+  inflight = (async () => {
+    const [appId, privateKey, webhookSecret, clientId, clientSecret] =
+      await Promise.all([
+        getSecret("GITHUB_APP_ID"),
+        getSecret("GITHUB_APP_PRIVATE_KEY"),
+        getSecret("GITHUB_APP_WEBHOOK_SECRET"),
+        getSecret("GITHUB_APP_CLIENT_ID"),
+        getSecret("GITHUB_APP_CLIENT_SECRET"),
+      ]);
+
+    if (!appId || !privateKey || !webhookSecret) {
+      throw new Error(
+        "GitHub App is not configured. Set GITHUB_APP_ID, GITHUB_APP_PRIVATE_KEY, and GITHUB_APP_WEBHOOK_SECRET (env or Vault)."
+      );
+    }
+    const app = new App({
+      appId,
+      privateKey: normalizePrivateKey(privateKey),
+      webhooks: { secret: webhookSecret },
+      ...(clientId && clientSecret
+        ? { oauth: { clientId, clientSecret } }
+        : {}),
+    });
+    cached = app;
+    return app;
+  })().finally(() => {
+    inflight = null;
   });
-  return cached;
+
+  return inflight;
 }
 
 /**
@@ -35,13 +53,19 @@ export function getGitHubApp(): App {
  * Use this for any repo-scoped GH API call.
  */
 export async function getInstallationOctokit(installationId: number) {
-  const app = getGitHubApp();
+  const app = await getGitHubApp();
   return app.getInstallationOctokit(installationId);
 }
 
+/** Drop the cached App so the next call re-resolves secrets (e.g. after rotation). */
+export function invalidateGitHubAppCache(): void {
+  cached = null;
+}
+
 /**
- * GitHub App private keys are sometimes stored in env as a single-line
- * string with literal "\n" characters. Normalize back to real newlines.
+ * GitHub App private keys are sometimes stored in env (or Vault) as a
+ * single-line string with literal "\n" characters. Normalize back to real
+ * newlines so the JWT signer accepts them.
  */
 function normalizePrivateKey(key: string): string {
   if (key.includes("\\n")) return key.replace(/\\n/g, "\n");
