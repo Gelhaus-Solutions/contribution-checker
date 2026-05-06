@@ -44,10 +44,12 @@ export function FormBuilder({
   projectId,
   initial,
   action,
+  canEdit,
 }: {
   projectId: string;
   initial: FormSchema;
   action: (formData: FormData) => Promise<void>;
+  canEdit: boolean;
 }) {
   const [fields, setFields] = useState<FormSchema>(initial);
   const [isPending, startTransition] = useTransition();
@@ -87,6 +89,21 @@ export function FormBuilder({
       setTimeout(() => setJustSaved(false), 1500);
     });
   };
+
+  if (!canEdit) {
+    return (
+      <div className="space-y-3">
+        <p className="text-sm text-muted-foreground">
+          You have reviewer access. Editing the form requires admin permissions.
+        </p>
+        {fields.length === 0 ? (
+          <p className="text-sm text-muted-foreground">The form is empty.</p>
+        ) : (
+          <FormRenderer fields={fields} disabled />
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="grid gap-6 lg:grid-cols-2">

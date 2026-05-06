@@ -91,7 +91,7 @@ export async function getPrOverview(args: {
   prCheckId: string;
 }): Promise<PrOverview> {
   const { projectId, prCheckId } = overviewSchema.parse(args);
-  await requireProjectRole(projectId, "ADMIN");
+  await requireProjectRole(projectId, "REVIEWER");
 
   const project = await prisma.project.findUnique({
     where: { id: projectId },

@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/db";
-import { requireProjectRole } from "@/lib/authz";
+import { requireProjectRole, roleAtLeast } from "@/lib/authz";
 import {
   Card,
   CardContent,
@@ -19,7 +19,8 @@ export default async function ProjectPeople({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  await requireProjectRole(id, "ADMIN");
+  const { role } = await requireProjectRole(id, "REVIEWER");
+  const canEdit = roleAtLeast(role, "ADMIN");
 
   const [manual, applications] = await Promise.all([
     prisma.manualDecision.findMany({
@@ -97,49 +98,51 @@ export default async function ProjectPeople({
 
   return (
     <div className="space-y-6">
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Add manual decision</CardTitle>
-          <CardDescription>
-            Pre-approve or pre-deny a GitHub user without requiring them to
-            apply. Manual decisions override applications and bypass lists.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form
-            action={addManualDecision}
-            className="flex flex-col gap-3 sm:flex-row sm:items-end"
-          >
-            <input type="hidden" name="projectId" value={id} />
-            <div className="flex-1 space-y-2">
-              <Label htmlFor="ghLogin">GitHub login</Label>
-              <Input
-                id="ghLogin"
-                name="ghLogin"
-                placeholder="octocat"
-                required
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="status">Decision</Label>
-              <select
-                id="status"
-                name="status"
-                defaultValue="APPROVED"
-                className="h-9 rounded-md border border-border bg-background px-3 text-sm"
-              >
-                <option value="APPROVED">Approve</option>
-                <option value="DENIED">Deny</option>
-              </select>
-            </div>
-            <div className="flex-1 space-y-2">
-              <Label htmlFor="reason">Note (optional)</Label>
-              <Input id="reason" name="reason" placeholder="Reason or context" />
-            </div>
-            <SubmitButton>Save</SubmitButton>
-          </form>
-        </CardContent>
-      </Card>
+      {canEdit && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Add manual decision</CardTitle>
+            <CardDescription>
+              Pre-approve or pre-deny a GitHub user without requiring them to
+              apply. Manual decisions override applications and bypass lists.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <form
+              action={addManualDecision}
+              className="flex flex-col gap-3 sm:flex-row sm:items-end"
+            >
+              <input type="hidden" name="projectId" value={id} />
+              <div className="flex-1 space-y-2">
+                <Label htmlFor="ghLogin">GitHub login</Label>
+                <Input
+                  id="ghLogin"
+                  name="ghLogin"
+                  placeholder="octocat"
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="status">Decision</Label>
+                <select
+                  id="status"
+                  name="status"
+                  defaultValue="APPROVED"
+                  className="h-9 rounded-md border border-border bg-background px-3 text-sm"
+                >
+                  <option value="APPROVED">Approve</option>
+                  <option value="DENIED">Deny</option>
+                </select>
+              </div>
+              <div className="flex-1 space-y-2">
+                <Label htmlFor="reason">Note (optional)</Label>
+                <Input id="reason" name="reason" placeholder="Reason or context" />
+              </div>
+              <SubmitButton>Save</SubmitButton>
+            </form>
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader>
@@ -151,7 +154,7 @@ export default async function ProjectPeople({
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <PeopleList projectId={id} people={rows} />
+          <PeopleList projectId={id} people={rows} canEdit={canEdit} />
         </CardContent>
       </Card>
     </div>
