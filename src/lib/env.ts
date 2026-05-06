@@ -1,4 +1,12 @@
 import { z } from "zod";
+import { getVaultPathFor } from "@/lib/vault/config";
+
+// A secret is "configured" if it's set in process.env OR has a VAULT_<name>_PATH
+// pointing into Vault. We can't await secret resolution from this module
+// (it's loaded synchronously by Next.js), so we use this presence check for
+// derived flags like `githubAppConfigured`.
+const presentInEnvOrVault = (name: string): boolean =>
+  !!process.env[name] || !!getVaultPathFor(name);
 
 const csv = (v: string | undefined) =>
   (v ?? "")
@@ -55,6 +63,15 @@ const schema = z.object({
   // `report-uri` / `report-to` so violations stream to Sentry. NOT used for
   // event/replay uploads (those go to the SDK's transport, separately).
   SENTRY_CSP_ENDPOINT: z.string().url().optional(),
+
+  // HashiCorp Vault — non-secret config only. Auth credentials (VAULT_TOKEN,
+  // VAULT_APPROLE_*) are deliberately NOT in this typed object so they can
+  // never be accidentally serialized; they're read directly from process.env
+  // inside src/lib/vault/config.ts.
+  VAULT_ADDR: z.string().url().optional(),
+  VAULT_NAMESPACE: z.string().optional(),
+  VAULT_AUTH_METHOD: z.enum(["token", "approle"]).optional(),
+  VAULT_CACHE_TTL_SECONDS: z.coerce.number().int().positive().optional(),
 });
 
 // During `next build`, Next.js executes server modules to collect page data
@@ -77,16 +94,21 @@ const raw = parsed.success
   : (schema.partial().parse(process.env) as z.infer<typeof schema>);
 
 // Single-App mode: use the GitHub App's OAuth client credentials for sign-in
-// when no separate OAuth App is configured.
+// when no separate OAuth App is configured. These string values are only used
+// for the env-only fallback path; when Vault is configured for these names,
+// auth.config.ts resolves them via getSecret() at request time instead.
 const oauthClientId = raw.AUTH_GITHUB_ID || raw.GITHUB_APP_CLIENT_ID || "";
 const oauthClientSecret =
   raw.AUTH_GITHUB_SECRET || raw.GITHUB_APP_CLIENT_SECRET || "";
 
-// We *don't* throw when OAuth creds are missing — the operator might be in
-// the middle of single-App bootstrap (no GH App yet, no OAuth App yet). The
-// /admin/setup page falls back to SETUP_TOKEN for that one-time flow. After
-// the GH App exists and credentials are pasted into .env, sign-in works.
-const oauthConfigured = !!oauthClientId && !!oauthClientSecret;
+// "Configured" is true when EITHER an env var is set OR a Vault path points
+// at the secret. This lets the webhook handler short-circuit correctly when
+// secrets live in Vault and env is empty.
+const oauthConfigured =
+  (presentInEnvOrVault("AUTH_GITHUB_ID") ||
+    presentInEnvOrVault("GITHUB_APP_CLIENT_ID")) &&
+  (presentInEnvOrVault("AUTH_GITHUB_SECRET") ||
+    presentInEnvOrVault("GITHUB_APP_CLIENT_SECRET"));
 
 export const env = {
   ...raw,
@@ -96,8 +118,11 @@ export const env = {
   superAdmins: csv(raw.SUPER_ADMINS).map((s) => s.toLowerCase()),
   projectCreators: csv(raw.PROJECT_CREATORS).map((s) => s.toLowerCase()),
   githubAppConfigured:
-    !!raw.GITHUB_APP_ID && !!raw.GITHUB_APP_PRIVATE_KEY && !!raw.GITHUB_APP_WEBHOOK_SECRET,
+    presentInEnvOrVault("GITHUB_APP_ID") &&
+    presentInEnvOrVault("GITHUB_APP_PRIVATE_KEY") &&
+    presentInEnvOrVault("GITHUB_APP_WEBHOOK_SECRET"),
   smtpConfigured: !!raw.SMTP_HOST && !!raw.SMTP_FROM,
+  vaultEnabled: !!raw.VAULT_ADDR,
 };
 
 export type Env = typeof env;

@@ -58,6 +58,23 @@ export default async function AdminHome() {
             )}
           </CardContent>
         </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">HashiCorp Vault</CardTitle>
+            <CardDescription>
+              Source secrets (GitHub App key, OAuth, SMTP) from Vault instead of env.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Link
+              href="/admin/vault"
+              className="text-sm font-medium underline underline-offset-2"
+            >
+              {env.vaultEnabled ? "View Vault status →" : "Configure Vault →"}
+            </Link>
+          </CardContent>
+        </Card>
       </main>
     </>
   );

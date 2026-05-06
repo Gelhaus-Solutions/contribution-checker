@@ -386,14 +386,15 @@ model PrQuality {
 
 model AuditEvent {
   id        String   @id @default(cuid())
-  projectId String
+  // Null = app-level event (e.g. Vault resolution failure) not tied to a project.
+  projectId String?
   actorId   String? // null = system
   kind      String  // e.g. "application.approved"
   // JSON-stringified
   payload   String  @default("{}")
   createdAt DateTime @default(now())
 
-  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
   actor   User?   @relation(fields: [actorId], references: [id], onDelete: SetNull)
 
   @@index([projectId, createdAt])

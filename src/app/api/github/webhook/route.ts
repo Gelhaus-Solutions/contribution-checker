@@ -4,6 +4,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { env } from "@/lib/env";
+import { getSecret } from "@/lib/vault/resolver";
 import { logger } from "@/lib/logger";
 import { withSentryScope } from "@/lib/observability/with-sentry-scope";
 import {
@@ -55,13 +56,15 @@ async function pruneStaleDeliveries(): Promise<void> {
   }
 }
 
-function verifySignature(rawBody: string, signature: string | null): boolean {
-  if (!signature || !env.GITHUB_APP_WEBHOOK_SECRET) return false;
+async function verifySignature(
+  rawBody: string,
+  signature: string | null
+): Promise<boolean> {
+  if (!signature) return false;
+  const secret = await getSecret("GITHUB_APP_WEBHOOK_SECRET");
+  if (!secret) return false;
   const expected =
-    "sha256=" +
-    createHmac("sha256", env.GITHUB_APP_WEBHOOK_SECRET)
-      .update(rawBody)
-      .digest("hex");
+    "sha256=" + createHmac("sha256", secret).update(rawBody).digest("hex");
   const a = Buffer.from(signature);
   const b = Buffer.from(expected);
   if (a.length !== b.length) return false;
@@ -89,7 +92,16 @@ export async function POST(req: Request) {
   const eventName = req.headers.get("x-github-event") ?? "";
   const deliveryId = req.headers.get("x-github-delivery") ?? "";
 
-  if (!verifySignature(rawBody, signature)) {
+  let signatureOk: boolean;
+  try {
+    signatureOk = await verifySignature(rawBody, signature);
+  } catch (e) {
+    // Vault unreachable or webhook secret can't be resolved → fail closed.
+    Sentry.captureException(e, { tags: { "github.event": eventName } });
+    logger.error({ err: e, deliveryId, eventName }, "webhook secret resolve failed");
+    return NextResponse.json({ error: "Secret resolve failed" }, { status: 500 });
+  }
+  if (!signatureOk) {
     logger.warn({ deliveryId, eventName }, "webhook signature invalid");
     return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
   }
