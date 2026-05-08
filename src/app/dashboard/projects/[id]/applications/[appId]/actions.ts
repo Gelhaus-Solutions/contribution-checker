@@ -12,6 +12,7 @@ import {
 } from "@/lib/applications/decide";
 import {
   onApplicationApproved,
+  onApplicationDenied,
   onApplicationRevokedWithClose,
 } from "@/lib/github/post-decision";
 import { recordAudit } from "@/lib/audit";
@@ -109,6 +110,8 @@ export async function denyAction(formData: FormData) {
     reason: parsed.reason,
     allowResubmit,
   });
+
+  await onApplicationDenied({ applicationId: parsed.appId });
 
   revalidatePath(`/dashboard/projects/${parsed.projectId}/applications`);
   revalidatePath(`/dashboard/projects/${parsed.projectId}/applications/${parsed.appId}`);
