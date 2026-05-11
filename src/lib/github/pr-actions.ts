@@ -1,7 +1,25 @@
+import * as Sentry from "@sentry/nextjs";
 import { getInstallationOctokit } from "@/lib/github/app";
 import { logger } from "@/lib/logger";
 
 type RepoRef = { owner: string; repo: string; installationId: number };
+
+function recordGithubMetric(
+  op: string,
+  outcome: "ok" | "error",
+  ref: RepoRef,
+  status?: number,
+): void {
+  Sentry.metrics.count("github.api_call", 1, {
+    attributes: {
+      "github.op": op,
+      "github.repo": `${ref.owner}/${ref.repo}`,
+      "github.installation_id": ref.installationId,
+      outcome,
+      ...(status != null ? { "github.status": status } : {}),
+    },
+  });
+}
 
 function splitFullName(fullName: string): { owner: string; repo: string } {
   const [owner, repo] = fullName.split("/");
@@ -36,16 +54,24 @@ export async function closePullRequest(
         issue_number: prNumber,
         body: comment,
       })
-      .catch((e: unknown) =>
-        logger.warn({ err: e, ref, prNumber }, "create-comment failed")
-      );
+      .then(() => recordGithubMetric("issue.comment", "ok", ref))
+      .catch((e: unknown) => {
+        recordGithubMetric("issue.comment", "error", ref, statusOf(e));
+        logger.warn({ err: e, ref, prNumber }, "create-comment failed");
+      });
   }
-  await octokit.request("PATCH /repos/{owner}/{repo}/pulls/{pull_number}", {
-    owner: ref.owner,
-    repo: ref.repo,
-    pull_number: prNumber,
-    state: "closed",
-  });
+  try {
+    await octokit.request("PATCH /repos/{owner}/{repo}/pulls/{pull_number}", {
+      owner: ref.owner,
+      repo: ref.repo,
+      pull_number: prNumber,
+      state: "closed",
+    });
+    recordGithubMetric("pr.close", "ok", ref);
+  } catch (e) {
+    recordGithubMetric("pr.close", "error", ref, statusOf(e));
+    throw e;
+  }
 }
 
 export async function reopenPullRequest(
@@ -54,12 +80,18 @@ export async function reopenPullRequest(
   comment?: string
 ): Promise<void> {
   const octokit = await getInstallationOctokit(ref.installationId);
-  await octokit.request("PATCH /repos/{owner}/{repo}/pulls/{pull_number}", {
-    owner: ref.owner,
-    repo: ref.repo,
-    pull_number: prNumber,
-    state: "open",
-  });
+  try {
+    await octokit.request("PATCH /repos/{owner}/{repo}/pulls/{pull_number}", {
+      owner: ref.owner,
+      repo: ref.repo,
+      pull_number: prNumber,
+      state: "open",
+    });
+    recordGithubMetric("pr.reopen", "ok", ref);
+  } catch (e) {
+    recordGithubMetric("pr.reopen", "error", ref, statusOf(e));
+    throw e;
+  }
   if (comment) {
     await octokit
       .request("POST /repos/{owner}/{repo}/issues/{issue_number}/comments", {
@@ -68,9 +100,11 @@ export async function reopenPullRequest(
         issue_number: prNumber,
         body: comment,
       })
-      .catch((e: unknown) =>
-        logger.warn({ err: e, ref, prNumber }, "create-comment failed")
-      );
+      .then(() => recordGithubMetric("issue.comment", "ok", ref))
+      .catch((e: unknown) => {
+        recordGithubMetric("issue.comment", "error", ref, statusOf(e));
+        logger.warn({ err: e, ref, prNumber }, "create-comment failed");
+      });
   }
 }
 
@@ -243,15 +277,40 @@ export async function upsertCheckRun(
           ...body,
         }
       );
+      recordGithubMetric("check_run.update", "ok", ref);
+      Sentry.metrics.count("github.check_run", 1, {
+        attributes: {
+          "github.repo": `${ref.owner}/${ref.repo}`,
+          "check.status": input.status,
+          "check.conclusion": input.conclusion ?? "",
+          mode: "update",
+        },
+      });
       return String((res.data as { id: number | string }).id);
     }
     const res = await octokit.request(
       "POST /repos/{owner}/{repo}/check-runs",
       { owner: ref.owner, repo: ref.repo, ...body }
     );
+    recordGithubMetric("check_run.create", "ok", ref);
+    Sentry.metrics.count("github.check_run", 1, {
+      attributes: {
+        "github.repo": `${ref.owner}/${ref.repo}`,
+        "check.status": input.status,
+        "check.conclusion": input.conclusion ?? "",
+        mode: "create",
+      },
+    });
     return String((res.data as { id: number | string }).id);
   } catch (e) {
-    if (statusOf(e) === 403 || statusOf(e) === 404) {
+    const status = statusOf(e);
+    recordGithubMetric(
+      existingId ? "check_run.update" : "check_run.create",
+      "error",
+      ref,
+      status,
+    );
+    if (status === 403 || status === 404) {
       logger.warn(
         { err: e, ref, headSha: input.headSha },
         "check-run publish forbidden — installation likely missing checks:write"

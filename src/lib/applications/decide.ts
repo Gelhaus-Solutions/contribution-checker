@@ -1,8 +1,23 @@
+import * as Sentry from "@sentry/nextjs";
 import { prisma } from "@/lib/db";
 import { recordAudit } from "@/lib/audit";
 import { notifyProjectReviewers, notifyUser } from "@/lib/notifications/inbox";
 import { applyUrl, dashboardUrl, sendEmail } from "@/lib/notifications/email";
 import { enqueueProjectWebhook } from "@/lib/notifications/webhooks";
+
+function recordApplicationDecisionMetric(
+  outcome: "approved" | "denied" | "revoked",
+  attrs: { projectId: string; projectSlug?: string; reason?: string | null },
+): void {
+  Sentry.metrics.count("application.decision", 1, {
+    attributes: {
+      outcome,
+      "project.id": attrs.projectId,
+      "project.slug": attrs.projectSlug ?? "",
+      "decision.has_reason": Boolean(attrs.reason),
+    },
+  });
+}
 
 /** Thrown by approveApplication when the project's review gate is not met. */
 export class ApprovalGateError extends Error {
@@ -118,6 +133,11 @@ export async function approveApplication(args: {
     },
   });
 
+  recordApplicationDecisionMetric("approved", {
+    projectId: app.projectId,
+    projectSlug: app.project.slug,
+    reason: args.reason,
+  });
   await recordAudit({
     projectId: app.projectId,
     actorId: args.decidedById,
@@ -187,6 +207,11 @@ export async function denyApplication(args: {
     },
   });
 
+  recordApplicationDecisionMetric("denied", {
+    projectId: app.projectId,
+    projectSlug: app.project.slug,
+    reason: args.reason,
+  });
   await recordAudit({
     projectId: app.projectId,
     actorId: args.decidedById,
@@ -289,6 +314,11 @@ export async function revokeApplication(args: {
     data,
   });
 
+  recordApplicationDecisionMetric("revoked", {
+    projectId: app.projectId,
+    projectSlug: app.project.slug,
+    reason: args.reason,
+  });
   await recordAudit({
     projectId: app.projectId,
     actorId: args.decidedById,

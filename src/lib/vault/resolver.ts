@@ -1,3 +1,4 @@
+import * as Sentry from "@sentry/nextjs";
 import { logger } from "@/lib/logger";
 import {
   getVaultConfig,
@@ -7,6 +8,15 @@ import {
 } from "./config";
 import { VaultClient, VaultError } from "./client";
 import { recordResolution, recordCacheHit } from "./status";
+
+function metric(
+  outcome: "vault_ok" | "vault_error" | "env_ok" | "missing" | "cache_hit",
+  name: string,
+): void {
+  Sentry.metrics.count("vault.secret_resolve", 1, {
+    attributes: { outcome, "secret.name": name },
+  });
+}
 
 /**
  * Logical secret names this app can read from Vault. The list bounds what the
@@ -68,6 +78,7 @@ export async function getSecret(name: string): Promise<string | undefined> {
   const cached = cache.get(name);
   if (cached && cached.expiresAt > Date.now()) {
     recordCacheHit(name);
+    metric("cache_hit", name);
     return cached.value;
   }
 
@@ -99,14 +110,19 @@ async function resolveOnce(name: string): Promise<string | undefined> {
       const ttlMs = getVaultConfig().cacheTtlSeconds * 1000;
       cache.set(name, { value, expiresAt: Date.now() + ttlMs });
       recordResolution(name, { ok: true, source: "vault" });
+      metric("vault_ok", name);
       return value;
     } catch (e) {
       // Re-throw VaultResolutionError as-is; wrap others so callers see a
       // consistent error type.
-      if (e instanceof VaultResolutionError) throw e;
+      if (e instanceof VaultResolutionError) {
+        metric("vault_error", name);
+        throw e;
+      }
       const msg = e instanceof VaultError ? e.message : String(e);
-      logger.error({ err: e, name }, "vault secret resolution failed");
+      logger.error({ err: e, "secret.name": name }, "vault secret resolution failed");
       recordResolution(name, { ok: false, source: "vault", error: msg });
+      metric("vault_error", name);
       throw new VaultResolutionError(
         `Failed to resolve ${name} from Vault: ${msg}`,
         e
@@ -117,9 +133,11 @@ async function resolveOnce(name: string): Promise<string | undefined> {
   const fromEnv = process.env[name];
   if (fromEnv && fromEnv.length > 0) {
     recordResolution(name, { ok: true, source: "env" });
+    metric("env_ok", name);
     return fromEnv;
   }
   recordResolution(name, { ok: false, source: "env", error: "not set" });
+  metric("missing", name);
   return undefined;
 }
 

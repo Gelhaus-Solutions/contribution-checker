@@ -24,6 +24,12 @@ Sentry.init({
       maskAllInputs: false,
     }),
     Sentry.browserProfilingIntegration(),
+    // Capture browser console.error/warn as Sentry events. Most React/Next
+    // client-side runtime errors surface as console.error before any error
+    // boundary sees them; without this, those never make it to Sentry.
+    Sentry.captureConsoleIntegration({
+      levels: ["error", "warn"],
+    }),
   ],
   tracesSampleRate: 1.0,
   replaysSessionSampleRate: 1.0,
@@ -31,6 +37,9 @@ Sentry.init({
   profilesSampleRate: 1.0,
   sendDefaultPii: true,
   enableLogs: true,
+  _experiments: {
+    enableLogs: true,
+  },
 });
 
 Sentry.getGlobalScope().setAttributes({
