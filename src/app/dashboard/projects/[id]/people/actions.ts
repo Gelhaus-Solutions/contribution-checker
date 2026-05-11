@@ -7,6 +7,7 @@ import { requireProjectRole } from "@/lib/authz";
 import { recordAudit } from "@/lib/audit";
 import {
   onApplicationApproved,
+  onApplicationDenied,
   onApplicationRevokedWithClose,
 } from "@/lib/github/post-decision";
 import {
@@ -207,6 +208,7 @@ export async function setApplicationStatus(args: {
       decidedById: session.user.id,
       allowResubmit: true,
     });
+    await onApplicationDenied({ applicationId: app.id });
   } else {
     const now = new Date();
     if (parsed.target === "SUBMITTED") {
