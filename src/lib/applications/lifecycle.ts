@@ -1,4 +1,5 @@
 import * as Sentry from "@sentry/nextjs";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { recordAudit } from "@/lib/audit";
 import { buildAnswersSchema, parseFormSchema } from "@/lib/applications/schema";
@@ -11,6 +12,23 @@ export async function submitApplication(args: {
   userId: string;
   projectId: string;
   rawAnswers: Record<string, unknown>;
+  /**
+   * Optional caller-owned transaction. When supplied, the Application row is
+   * created inside this transaction so callers can atomically write related
+   * rows (e.g. an embedded CLA signature). When omitted, a plain create is
+   * used as before.
+   */
+  tx?: Prisma.TransactionClient;
+  /**
+   * Optional hook run inside the same transaction immediately after the
+   * Application is created. Only invoked when `tx` is supplied. Throwing from
+   * here rolls back the application create. Used by the apply flow to record
+   * the embedded ClaSignature atomically with the application.
+   */
+  afterCreate?: (
+    application: { id: string },
+    tx: Prisma.TransactionClient
+  ) => Promise<void>;
 }): Promise<SubmitResult> {
   const project = await prisma.project.findUnique({
     where: { id: args.projectId },
@@ -88,14 +106,20 @@ export async function submitApplication(args: {
     }
   }
 
-  const application = await prisma.application.create({
-    data: {
-      projectId: args.projectId,
-      userId: args.userId,
-      answers: JSON.stringify(parsed.data),
-      status: "SUBMITTED",
-    },
-  });
+  const applicationData = {
+    projectId: args.projectId,
+    userId: args.userId,
+    answers: JSON.stringify(parsed.data),
+    status: "SUBMITTED",
+  };
+  const application = args.tx
+    ? await (async () => {
+        const tx = args.tx!;
+        const created = await tx.application.create({ data: applicationData });
+        if (args.afterCreate) await args.afterCreate(created, tx);
+        return created;
+      })()
+    : await prisma.application.create({ data: applicationData });
 
   await recordAudit({
     projectId: args.projectId,

@@ -339,6 +339,7 @@ export async function deleteProjectWebhook(formData: FormData) {
 const gatingSchema = z.object({
   projectId: z.string().min(1),
   checkerEnabled: z.string().optional(),
+  applicationRequired: z.string().optional(),
   trackWhenDisabled: z.string().optional(),
   checksEnabled: z.string().optional(),
 });
@@ -347,6 +348,7 @@ export async function updateGatingSettings(formData: FormData) {
   const parsed = gatingSchema.parse({
     projectId: formData.get("projectId"),
     checkerEnabled: formData.get("checkerEnabled") ?? undefined,
+    applicationRequired: formData.get("applicationRequired") ?? undefined,
     trackWhenDisabled: formData.get("trackWhenDisabled") ?? undefined,
     checksEnabled: formData.get("checksEnabled") ?? undefined,
   });
@@ -356,6 +358,7 @@ export async function updateGatingSettings(formData: FormData) {
     where: { id: parsed.projectId },
     select: {
       checkerEnabled: true,
+      applicationRequired: true,
       trackWhenDisabled: true,
       checksEnabled: true,
     },
@@ -364,6 +367,7 @@ export async function updateGatingSettings(formData: FormData) {
 
   const after = {
     checkerEnabled: !!parsed.checkerEnabled,
+    applicationRequired: !!parsed.applicationRequired,
     trackWhenDisabled: !!parsed.trackWhenDisabled,
     checksEnabled: !!parsed.checksEnabled,
   };
@@ -381,6 +385,10 @@ export async function updateGatingSettings(formData: FormData) {
       changed: Object.fromEntries(
         Object.entries({
           checkerEnabled: [before.checkerEnabled, after.checkerEnabled],
+          applicationRequired: [
+            before.applicationRequired,
+            after.applicationRequired,
+          ],
           trackWhenDisabled: [before.trackWhenDisabled, after.trackWhenDisabled],
           checksEnabled: [before.checksEnabled, after.checksEnabled],
         }).filter(([, [a, b]]) => a !== b)

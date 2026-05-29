@@ -179,6 +179,22 @@ export default async function ProjectSettings({
             <label className="flex items-start gap-3 text-sm">
               <input
                 type="checkbox"
+                name="applicationRequired"
+                value="1"
+                defaultChecked={project.applicationRequired}
+                className="mt-0.5 h-4 w-4 rounded border-border"
+              />
+              <span>
+                <span className="font-medium">Require an approved application</span>
+                <span className="block text-xs text-muted-foreground">
+                  When off, the application gate is skipped but CLA signing and
+                  PR-quality scoring still apply.
+                </span>
+              </span>
+            </label>
+            <label className="flex items-start gap-3 text-sm">
+              <input
+                type="checkbox"
                 name="checksEnabled"
                 value="1"
                 defaultChecked={project.checksEnabled}
