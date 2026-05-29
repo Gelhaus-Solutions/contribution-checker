@@ -14,6 +14,8 @@ import {
   approveApplication,
   denyApplication,
   revokeApplication,
+  ApprovalGateError,
+  ClaGateError,
 } from "@/lib/applications/decide";
 import { getClaStatus } from "@/lib/cla/status";
 
@@ -191,10 +193,29 @@ export async function setApplicationStatus(args: {
 
   if (parsed.target === "APPROVED") {
     if (app.status === "APPROVED") return;
-    await approveApplication({
-      applicationId: app.id,
-      decidedById: session.user.id,
-    });
+    try {
+      await approveApplication({
+        applicationId: app.id,
+        decidedById: session.user.id,
+      });
+    } catch (e) {
+      // The people overview disables the APPROVED button when these gates
+      // are unmet; this is the server-side safety net so a stale view can't
+      // surface the raw gate error.
+      if (e instanceof ClaGateError) {
+        throw new Error(
+          "CLA gate: this applicant must sign the project's CLA before approval.",
+        );
+      }
+      if (e instanceof ApprovalGateError) {
+        throw new Error(
+          `Approval gate: this project requires ${e.required} approving review${
+            e.required === 1 ? "" : "s"
+          } from other reviewers (currently ${e.have}).`,
+        );
+      }
+      throw e;
+    }
     await onApplicationApproved({ applicationId: app.id });
   } else if (wasApproved) {
     await revokeApplication({

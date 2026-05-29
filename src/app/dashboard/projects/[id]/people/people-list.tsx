@@ -366,6 +366,11 @@ function UserOverviewDialog({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
+  // Mirror approveApplication's CLA gate so forcing APPROVED can't throw an
+  // unhandled gate error. record-only CLAs (required=false) never block.
+  const claBlocksApproval =
+    !!data?.cla && data.cla.required && !data.cla.satisfied;
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
@@ -438,7 +443,15 @@ function UserOverviewDialog({
                           variant="outline"
                           loading={feedback.isLoading(`status:${t}`)}
                           success={feedback.isSuccess(`status:${t}`)}
-                          disabled={feedback.isAnyLoading}
+                          disabled={
+                            feedback.isAnyLoading ||
+                            (t === "APPROVED" && claBlocksApproval)
+                          }
+                          title={
+                            t === "APPROVED" && claBlocksApproval
+                              ? "Applicant must sign the CLA before approval."
+                              : undefined
+                          }
                           onClick={() => setStatus(t)}
                           className="h-7 px-2 text-[11px]"
                         >

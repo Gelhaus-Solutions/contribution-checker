@@ -19,6 +19,7 @@ import { computeScore } from "@/lib/quality/score";
 import { ALL_HEURISTICS, parseQualityConfig } from "@/lib/quality/registry";
 import type { SignalsRaw } from "@/lib/quality/types";
 import { countApprovingReviewers } from "@/lib/applications/decide";
+import { getClaStatus } from "@/lib/cla/status";
 import { FieldThread, type FieldThreadNote } from "./_components/field-thread";
 import { NoteCard } from "./_components/note-card";
 import { ReviewComposer, type DraftComment } from "./_components/review-composer";
@@ -44,7 +45,16 @@ export default async function ApplicationDetail({
   const app = await prisma.application.findFirst({
     where: { id: appId, projectId: id },
     include: {
-      user: { select: { id: true, ghLogin: true, name: true, image: true, email: true } },
+      user: {
+        select: {
+          id: true,
+          ghId: true,
+          ghLogin: true,
+          name: true,
+          image: true,
+          email: true,
+        },
+      },
       decidedBy: { select: { ghLogin: true } },
       project: {
         select: {
@@ -54,6 +64,8 @@ export default async function ApplicationDetail({
           qualityEnabled: true,
           qualityConfig: true,
           requireApprovalCount: true,
+          claEnabled: true,
+          claRequired: true,
         },
       },
       notes: {
@@ -78,6 +90,81 @@ export default async function ApplicationDetail({
   });
   const requiredApprovals = app.project.requireApprovalCount;
   const gateMet = requiredApprovals === 0 || approvingReviewerCount >= requiredApprovals;
+
+  // CLA gate: mirrors approveApplication's check (decide.ts). It only gates
+  // when the project both enables AND requires the CLA — record-only mode
+  // (claEnabled, !claRequired) never blocks approval. An unlinked applicant
+  // (no ghId/ghLogin) can't satisfy the CLA, so the gate stays unmet, exactly
+  // as approveApplication treats it.
+  const claGateActive = app.project.claEnabled && app.project.claRequired;
+  const claStatus =
+    claGateActive && app.user.ghId != null && app.user.ghLogin != null
+      ? await getClaStatus({
+          projectId: id,
+          ghId: app.user.ghId,
+          ghLogin: app.user.ghLogin,
+        })
+      : null;
+  const claGateMet = !claGateActive || (claStatus?.satisfied ?? false);
+
+  // Both the Approve and Re-approve forms post to approveApplication, which
+  // enforces the same approval-count and CLA gates. Render the gate status and
+  // disable the buttons proactively in both so a server-side gate throw never
+  // reaches the global error boundary.
+  const approvalGateNote =
+    requiredApprovals > 0 ? (
+      <p className="text-xs text-muted-foreground">
+        Approval gate:{" "}
+        <Badge
+          variant={gateMet ? "success" : "warning"}
+          className="ml-1 text-[10px]"
+        >
+          {approvingReviewerCount}/{requiredApprovals} approving review
+          {requiredApprovals === 1 ? "" : "s"} from other reviewers
+        </Badge>
+        {!gateMet && (
+          <span className="ml-1">— collect more LGTMs before approving.</span>
+        )}
+      </p>
+    ) : null;
+
+  // Status line shown in both the Approve and Re-approve forms when the CLA
+  // gates approval — wording mirrors the People overview CLA badges.
+  const claGateNote = claGateActive ? (
+    <p className="text-xs text-muted-foreground">
+      CLA:{" "}
+      <Badge
+        variant={
+          claGateMet
+            ? "success"
+            : claStatus?.needsResign
+              ? "warning"
+              : "destructive"
+        }
+        className="ml-1 text-[10px]"
+      >
+        {claGateMet
+          ? "Signed"
+          : claStatus?.needsResign
+            ? "Re-sign required"
+            : "Not signed"}
+      </Badge>
+      {claGateMet && claStatus?.via && (
+        <Badge variant="outline" className="ml-1 text-[10px]">
+          {claStatus.via === "icla"
+            ? "Individual"
+            : claStatus.via === "ccla"
+              ? "Corporate"
+              : "Waiver"}
+        </Badge>
+      )}
+      {!claGateMet && (
+        <span className="ml-1">
+          — applicant must sign the CLA before approval.
+        </span>
+      )}
+    </p>
+  ) : null;
 
   // Aggregate this user's PR Quality across all PRs in the project (any
   // status). The averages help reviewers judge a SUBMITTED application by
@@ -315,24 +402,12 @@ export default async function ApplicationDetail({
                     rows={2}
                     placeholder="Welcome aboard…"
                   />
-                  {requiredApprovals > 0 && (
-                    <p className="text-xs text-muted-foreground">
-                      Approval gate:{" "}
-                      <Badge
-                        variant={gateMet ? "success" : "warning"}
-                        className="ml-1 text-[10px]"
-                      >
-                        {approvingReviewerCount}/{requiredApprovals} approving review
-                        {requiredApprovals === 1 ? "" : "s"} from other reviewers
-                      </Badge>
-                      {!gateMet && (
-                        <span className="ml-1">
-                          — collect more LGTMs before approving.
-                        </span>
-                      )}
-                    </p>
-                  )}
-                  <SubmitButton variant="success" disabled={!gateMet}>
+                  {approvalGateNote}
+                  {claGateNote}
+                  <SubmitButton
+                    variant="success"
+                    disabled={!gateMet || !claGateMet}
+                  >
                     Approve
                   </SubmitButton>
                 </form>
@@ -416,7 +491,14 @@ export default async function ApplicationDetail({
                   Re-approving will reopen any PRs that were closed when this
                   application was denied.
                 </p>
-                <SubmitButton variant="success">Re-approve</SubmitButton>
+                {approvalGateNote}
+                {claGateNote}
+                <SubmitButton
+                  variant="success"
+                  disabled={!gateMet || !claGateMet}
+                >
+                  Re-approve
+                </SubmitButton>
               </form>
             )}
           </CardContent>

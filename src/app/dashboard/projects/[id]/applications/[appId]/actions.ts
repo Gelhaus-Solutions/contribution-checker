@@ -9,6 +9,7 @@ import {
   denyApplication,
   revokeApplication,
   ApprovalGateError,
+  ClaGateError,
 } from "@/lib/applications/decide";
 import {
   onApplicationApproved,
@@ -69,6 +70,14 @@ export async function approveAction(formData: FormData) {
         `Approval gate: this project requires ${e.required} approving review${
           e.required === 1 ? "" : "s"
         } from other reviewers (currently ${e.have}).`,
+      );
+    }
+    if (e instanceof ClaGateError) {
+      // Same contract as the approval gate: the approve button is disabled
+      // proactively in the UI, and this is the server-side safety net so the
+      // raw error never reaches the global error boundary.
+      throw new Error(
+        "CLA gate: this applicant must sign the project's Contributor License Agreement before they can be approved.",
       );
     }
     throw e;
