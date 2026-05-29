@@ -71,7 +71,11 @@ const cclaSignedPayloadSchema = z.object({
   legalName: z.string().min(1),
   affirmation: z.string(),
   companyName: z.string().min(1),
+  registeredAddress: z.string().nullable().optional(),
+  country: z.string().nullable().optional(),
+  contactName: z.string().nullable().optional(),
   signatoryTitle: z.string().nullable().optional(),
+  signatureText: z.string().nullable().optional(),
   contactEmail: z.string().min(1),
   emailSnapshot: z.string().nullable().optional(),
   ip: z.string(),
@@ -203,20 +207,25 @@ export const signIclaSchema = z.object({
   applicationId: z.string().min(1).optional(),
 });
 
+const cclaLine = (max: number, label: string) =>
+  z
+    .string()
+    .trim()
+    .min(1)
+    .max(max)
+    .refine((v) => !/[\r\n]/.test(v), `${label} cannot contain line breaks`);
+
+// Full executed corporate-signature block (legally binding). legalName (from
+// signIclaSchema) is the Authorized representative (name); the signing Date is
+// the server-stamped signedAt, so it is not collected from the client.
 export const signCclaSchema = signIclaSchema.extend({
-  companyName: z
-    .string()
-    .trim()
-    .min(2)
-    .max(200)
-    .refine((v) => !/[\r\n]/.test(v), "company name cannot contain line breaks"),
-  signatoryTitle: z
-    .string()
-    .trim()
-    .max(120)
-    .refine((v) => !/[\r\n]/.test(v), "title cannot contain line breaks")
-    .optional(),
+  companyName: cclaLine(200, "company name"), // Legal Entity (full legal name)
+  registeredAddress: z.string().trim().min(1).max(500), // may span lines
+  country: cclaLine(100, "country"),
+  contactName: cclaLine(200, "point of contact name"),
   contactEmail: z.string().trim().email().max(320),
+  signatoryTitle: cclaLine(120, "title"), // representative's Title (required)
+  signatureText: cclaLine(200, "signature"), // typed signature
 });
 
 export const rosterAddSchema = z.object({

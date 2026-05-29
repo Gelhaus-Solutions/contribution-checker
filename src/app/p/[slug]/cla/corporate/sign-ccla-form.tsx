@@ -3,6 +3,7 @@
 import { useActionState, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import type { ClaActionState } from "../actions";
 
@@ -31,56 +32,119 @@ export function SignCclaForm({
     <form action={dispatch} className="space-y-4">
       <input type="hidden" name="projectId" value={projectId} />
 
-      <div className="space-y-1.5">
-        <Label htmlFor="companyName">Company legal name</Label>
-        <Input
-          id="companyName"
-          name="companyName"
-          required
-          autoComplete="organization"
-          placeholder="Acme, Inc."
-        />
-      </div>
+      <fieldset className="space-y-4 rounded-md border border-border p-4">
+        <legend className="px-1 text-xs font-medium uppercase text-muted-foreground">
+          Company
+        </legend>
 
-      <div className="space-y-1.5">
-        <Label htmlFor="signatoryTitle">Your title (optional)</Label>
-        <Input
-          id="signatoryTitle"
-          name="signatoryTitle"
-          autoComplete="organization-title"
-          placeholder="VP of Engineering"
-        />
-      </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="companyName">Legal entity (full legal name)</Label>
+          <Input
+            id="companyName"
+            name="companyName"
+            required
+            autoComplete="organization"
+            placeholder="Acme, Inc."
+          />
+        </div>
 
-      <div className="space-y-1.5">
-        <Label htmlFor="contactEmail">Contact email</Label>
-        <Input
-          id="contactEmail"
-          name="contactEmail"
-          type="email"
-          required
-          autoComplete="email"
-          placeholder="legal@acme.com"
-        />
+        <div className="space-y-1.5">
+          <Label htmlFor="registeredAddress">Registered address</Label>
+          <Textarea
+            id="registeredAddress"
+            name="registeredAddress"
+            required
+            rows={3}
+            autoComplete="street-address"
+            placeholder="123 Example Street, Suite 100&#10;Springfield, ST 00000"
+          />
+        </div>
+
+        <div className="space-y-1.5">
+          <Label htmlFor="country">Country</Label>
+          <Input
+            id="country"
+            name="country"
+            required
+            autoComplete="country-name"
+            placeholder="United States"
+          />
+        </div>
+
+        <div className="space-y-1.5">
+          <Label htmlFor="contactName">Point of contact (name)</Label>
+          <Input
+            id="contactName"
+            name="contactName"
+            required
+            placeholder="Alex Contact"
+          />
+        </div>
+
+        <div className="space-y-1.5">
+          <Label htmlFor="contactEmail">Point of contact (email)</Label>
+          <Input
+            id="contactEmail"
+            name="contactEmail"
+            type="email"
+            required
+            autoComplete="email"
+            placeholder="legal@acme.com"
+          />
+          <p className="text-xs text-muted-foreground">
+            We&apos;ll notify this address about roster disputes and CLA version
+            changes.
+          </p>
+        </div>
+      </fieldset>
+
+      <fieldset className="space-y-4 rounded-md border border-border p-4">
+        <legend className="px-1 text-xs font-medium uppercase text-muted-foreground">
+          Authorized representative
+        </legend>
+
+        <div className="space-y-1.5">
+          <Label htmlFor="legalName">Authorized representative (name)</Label>
+          <Input
+            id="legalName"
+            name="legalName"
+            required
+            autoComplete="name"
+            placeholder="Jane Q. Signatory"
+          />
+        </div>
+
+        <div className="space-y-1.5">
+          <Label htmlFor="signatoryTitle">Title</Label>
+          <Input
+            id="signatoryTitle"
+            name="signatoryTitle"
+            required
+            autoComplete="organization-title"
+            placeholder="VP of Engineering"
+          />
+        </div>
+
+        <div className="space-y-1.5">
+          <Label htmlFor="signatureText">Signature</Label>
+          <Input
+            id="signatureText"
+            name="signatureText"
+            required
+            placeholder="Type your full legal name to sign"
+            className="font-[cursive] text-base"
+          />
+          <p className="text-xs text-muted-foreground">
+            Typing your name in this box constitutes your electronic signature
+            binding the company above.
+          </p>
+        </div>
+
         <p className="text-xs text-muted-foreground">
-          We&apos;ll notify this address about roster disputes and CLA version
-          changes.
+          Date: stamped automatically on submission (server time), together with
+          your IP address and the exact CLA version you signed.
         </p>
-      </div>
-
-      <div className="space-y-1.5">
-        <Label htmlFor="legalName">Your full legal name</Label>
-        <Input
-          id="legalName"
-          name="legalName"
-          required
-          autoComplete="name"
-          placeholder="Jane Q. Signatory"
-        />
-        <p className="text-xs text-muted-foreground">
-          Typing your name acts as your signature on behalf of the company.
-        </p>
-      </div>
+      </fieldset>
 
       <label className="flex items-start gap-2 text-sm">
         <input

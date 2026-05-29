@@ -630,9 +630,20 @@ model CorporateCla {
   versionId   String
   signatureId String @unique
 
-  companyName   String
-  signatoryTitle String?
-  contactEmail  String
+  // Executed corporate-signature block (legally binding). companyName is the
+  // full legal entity name; signatoryTitle is the representative's Title;
+  // contactEmail is the point-of-contact email. The remaining structured fields
+  // are captured at signing. signatureText is the representative's typed
+  // signature; the signing Date is the linked ClaSignature.signedAt (immutable
+  // server timestamp). Nullable for backward compatibility; required for new
+  // signings via the Zod validator.
+  companyName       String  // Legal Entity (full legal name)
+  registeredAddress String?
+  country           String?
+  contactName       String? // Point of contact (name)
+  contactEmail      String  // Point of contact (email)
+  signatoryTitle    String? // Authorized representative's Title
+  signatureText     String? // Authorized representative's typed signature
 
   status      String @default("ACTIVE") // "ACTIVE" | "REVOKED"
   revokedById String?

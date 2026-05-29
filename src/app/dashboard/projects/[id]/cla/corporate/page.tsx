@@ -107,14 +107,25 @@ export default async function CorporateClaPage({
                       </Badge>
                     </CardTitle>
                     <CardDescription className="mt-1 space-y-0.5">
+                      {(c.registeredAddress || c.country) && (
+                        <span className="block">
+                          Registered address:{" "}
+                          <span className="text-foreground">
+                            {[c.registeredAddress, c.country]
+                              .filter(Boolean)
+                              .join(", ")}
+                          </span>
+                        </span>
+                      )}
                       <span className="block">
-                        Contact:{" "}
+                        Point of contact:{" "}
                         <span className="text-foreground">
+                          {c.contactName ? `${c.contactName} · ` : ""}
                           {c.contactEmail}
                         </span>
                       </span>
                       <span className="block">
-                        Signatory:{" "}
+                        Authorized representative:{" "}
                         <span className="text-foreground">
                           @{c.signature.ghLogin}
                         </span>{" "}
@@ -122,7 +133,9 @@ export default async function CorporateClaPage({
                         {c.signatoryTitle ? `, ${c.signatoryTitle}` : ""})
                       </span>
                       <span className="block text-xs">
-                        Signed {fmt(c.createdAt)}
+                        Signed
+                        {c.signatureText ? ` “${c.signatureText}”` : ""} on{" "}
+                        {fmt(c.createdAt)}
                         {revoked && c.revokedAt
                           ? ` · revoked ${fmt(c.revokedAt)}`
                           : ""}

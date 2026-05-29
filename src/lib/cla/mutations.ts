@@ -233,12 +233,16 @@ export async function recordCclaSignature(a: {
   ghId: number;
   ghLogin: string;
   emailSnapshot?: string | null;
-  legalName: string;
+  legalName: string; // Authorized representative (name)
   affirmation: string;
   ip: string;
   userAgent: string;
-  companyName: string;
-  signatoryTitle?: string | null;
+  companyName: string; // Legal Entity (full legal name)
+  registeredAddress?: string | null;
+  country?: string | null;
+  contactName?: string | null;
+  signatoryTitle?: string | null; // representative's Title
+  signatureText?: string | null; // typed signature
   contactEmail: string;
 }): Promise<{ corporateId: string; signatureId: string }> {
   return prisma.$transaction(async (tx) => {
@@ -288,7 +292,11 @@ export async function recordCclaSignature(a: {
         versionId: version.id,
         signatureId: sig.id,
         companyName: a.companyName,
+        registeredAddress: a.registeredAddress ?? null,
+        country: a.country ?? null,
+        contactName: a.contactName ?? null,
         signatoryTitle: a.signatoryTitle ?? null,
+        signatureText: a.signatureText ?? null,
         contactEmail: a.contactEmail,
         status: "ACTIVE",
       },
@@ -318,7 +326,11 @@ export async function recordCclaSignature(a: {
         legalName: a.legalName,
         affirmation: a.affirmation,
         companyName: a.companyName,
+        registeredAddress: a.registeredAddress ?? null,
+        country: a.country ?? null,
+        contactName: a.contactName ?? null,
         signatoryTitle: a.signatoryTitle ?? null,
+        signatureText: a.signatureText ?? null,
         contactEmail: a.contactEmail,
         emailSnapshot: a.emailSnapshot ?? null,
         ip: a.ip,

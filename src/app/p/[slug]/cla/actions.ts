@@ -255,14 +255,16 @@ export async function signCcla(
     legalName: String(formData.get("legalName") ?? ""),
     agree: formData.get("agree") != null,
     companyName: String(formData.get("companyName") ?? ""),
-    signatoryTitle: formData.get("signatoryTitle")
-      ? String(formData.get("signatoryTitle"))
-      : undefined,
+    registeredAddress: String(formData.get("registeredAddress") ?? ""),
+    country: String(formData.get("country") ?? ""),
+    contactName: String(formData.get("contactName") ?? ""),
     contactEmail: String(formData.get("contactEmail") ?? ""),
+    signatoryTitle: String(formData.get("signatoryTitle") ?? ""),
+    signatureText: String(formData.get("signatureText") ?? ""),
   });
   if (!parsed.success) {
     return fail(
-      "Please complete the company name, contact email, your full legal name, and check the agreement box."
+      "Please complete the full corporate signature block (legal entity, registered address, country, point of contact, authorized representative, title, and signature) and check the agreement box."
     );
   }
   const input = parsed.data;
@@ -314,7 +316,11 @@ export async function signCcla(
       ip,
       userAgent,
       companyName: input.companyName,
-      signatoryTitle: input.signatoryTitle ?? null,
+      registeredAddress: input.registeredAddress,
+      country: input.country,
+      contactName: input.contactName,
+      signatoryTitle: input.signatoryTitle,
+      signatureText: input.signatureText,
       contactEmail: input.contactEmail,
     });
 
