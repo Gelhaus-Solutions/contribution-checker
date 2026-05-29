@@ -13,8 +13,15 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { SubmitButton } from "@/components/ui/submit-button";
 import { Badge } from "@/components/ui/badge";
+import { FormBuilder } from "../form/builder";
+import { parseFormSchema } from "@/lib/applications/schema";
 import { VersionEditor } from "./version-editor";
-import { updateClaSettings, publishClaVersion } from "./actions";
+import {
+  updateClaSettings,
+  publishClaVersion,
+  saveIclaCustomFields,
+  saveCclaCustomFields,
+} from "./actions";
 
 export default async function ClaSettings({
   params,
@@ -157,6 +164,27 @@ export default async function ClaSettings({
               </label>
             </div>
 
+            <label className="flex items-start gap-3 pl-7 text-sm">
+              <input
+                type="checkbox"
+                name="claIclaRequireSignature"
+                value="1"
+                defaultChecked={project.claIclaRequireSignature}
+                className="mt-0.5 h-4 w-4 rounded border-border"
+              />
+              <span>
+                <span className="font-medium">
+                  Require a typed signature for individual CLAs
+                </span>
+                <span className="block text-xs text-muted-foreground">
+                  Contributors must type their full legal name to sign. When off,
+                  the &ldquo;I agree&rdquo; checkbox alone is a valid individual
+                  click-wrap. (Corporate CLAs always require the full signature
+                  block.)
+                </span>
+              </span>
+            </label>
+
             <label className="flex items-start gap-3 text-sm">
               <input
                 type="checkbox"
@@ -230,6 +258,9 @@ export default async function ClaSettings({
             )}
             {project.dcoEnabled && (
               <input type="hidden" name="dcoEnabled" value="1" />
+            )}
+            {project.claIclaRequireSignature && (
+              <input type="hidden" name="claIclaRequireSignature" value="1" />
             )}
             <input
               type="hidden"
@@ -402,6 +433,44 @@ export default async function ClaSettings({
                   }
                 : null
             }
+          />
+        </CardContent>
+      </Card>
+
+      {/* ----- ICLA custom fields ----- */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">ICLA custom fields</CardTitle>
+          <CardDescription>
+            Extra fields collected from individual signers (e.g. mailing
+            address, employer). Answers are stored immutably with each signature.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <FormBuilder
+            projectId={project.id}
+            initial={parseFormSchema(project.claIclaCustomFields)}
+            action={saveIclaCustomFields}
+            canEdit
+          />
+        </CardContent>
+      </Card>
+
+      {/* ----- CCLA custom fields ----- */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">CCLA custom fields</CardTitle>
+          <CardDescription>
+            Extra fields collected from the corporate signatory at signing time.
+            Answers are stored immutably with the corporate signature.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <FormBuilder
+            projectId={project.id}
+            initial={parseFormSchema(project.claCclaCustomFields)}
+            action={saveCclaCustomFields}
+            canEdit
           />
         </CardContent>
       </Card>

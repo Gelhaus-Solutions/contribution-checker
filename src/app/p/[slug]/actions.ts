@@ -7,8 +7,12 @@ import { prisma } from "@/lib/db";
 import { rateLimit } from "@/lib/ratelimit";
 import { submitApplication } from "@/lib/applications/lifecycle";
 import { notifyAdminsOfNewApplication } from "@/lib/applications/decide";
-import { parseFormSchema, type FormSchema } from "@/lib/applications/schema";
-import { signIclaSchema } from "@/lib/cla/schema";
+import {
+  parseFormSchema,
+  buildAnswersSchema,
+  type FormSchema,
+} from "@/lib/applications/schema";
+import { signIclaSchema, collectClaCustomAnswers } from "@/lib/cla/schema";
 import { getClaStatus, invalidateClaCache } from "@/lib/cla/status";
 import { recordIclaSignature } from "@/lib/cla/mutations";
 import { onClaCoverageChanged } from "@/lib/cla/post-sign";
@@ -59,6 +63,8 @@ export async function applyAction(
       claEnabled: true,
       claRequired: true,
       claPlacementEmbed: true,
+      claIclaRequireSignature: true,
+      claIclaCustomFields: true,
       currentIclaVersionId: true,
     },
   });
@@ -94,10 +100,11 @@ export async function applyAction(
     claRequiredForSubmission = !status.satisfied;
   }
 
-  // Validate the click-wrap acceptance (agree + legal name) up front so the
-  // user gets the error without consuming a rate-limit slot or touching the DB
-  // beyond the coverage read above.
+  // Validate the click-wrap acceptance (agree + optional legal name + custom
+  // fields) up front so the user gets the error without consuming a rate-limit
+  // slot or touching the DB beyond the coverage read above.
   let claLegalName = "";
+  let claCustomFields: Record<string, string | boolean> | null = null;
   if (claRequiredForSubmission) {
     const claParsed = signIclaSchema
       .pick({ legalName: true, agree: true })
@@ -109,11 +116,33 @@ export async function applyAction(
       return {
         status: "error",
         reason:
-          "You must accept the Contributor License Agreement and provide your full legal name.",
+          "You must accept the Contributor License Agreement to submit.",
         values: submitted,
       };
     }
     claLegalName = claParsed.data.legalName;
+    // A typed signature is required only when the project opts in.
+    if (project.claIclaRequireSignature && claLegalName.length < 2) {
+      return {
+        status: "error",
+        reason:
+          "You must provide your full legal name to sign the Contributor License Agreement.",
+        values: submitted,
+      };
+    }
+    const claFieldDefs = parseFormSchema(project.claIclaCustomFields);
+    if (claFieldDefs.length > 0) {
+      const raw = collectClaCustomAnswers(formData, claFieldDefs);
+      const ans = buildAnswersSchema(claFieldDefs).safeParse(raw);
+      if (!ans.success) {
+        return {
+          status: "error",
+          reason: "Please complete the required fields on the CLA form.",
+          values: submitted,
+        };
+      }
+      claCustomFields = ans.data as Record<string, string | boolean>;
+    }
   }
 
   // Rate limit by user (5/hr) and IP (20/hr).
@@ -185,6 +214,7 @@ export async function applyAction(
                 emailSnapshot: session.user!.email ?? null,
                 legalName: claLegalName,
                 affirmation: CLA_EMBED_AFFIRMATION,
+                customFields: claCustomFields,
                 ip,
                 userAgent,
                 applicationId: application.id,

@@ -47,6 +47,8 @@ export default async function PublicProjectPage({
       claEnabled: true,
       claRequired: true,
       claPlacementEmbed: true,
+      claIclaRequireSignature: true,
+      claIclaCustomFields: true,
       currentIclaVersionId: true,
       repos: {
         where: { active: true },
@@ -97,6 +99,8 @@ export default async function PublicProjectPage({
           contentHash: version.contentHash,
           bodyMarkdown: version.bodyMarkdown,
           version: version.version,
+          requireSignature: project.claIclaRequireSignature,
+          customFields: parseFormSchema(project.claIclaCustomFields),
         };
       }
     }

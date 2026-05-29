@@ -138,6 +138,7 @@ export async function recordIclaSignature(a: {
   emailSnapshot?: string | null;
   legalName: string;
   affirmation: string;
+  customFields?: Record<string, string | boolean> | null;
   ip: string;
   userAgent: string;
   applicationId?: string | null;
@@ -177,6 +178,10 @@ export async function recordIclaSignature(a: {
         agreed: true,
         documentVersion: version.version,
         contentHash: version.contentHash,
+        customFields:
+          a.customFields && Object.keys(a.customFields).length > 0
+            ? JSON.stringify(a.customFields)
+            : null,
         ip: a.ip,
         userAgent: a.userAgent,
         applicationId: a.applicationId ?? null,
@@ -202,6 +207,7 @@ export async function recordIclaSignature(a: {
         ghLogin: a.ghLogin,
         legalName: a.legalName,
         affirmation: a.affirmation,
+        customFields: a.customFields ?? null,
         emailSnapshot: a.emailSnapshot ?? null,
         applicationId: a.applicationId ?? null,
         ip: a.ip,
@@ -235,6 +241,7 @@ export async function recordCclaSignature(a: {
   emailSnapshot?: string | null;
   legalName: string; // Authorized representative (name)
   affirmation: string;
+  customFields?: Record<string, string | boolean> | null;
   ip: string;
   userAgent: string;
   companyName: string; // Legal Entity (full legal name)
@@ -279,6 +286,10 @@ export async function recordCclaSignature(a: {
         agreed: true,
         documentVersion: version.version,
         contentHash: version.contentHash,
+        customFields:
+          a.customFields && Object.keys(a.customFields).length > 0
+            ? JSON.stringify(a.customFields)
+            : null,
         ip: a.ip,
         userAgent: a.userAgent,
         status: "ACTIVE",
@@ -325,6 +336,7 @@ export async function recordCclaSignature(a: {
         ghLogin: a.ghLogin,
         legalName: a.legalName,
         affirmation: a.affirmation,
+        customFields: a.customFields ?? null,
         companyName: a.companyName,
         registeredAddress: a.registeredAddress ?? null,
         country: a.country ?? null,

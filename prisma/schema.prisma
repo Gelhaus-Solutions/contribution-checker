@@ -163,6 +163,15 @@ model Project {
   currentCclaVersionId   String?
   // When a repo-file CLA auto-versions on push, whether that forces re-sign.
   claAutoVersionRequiresResign Boolean @default(false)
+  // Whether an ICLA requires a typed signature (full legal name). When false,
+  // the "I agree" checkbox alone is a valid individual click-wrap. (CCLA always
+  // requires the full executed signature block.)
+  claIclaRequireSignature Boolean @default(true)
+  // Admin-defined custom fields collected at signing time, as JSON Field[]
+  // (same schema as the application form; see src/lib/applications/schema.ts).
+  // Answers are stored immutably on ClaSignature.customFields.
+  claIclaCustomFields String @default("[]")
+  claCclaCustomFields String @default("[]")
 
   // ----- DCO (Developer Certificate of Origin) — independent of CLA -----
   dcoEnabled Boolean @default(false)
@@ -599,6 +608,10 @@ model ClaSignature {
   userAgent String @default("")
 
   applicationId String? // set when signed embedded in an application
+
+  // JSON-stringified answers to the project's admin-defined CLA custom fields
+  // ({ [fieldId]: value }), snapshotted at signing time. Null when none.
+  customFields String?
 
   status       String  @default("ACTIVE") // "ACTIVE" | "REVOKED"
   revokedById  String?

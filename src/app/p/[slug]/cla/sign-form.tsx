@@ -6,6 +6,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Markdown } from "@/components/markdown";
+import { FormRenderer } from "@/components/form-renderer";
+import { CLA_CUSTOM_FIELD_PREFIX } from "@/lib/cla/schema";
+import type { FormSchema } from "@/lib/applications/schema";
 import type { ClaActionState } from "./actions";
 
 /**
@@ -22,6 +25,8 @@ export function SignForm({
   bodyMarkdown,
   ghLogin,
   applicationId,
+  requireSignature = true,
+  customFields = [],
   action,
 }: {
   projectId: string;
@@ -30,6 +35,8 @@ export function SignForm({
   bodyMarkdown: string;
   ghLogin: string;
   applicationId?: string;
+  requireSignature?: boolean;
+  customFields?: FormSchema;
   action: (
     prev: ClaActionState,
     formData: FormData
@@ -78,18 +85,27 @@ export function SignForm({
         </Label>
       </div>
 
-      <div className="space-y-1.5">
-        <Label htmlFor="cla-legal-name">Full legal name</Label>
-        <Input
-          id="cla-legal-name"
-          name="legalName"
-          required
-          minLength={2}
-          maxLength={200}
-          autoComplete="name"
-          placeholder="Your full legal name"
+      {customFields.length > 0 && (
+        <FormRenderer
+          fields={customFields}
+          namePrefix={CLA_CUSTOM_FIELD_PREFIX}
         />
-      </div>
+      )}
+
+      {requireSignature && (
+        <div className="space-y-1.5">
+          <Label htmlFor="cla-legal-name">Full legal name (signature)</Label>
+          <Input
+            id="cla-legal-name"
+            name="legalName"
+            required
+            minLength={2}
+            maxLength={200}
+            autoComplete="name"
+            placeholder="Type your full legal name to sign"
+          />
+        </div>
+      )}
 
       <p className="text-xs text-muted-foreground">
         Signing as <span className="font-medium">@{ghLogin}</span>. Your GitHub

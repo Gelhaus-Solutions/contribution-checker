@@ -16,7 +16,12 @@ import {
   rosterAddSchema,
   rosterRevokeSchema,
   disputeSchema,
+  collectClaCustomAnswers,
 } from "@/lib/cla/schema";
+import {
+  parseFormSchema,
+  buildAnswersSchema,
+} from "@/lib/applications/schema";
 import {
   recordIclaSignature,
   recordCclaSignature,
@@ -175,6 +180,8 @@ export async function signIcla(
       id: true,
       slug: true,
       claEnabled: true,
+      claIclaRequireSignature: true,
+      claIclaCustomFields: true,
       currentIclaVersionId: true,
     },
   });
@@ -182,6 +189,23 @@ export async function signIcla(
   if (!project.claEnabled) return fail("This project does not require a CLA.");
   if (!project.currentIclaVersionId) {
     return fail("No CLA has been published for this project yet.");
+  }
+
+  // The typed signature (legal name) is required only when the project opts in.
+  if (project.claIclaRequireSignature && input.legalName.length < 2) {
+    return fail("Please type your full legal name to sign.");
+  }
+
+  // Collect + validate admin-defined custom fields.
+  const customFieldDefs = parseFormSchema(project.claIclaCustomFields);
+  let customFields: Record<string, string | boolean> | null = null;
+  if (customFieldDefs.length > 0) {
+    const raw = collectClaCustomAnswers(formData, customFieldDefs);
+    const ans = buildAnswersSchema(customFieldDefs).safeParse(raw);
+    if (!ans.success) {
+      return fail("Please complete the required fields on the CLA form.");
+    }
+    customFields = ans.data as Record<string, string | boolean>;
   }
 
   const version = await prisma.claDocumentVersion.findUnique({
@@ -194,7 +218,7 @@ export async function signIcla(
 
   const affirmation = buildAffirmation({
     kind: "ICLA",
-    legalName: input.legalName,
+    legalName: input.legalName || `GitHub @${user.ghLogin}`,
     ghLogin: user.ghLogin,
     version: version.version,
     contentHash: version.contentHash,
@@ -209,6 +233,7 @@ export async function signIcla(
       emailSnapshot: user.email,
       legalName: input.legalName,
       affirmation,
+      customFields,
       ip,
       userAgent,
       applicationId: input.applicationId ?? null,
@@ -276,6 +301,7 @@ export async function signCcla(
       slug: true,
       claEnabled: true,
       claCorporateEnabled: true,
+      claCclaCustomFields: true,
       currentCclaVersionId: true,
     },
   });
@@ -285,6 +311,18 @@ export async function signCcla(
   }
   if (!project.currentCclaVersionId) {
     return fail("No Corporate CLA has been published for this project yet.");
+  }
+
+  // Collect + validate admin-defined CCLA custom fields.
+  const customFieldDefs = parseFormSchema(project.claCclaCustomFields);
+  let customFields: Record<string, string | boolean> | null = null;
+  if (customFieldDefs.length > 0) {
+    const raw = collectClaCustomAnswers(formData, customFieldDefs);
+    const ans = buildAnswersSchema(customFieldDefs).safeParse(raw);
+    if (!ans.success) {
+      return fail("Please complete the required fields on the Corporate CLA form.");
+    }
+    customFields = ans.data as Record<string, string | boolean>;
   }
 
   const version = await prisma.claDocumentVersion.findUnique({
@@ -313,6 +351,7 @@ export async function signCcla(
       emailSnapshot: user.email,
       legalName: input.legalName,
       affirmation,
+      customFields,
       ip,
       userAgent,
       companyName: input.companyName,

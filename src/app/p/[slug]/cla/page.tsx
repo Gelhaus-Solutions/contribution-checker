@@ -3,6 +3,7 @@ import Link from "next/link";
 import { auth, signIn } from "@/auth";
 import { prisma } from "@/lib/db";
 import { getClaStatus } from "@/lib/cla/status";
+import { parseFormSchema } from "@/lib/applications/schema";
 import { SiteHeader } from "@/components/site-header";
 import { SubmitButton } from "@/components/ui/submit-button";
 import { Badge } from "@/components/ui/badge";
@@ -31,6 +32,8 @@ export default async function ClaSignPage({
       claEnabled: true,
       claRequired: true,
       claCorporateEnabled: true,
+      claIclaRequireSignature: true,
+      claIclaCustomFields: true,
       currentIclaVersionId: true,
     },
   });
@@ -112,6 +115,8 @@ async function ClaSurface({
     name: string;
     claEnabled: boolean;
     claCorporateEnabled: boolean;
+    claIclaRequireSignature: boolean;
+    claIclaCustomFields: string;
     currentIclaVersionId: string | null;
   };
   user: { id: string; ghId: number | null; ghLogin: string | null };
@@ -253,6 +258,8 @@ async function ClaSurface({
           contentHash={version.contentHash}
           bodyMarkdown={version.bodyMarkdown}
           ghLogin={ghLogin}
+          requireSignature={project.claIclaRequireSignature}
+          customFields={parseFormSchema(project.claIclaCustomFields)}
           action={signIcla}
         />
         {project.claCorporateEnabled && (

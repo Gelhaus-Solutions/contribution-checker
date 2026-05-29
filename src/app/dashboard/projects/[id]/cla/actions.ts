@@ -10,11 +10,64 @@ import {
   claSettingsSchema,
   publishVersionSchema,
   waiverSchema,
+  saveCustomFieldsSchema,
 } from "@/lib/cla/schema";
+import { formSchema as formSchemaValidator } from "@/lib/applications/schema";
 import * as claMutations from "@/lib/cla/mutations";
 
 function revalidateCla(projectId: string) {
   revalidatePath(`/dashboard/projects/${projectId}/cla`);
+}
+
+// ---------------------------------------------------------------------------
+// Save CLA custom fields (per kind). Validates the posted JSON as a Field[]
+// using the shared application form-schema validator, then persists to the
+// matching Project column. Mirrors the FormBuilder save contract (FormData with
+// `schema` = JSON Field[]).
+// ---------------------------------------------------------------------------
+export async function saveClaCustomFields(formData: FormData) {
+  const parsed = saveCustomFieldsSchema.parse({
+    projectId: formData.get("projectId"),
+    kind: formData.get("kind"),
+    schema: formData.get("schema"),
+  });
+  const { session } = await requireProjectRole(parsed.projectId, "ADMIN");
+
+  let fields: unknown;
+  try {
+    fields = JSON.parse(parsed.schema);
+  } catch {
+    throw new Error("Custom fields must be valid JSON.");
+  }
+  const validated = formSchemaValidator.parse(fields);
+
+  await prisma.project.update({
+    where: { id: parsed.projectId },
+    data:
+      parsed.kind === "ICLA"
+        ? { claIclaCustomFields: JSON.stringify(validated) }
+        : { claCclaCustomFields: JSON.stringify(validated) },
+  });
+
+  await recordAudit({
+    projectId: parsed.projectId,
+    actorId: session.user.id,
+    kind: "cla.settings_changed",
+    payload: { customFields: parsed.kind, count: validated.length },
+  });
+
+  revalidateCla(parsed.projectId);
+}
+
+// Per-kind wrappers matching the FormBuilder action contract (FormData carries
+// only projectId + schema); they inject the `kind`.
+export async function saveIclaCustomFields(formData: FormData) {
+  formData.set("kind", "ICLA");
+  return saveClaCustomFields(formData);
+}
+export async function saveCclaCustomFields(formData: FormData) {
+  formData.set("kind", "CCLA");
+  return saveClaCustomFields(formData);
 }
 
 // ---------------------------------------------------------------------------
@@ -31,6 +84,8 @@ export async function updateClaSettings(formData: FormData) {
     claPlacementStandalone: formData.get("claPlacementStandalone") ?? undefined,
     claAutoVersionRequiresResign:
       formData.get("claAutoVersionRequiresResign") ?? undefined,
+    claIclaRequireSignature:
+      formData.get("claIclaRequireSignature") ?? undefined,
     dcoEnabled: formData.get("dcoEnabled") ?? undefined,
     labelClaPending: formData.get("labelClaPending") ?? undefined,
   });
@@ -46,6 +101,7 @@ export async function updateClaSettings(formData: FormData) {
       claPlacementEmbed: true,
       claPlacementStandalone: true,
       claAutoVersionRequiresResign: true,
+      claIclaRequireSignature: true,
       dcoEnabled: true,
       labelClaPending: true,
     },
@@ -59,6 +115,7 @@ export async function updateClaSettings(formData: FormData) {
     claPlacementEmbed: !!parsed.claPlacementEmbed,
     claPlacementStandalone: !!parsed.claPlacementStandalone,
     claAutoVersionRequiresResign: !!parsed.claAutoVersionRequiresResign,
+    claIclaRequireSignature: !!parsed.claIclaRequireSignature,
     dcoEnabled: !!parsed.dcoEnabled,
     labelClaPending: parsed.labelClaPending ?? before.labelClaPending,
   };
@@ -92,6 +149,10 @@ export async function updateClaSettings(formData: FormData) {
           claAutoVersionRequiresResign: [
             before.claAutoVersionRequiresResign,
             after.claAutoVersionRequiresResign,
+          ],
+          claIclaRequireSignature: [
+            before.claIclaRequireSignature,
+            after.claIclaRequireSignature,
           ],
           dcoEnabled: [before.dcoEnabled, after.dcoEnabled],
           labelClaPending: [before.labelClaPending, after.labelClaPending],

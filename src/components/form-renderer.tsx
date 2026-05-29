@@ -10,17 +10,23 @@ export function FormRenderer({
   values,
   onChange,
   disabled,
+  namePrefix = "",
 }: {
   fields: FormSchema;
   values?: Record<string, FormValue>;
   onChange?: (id: string, value: string | boolean) => void;
   disabled?: boolean;
+  // Prefix applied to the input `name` (and id) so a field set can be embedded
+  // alongside another form without key collisions. The server strips it back
+  // off when collecting answers. Defaults to "" (no prefix).
+  namePrefix?: string;
 }) {
   const controlled = onChange != null;
   return (
     <div className="space-y-5">
       {fields.map((field) => {
-        const inputId = `f_${field.id}`;
+        const inputName = `${namePrefix}${field.id}`;
+        const inputId = `f_${inputName}`;
         const required = field.required;
         const value = values?.[field.id];
         const stringValue = typeof value === "string" ? value : "";
@@ -35,7 +41,7 @@ export function FormRenderer({
             {field.type === "text" || field.type === "url" ? (
               <Input
                 id={inputId}
-                name={field.id}
+                name={inputName}
                 type={field.type === "url" ? "url" : "text"}
                 placeholder={field.placeholder}
                 maxLength={field.maxLength}
@@ -51,7 +57,7 @@ export function FormRenderer({
             ) : field.type === "textarea" ? (
               <Textarea
                 id={inputId}
-                name={field.id}
+                name={inputName}
                 placeholder={field.placeholder}
                 maxLength={field.maxLength}
                 required={required}
@@ -67,7 +73,7 @@ export function FormRenderer({
             ) : field.type === "select" ? (
               <select
                 id={inputId}
-                name={field.id}
+                name={inputName}
                 required={required}
                 disabled={disabled}
                 className="flex h-9 w-full rounded-md border border-border bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
@@ -89,7 +95,7 @@ export function FormRenderer({
               <label className="flex items-center gap-2 text-sm">
                 <input
                   id={inputId}
-                  name={field.id}
+                  name={inputName}
                   type="checkbox"
                   required={required}
                   disabled={disabled}

@@ -28,6 +28,15 @@ const legalNameSchema = z
   .max(200)
   .refine((v) => !/[\r\n]/.test(v), "legal name cannot contain line breaks");
 
+// ICLA legal name is optional at the schema level: whether a typed signature is
+// *required* is a per-project setting (claIclaRequireSignature), enforced in the
+// signing action. Empty string is allowed here. (CCLA always requires it.)
+const optionalLegalNameSchema = z
+  .string()
+  .trim()
+  .max(200)
+  .refine((v) => !/[\r\n]/.test(v), "legal name cannot contain line breaks");
+
 const documentKindSchema = z.enum(["ICLA", "CCLA"]);
 
 // ----- Hash-chained ledger payloads (`ClaEventLog.payload`) -----
@@ -50,8 +59,10 @@ const iclaSignedPayloadSchema = z.object({
   contentHash: z.string().min(1),
   ghId: z.number().int(),
   ghLogin: z.string().min(1),
-  legalName: z.string().min(1),
+  // May be empty when the project does not require a typed signature for ICLAs.
+  legalName: z.string(),
   affirmation: z.string(),
+  customFields: z.record(z.string(), z.unknown()).nullable().optional(),
   emailSnapshot: z.string().nullable().optional(),
   applicationId: z.string().nullable().optional(),
   ip: z.string(),
@@ -70,6 +81,7 @@ const cclaSignedPayloadSchema = z.object({
   ghLogin: z.string().min(1),
   legalName: z.string().min(1),
   affirmation: z.string(),
+  customFields: z.record(z.string(), z.unknown()).nullable().optional(),
   companyName: z.string().min(1),
   registeredAddress: z.string().nullable().optional(),
   country: z.string().nullable().optional(),
@@ -202,7 +214,9 @@ export function parseChainPayload(json: string): ParseChainPayloadResult {
 
 export const signIclaSchema = z.object({
   projectId: z.string().min(1),
-  legalName: legalNameSchema,
+  // Optional here; required-ness depends on Project.claIclaRequireSignature and
+  // is enforced in the signing action.
+  legalName: optionalLegalNameSchema,
   agree: z.literal(true),
   applicationId: z.string().min(1).optional(),
 });
@@ -219,6 +233,8 @@ const cclaLine = (max: number, label: string) =>
 // signIclaSchema) is the Authorized representative (name); the signing Date is
 // the server-stamped signedAt, so it is not collected from the client.
 export const signCclaSchema = signIclaSchema.extend({
+  // CCLA always requires the authorized representative's full legal name.
+  legalName: legalNameSchema,
   companyName: cclaLine(200, "company name"), // Legal Entity (full legal name)
   registeredAddress: z.string().trim().min(1).max(500), // may span lines
   country: cclaLine(100, "country"),
@@ -263,6 +279,7 @@ export const claSettingsSchema = z.object({
   claPlacementEmbed: z.string().optional(),
   claPlacementStandalone: z.string().optional(),
   claAutoVersionRequiresResign: z.string().optional(),
+  claIclaRequireSignature: z.string().optional(),
   dcoEnabled: z.string().optional(),
   labelClaPending: z.string().trim().min(1).max(50).optional(),
 });
@@ -272,6 +289,42 @@ export const waiverSchema = z.object({
   ghLogin: ghLoginSchema,
   reason: z.string().trim().min(1).max(500),
 });
+
+// Admin saves CLA custom fields (per kind) as a JSON Field[] (same shape as the
+// application form schema). The action validates `schema` with the shared
+// `formSchema` validator from src/lib/applications/schema.ts.
+export const saveCustomFieldsSchema = z.object({
+  projectId: z.string().min(1),
+  kind: documentKindSchema,
+  schema: z.string(), // JSON-encoded Field[]
+});
+
+// Inputs for CLA custom fields are rendered with this prefix so a CLA field set
+// can be embedded alongside the application form without `name` collisions.
+export const CLA_CUSTOM_FIELD_PREFIX = "clacf_";
+
+/**
+ * Collect raw answers to CLA custom fields from FormData (inputs are named
+ * `${prefix}${field.id}`), keyed by field id. Mirrors `collectAnswers` in the
+ * apply flow. Validate the result with `buildAnswersSchema(fields)` before use.
+ */
+export function collectClaCustomAnswers(
+  formData: FormData,
+  fields: import("@/lib/applications/schema").FormSchema,
+  prefix: string = CLA_CUSTOM_FIELD_PREFIX
+): Record<string, string | boolean> {
+  const out: Record<string, string | boolean> = {};
+  for (const f of fields) {
+    const key = `${prefix}${f.id}`;
+    if (f.type === "checkbox") {
+      out[f.id] = formData.get(key) !== null;
+    } else {
+      const v = formData.get(key);
+      out[f.id] = typeof v === "string" ? v : "";
+    }
+  }
+  return out;
+}
 
 export type SignIclaInput = z.infer<typeof signIclaSchema>;
 export type SignCclaInput = z.infer<typeof signCclaSchema>;

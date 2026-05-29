@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Markdown } from "@/components/markdown";
 import { FormRenderer, type FormValue } from "@/components/form-renderer";
 import type { FormSchema } from "@/lib/applications/schema";
+import { CLA_CUSTOM_FIELD_PREFIX } from "@/lib/cla/schema";
 
 type FormValues = Record<string, FormValue>;
 
@@ -21,6 +22,8 @@ export type ClaEmbed = {
   contentHash: string;
   bodyMarkdown: string;
   version: number;
+  requireSignature: boolean;
+  customFields: FormSchema;
 };
 
 export type ApplyState =
@@ -156,16 +159,24 @@ export function ApplyForm({
             name="cla_contentHash"
             value={claEmbed.contentHash}
           />
-          <div className="space-y-1">
-            <Label htmlFor="cla_legalName">Full legal name</Label>
-            <Input
-              id="cla_legalName"
-              name="cla_legalName"
-              required
-              autoComplete="name"
-              placeholder="Your full legal name"
+          {claEmbed.customFields.length > 0 && (
+            <FormRenderer
+              fields={claEmbed.customFields}
+              namePrefix={CLA_CUSTOM_FIELD_PREFIX}
             />
-          </div>
+          )}
+          {claEmbed.requireSignature && (
+            <div className="space-y-1">
+              <Label htmlFor="cla_legalName">Full legal name (signature)</Label>
+              <Input
+                id="cla_legalName"
+                name="cla_legalName"
+                required
+                autoComplete="name"
+                placeholder="Type your full legal name to sign"
+              />
+            </div>
+          )}
           <label className="flex items-start gap-2 text-sm">
             <input
               type="checkbox"

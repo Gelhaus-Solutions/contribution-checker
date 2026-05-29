@@ -5,6 +5,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import { FormRenderer } from "@/components/form-renderer";
+import { CLA_CUSTOM_FIELD_PREFIX } from "@/lib/cla/schema";
+import type { FormSchema } from "@/lib/applications/schema";
 import type { ClaActionState } from "../actions";
 
 // `signCcla` returns the shared `ClaActionState`; on success the page
@@ -14,9 +17,11 @@ const INITIAL: ClaActionState = { status: "idle" };
 
 export function SignCclaForm({
   projectId,
+  customFields = [],
   action,
 }: {
   projectId: string;
+  customFields?: FormSchema;
   action: (
     prev: ClaActionState,
     formData: FormData
@@ -145,6 +150,18 @@ export function SignCclaForm({
           your IP address and the exact CLA version you signed.
         </p>
       </fieldset>
+
+      {customFields.length > 0 && (
+        <fieldset className="space-y-4 rounded-md border border-border p-4">
+          <legend className="px-1 text-xs font-medium uppercase text-muted-foreground">
+            Additional information
+          </legend>
+          <FormRenderer
+            fields={customFields}
+            namePrefix={CLA_CUSTOM_FIELD_PREFIX}
+          />
+        </fieldset>
+      )}
 
       <label className="flex items-start gap-2 text-sm">
         <input

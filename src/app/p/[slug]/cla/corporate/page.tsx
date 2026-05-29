@@ -15,6 +15,7 @@ import {
 import { SignCclaForm } from "./sign-ccla-form";
 import { RosterManager, type RosterMember } from "./roster";
 import { signCcla, addRosterMembers, revokeRosterMember } from "../actions";
+import { parseFormSchema, type FormSchema } from "@/lib/applications/schema";
 
 export default async function CorporateClaPage({
   params,
@@ -31,6 +32,7 @@ export default async function CorporateClaPage({
       claEnabled: true,
       claRequired: true,
       claCorporateEnabled: true,
+      claCclaCustomFields: true,
       currentCclaVersionId: true,
     },
   });
@@ -85,6 +87,7 @@ export default async function CorporateClaPage({
             projectId={project.id}
             userId={session.user.id}
             currentCclaVersionId={project.currentCclaVersionId}
+            cclaCustomFields={parseFormSchema(project.claCclaCustomFields)}
           />
         )}
       </main>
@@ -96,10 +99,12 @@ async function CorporateSurface({
   projectId,
   userId,
   currentCclaVersionId,
+  cclaCustomFields,
 }: {
   projectId: string;
   userId: string;
   currentCclaVersionId: string | null;
+  cclaCustomFields: FormSchema;
 }) {
   // Does the signed-in user already manage a CCLA for this project? The
   // signatory's ClaSignature is FK'd to the CorporateCla; we match on the
@@ -199,7 +204,11 @@ async function CorporateSurface({
         <div className="max-h-96 overflow-y-auto rounded-md border border-border bg-muted/20 p-4">
           <Markdown source={version.bodyMarkdown} />
         </div>
-        <SignCclaForm projectId={projectId} action={signCcla} />
+        <SignCclaForm
+          projectId={projectId}
+          customFields={cclaCustomFields}
+          action={signCcla}
+        />
       </CardContent>
     </Card>
   );
