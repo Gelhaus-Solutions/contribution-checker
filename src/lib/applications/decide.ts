@@ -4,6 +4,7 @@ import { recordAudit } from "@/lib/audit";
 import { notifyProjectReviewers, notifyUser } from "@/lib/notifications/inbox";
 import { applyUrl, dashboardUrl, sendEmail } from "@/lib/notifications/email";
 import { enqueueProjectWebhook } from "@/lib/notifications/webhooks";
+import { isClaSatisfied } from "@/lib/cla/status";
 
 function recordApplicationDecisionMetric(
   outcome: "approved" | "denied" | "revoked",
@@ -27,6 +28,18 @@ export class ApprovalGateError extends Error {
   ) {
     super(`approval_gate_blocked: have ${have}, need ${required}`);
     this.name = "ApprovalGateError";
+  }
+}
+
+/**
+ * Thrown by approveApplication when the project requires a CLA
+ * (`claEnabled && claRequired`) and the applicant has not yet satisfied it.
+ * Surfaced as a friendly banner in the application review UI.
+ */
+export class ClaGateError extends Error {
+  constructor() {
+    super("cla_gate_blocked: applicant must sign the CLA before approval");
+    this.name = "ClaGateError";
   }
 }
 
@@ -102,9 +115,11 @@ export async function approveApplication(args: {
           name: true,
           slug: true,
           requireApprovalCount: true,
+          claEnabled: true,
+          claRequired: true,
         },
       },
-      user: { select: { ghLogin: true } },
+      user: { select: { ghId: true, ghLogin: true } },
     },
   });
   if (!app) throw new Error("Application not found");
@@ -118,6 +133,22 @@ export async function approveApplication(args: {
     });
     if (have < app.project.requireApprovalCount) {
       throw new ApprovalGateError(app.project.requireApprovalCount, have);
+    }
+  }
+
+  // CLA gate: when the project requires a CLA, the applicant must have
+  // satisfied it (ICLA / CCLA roster / waiver) before approval is allowed.
+  if (app.project.claEnabled && app.project.claRequired) {
+    const satisfied =
+      app.user.ghId != null &&
+      app.user.ghLogin != null &&
+      (await isClaSatisfied({
+        projectId: app.projectId,
+        ghId: app.user.ghId,
+        ghLogin: app.user.ghLogin,
+      }));
+    if (!satisfied) {
+      throw new ClaGateError();
     }
   }
 
