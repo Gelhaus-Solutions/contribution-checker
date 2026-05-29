@@ -15,6 +15,7 @@ import {
   denyApplication,
   revokeApplication,
 } from "@/lib/applications/decide";
+import { getClaStatus } from "@/lib/cla/status";
 
 const ghLoginPattern = /^[a-z0-9](?:[a-z0-9]|-(?=[a-z0-9])){0,38}$/i;
 
@@ -328,6 +329,29 @@ export type UserOverview = {
   averageQuality: number | null;
   scoredPrCount: number;
   qualityEnabled: boolean;
+  // CLA coverage for this contributor (null when the project has no CLA enabled).
+  cla: {
+    required: boolean;
+    satisfied: boolean;
+    via: "icla" | "ccla" | "waiver" | null;
+    needsResign: boolean;
+    corporate: { id: string; companyName: string } | null;
+    // Most recent individual signature for this account, if any.
+    signature: {
+      version: number;
+      signedAt: string;
+      legalName: string;
+      status: string;
+    } | null;
+    currentVersion: number | null;
+    // Open PRs from this user currently held open by a failing CLA Check.
+    blockedPrCount: number;
+  } | null;
+  // DCO status (null when DCO is not enabled for the project).
+  dco: {
+    // Open PRs from this user currently held open by a failing DCO Check.
+    blockedPrCount: number;
+  } | null;
 };
 
 const overviewSchema = z.object({
@@ -351,7 +375,14 @@ export async function getUserOverview(args: {
 
   const project = await prisma.project.findUnique({
     where: { id: projectId },
-    select: { qualityEnabled: true, qualityConfig: true },
+    select: {
+      qualityEnabled: true,
+      qualityConfig: true,
+      claEnabled: true,
+      claRequired: true,
+      dcoEnabled: true,
+      currentIclaVersionId: true,
+    },
   });
   if (!project) throw new Error("Project not found");
 
@@ -362,6 +393,7 @@ export async function getUserOverview(args: {
       where: { ghLogin },
       select: {
         id: true,
+        ghId: true,
         applications: {
           where: { projectId },
           orderBy: { createdAt: "desc" },
@@ -418,6 +450,8 @@ export async function getUserOverview(args: {
     closedByApp: 0,
   };
   const scoresForAverage: number[] = [];
+  let claBlockedPrCount = 0;
+  let dcoBlockedPrCount = 0;
 
   for (const c of prChecks) {
     if (c.status === "PENDING") stats.pending += 1;
@@ -425,6 +459,11 @@ export async function getUserOverview(args: {
     if (c.status === "DENIED") stats.denied += 1;
     if (c.status === "BYPASSED") stats.bypassed += 1;
     if (c.closedByApp) stats.closedByApp += 1;
+    if (c.status === "CHECK_REQUIRED") {
+      if (c.gateReason === "dco_missing") dcoBlockedPrCount += 1;
+      else if (c.gateReason === "cla_required" || c.gateReason === "cla_stale")
+        claBlockedPrCount += 1;
+    }
 
     if (project.qualityEnabled && c.quality) {
       const signals = JSON.parse(c.quality.signalsRaw) as SignalsRaw;
@@ -439,6 +478,59 @@ export async function getUserOverview(args: {
           scoresForAverage.reduce((a, b) => a + b, 0) / scoresForAverage.length
         )
       : null;
+
+  // CLA coverage (only when the project has a CLA enabled). Matches the gate's
+  // own logic via getClaStatus; we additionally surface the latest individual
+  // signature + the current required version for context.
+  let cla: UserOverview["cla"] = null;
+  if (project.claEnabled) {
+    const ghIdForLookup = user?.ghId ?? manual?.ghId ?? 0;
+    const status = await getClaStatus({
+      projectId,
+      ghId: ghIdForLookup,
+      ghLogin,
+    });
+
+    const sig = ghIdForLookup
+      ? await prisma.claSignature.findFirst({
+          where: { projectId, ghId: ghIdForLookup, kind: "ICLA" },
+          orderBy: { signedAt: "desc" },
+          select: {
+            documentVersion: true,
+            signedAt: true,
+            legalName: true,
+            status: true,
+          },
+        })
+      : null;
+
+    let currentVersion: number | null = null;
+    if (project.currentIclaVersionId) {
+      const v = await prisma.claDocumentVersion.findUnique({
+        where: { id: project.currentIclaVersionId },
+        select: { version: true },
+      });
+      currentVersion = v?.version ?? null;
+    }
+
+    cla = {
+      required: project.claRequired,
+      satisfied: status.satisfied,
+      via: status.via ?? null,
+      needsResign: !!status.needsResign,
+      corporate: status.corporate ?? null,
+      signature: sig
+        ? {
+            version: sig.documentVersion,
+            signedAt: sig.signedAt.toISOString(),
+            legalName: sig.legalName,
+            status: sig.status,
+          }
+        : null,
+      currentVersion,
+      blockedPrCount: claBlockedPrCount,
+    };
+  }
 
   return {
     ghLogin,
@@ -455,5 +547,7 @@ export async function getUserOverview(args: {
     averageQuality,
     scoredPrCount: scoresForAverage.length,
     qualityEnabled: project.qualityEnabled,
+    cla,
+    dco: project.dcoEnabled ? { blockedPrCount: dcoBlockedPrCount } : null,
   };
 }

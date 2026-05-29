@@ -510,6 +510,100 @@ function UserOverviewDialog({
               </section>
             )}
 
+            {data.cla && (
+              <section>
+                <h3 className="text-sm font-medium">CLA</h3>
+                <div className="mt-2 rounded-md border border-border p-3 text-sm">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge
+                      variant={
+                        data.cla.satisfied
+                          ? "success"
+                          : data.cla.needsResign
+                            ? "warning"
+                            : data.cla.required
+                              ? "destructive"
+                              : "warning"
+                      }
+                    >
+                      {data.cla.satisfied
+                        ? "Signed"
+                        : data.cla.needsResign
+                          ? "Re-sign required"
+                          : "Not signed"}
+                    </Badge>
+                    {data.cla.via && (
+                      <Badge variant="outline" className="text-xs">
+                        {data.cla.via === "icla"
+                          ? "Individual"
+                          : data.cla.via === "ccla"
+                            ? "Corporate"
+                            : "Waiver"}
+                      </Badge>
+                    )}
+                    {!data.cla.required && (
+                      <span className="text-xs text-muted-foreground">
+                        record-only (not gating)
+                      </span>
+                    )}
+                  </div>
+                  {data.cla.via === "ccla" && data.cla.corporate && (
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      Covered by Corporate CLA:{" "}
+                      <span className="font-medium">
+                        {data.cla.corporate.companyName}
+                      </span>
+                    </p>
+                  )}
+                  {data.cla.via === "waiver" && (
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      Exempt via an admin waiver.
+                    </p>
+                  )}
+                  {data.cla.signature && (
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      Individual signature: v{data.cla.signature.version}
+                      {data.cla.currentVersion != null &&
+                        ` (current v${data.cla.currentVersion})`}{" "}
+                      • signed {data.cla.signature.signedAt.slice(0, 10)} as{" "}
+                      <span className="font-medium">
+                        {data.cla.signature.legalName}
+                      </span>
+                      {data.cla.signature.status === "REVOKED" && (
+                        <span className="text-destructive"> • REVOKED</span>
+                      )}
+                    </p>
+                  )}
+                  {data.cla.blockedPrCount > 0 && (
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {data.cla.blockedPrCount} open PR(s) held open pending CLA.
+                    </p>
+                  )}
+                </div>
+              </section>
+            )}
+
+            {data.dco && (
+              <section>
+                <h3 className="text-sm font-medium">DCO</h3>
+                <div className="mt-2 rounded-md border border-border p-3 text-sm">
+                  <Badge
+                    variant={
+                      data.dco.blockedPrCount > 0 ? "destructive" : "success"
+                    }
+                  >
+                    {data.dco.blockedPrCount > 0
+                      ? `${data.dco.blockedPrCount} PR(s) missing sign-off`
+                      : "No PRs blocked on sign-off"}
+                  </Badge>
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    DCO requires every commit to carry a{" "}
+                    <span className="font-mono">Signed-off-by</span> trailer.
+                  </p>
+                </div>
+              </section>
+            )}
+
             <section>
               <h3 className="text-sm font-medium">PR stats</h3>
               <dl className="mt-2 grid grid-cols-3 gap-2 text-xs sm:grid-cols-5">
