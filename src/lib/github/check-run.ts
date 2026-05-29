@@ -13,7 +13,7 @@ export const CHECK_RUN_NAME = "contribution-checker / decision";
 
 type DecisionFor = Extract<
   PrDecision,
-  { status: "APPROVED" | "BYPASSED" | "PENDING" | "DENIED" }
+  { status: "APPROVED" | "BYPASSED" | "PENDING" | "CHECK_REQUIRED" | "DENIED" }
 >;
 
 type ProjectInfo = {
@@ -40,8 +40,10 @@ export function buildDecisionCheckPayload(args: {
   decision: DecisionFor;
   applyUrl: string;
   projectName: string;
+  /** Signing page URL; used as detailsUrl for CLA gates. Falls back to applyUrl. */
+  claUrl?: string;
 }): DecisionCheckPayload {
-  const { decision, applyUrl, projectName } = args;
+  const { decision, applyUrl, projectName, claUrl } = args;
   switch (decision.status) {
     case "APPROVED": {
       const disabled =
@@ -89,6 +91,29 @@ export function buildDecisionCheckPayload(args: {
         detailsUrl: applyUrl,
       };
     }
+    case "CHECK_REQUIRED": {
+      if (decision.reason === "dco_missing") {
+        return {
+          name: CHECK_RUN_NAME,
+          status: "completed",
+          conclusion: "action_required",
+          title: "DCO sign-off required",
+          summary: `One or more commits are missing a Developer Certificate of Origin sign-off. Add a "Signed-off-by" trailer to each commit (e.g. \`git commit -s\`) — your PR stays open and we'll re-check automatically.`,
+          detailsUrl: applyUrl,
+        };
+      }
+      const stale = decision.reason === "cla_stale";
+      return {
+        name: CHECK_RUN_NAME,
+        status: "completed",
+        conclusion: "action_required",
+        title: "CLA required",
+        summary: stale
+          ? `A new version of the ${projectName} CLA must be signed. Sign it to unblock this PR — your PR stays open and we'll re-check automatically once signed.`
+          : `Sign the ${projectName} CLA to unblock this PR — your PR stays open and we'll re-check automatically once signed.`,
+        detailsUrl: claUrl ?? applyUrl,
+      };
+    }
     case "DENIED": {
       const cooldownText = decision.cooldownUntil
         ? `Denied until ${decision.cooldownUntil.toISOString().slice(0, 10)}.`
@@ -122,6 +147,7 @@ export async function publishDecisionCheck(args: {
   project: ProjectInfo;
   decision: DecisionFor;
   applyUrl: string;
+  claUrl?: string;
 }): Promise<void> {
   if (!args.project.checksEnabled) return;
   if (!args.headSha) return;
@@ -131,6 +157,7 @@ export async function publishDecisionCheck(args: {
     decision: args.decision,
     applyUrl: args.applyUrl,
     projectName: args.project.name,
+    claUrl: args.claUrl,
   });
 
   let existingId: string | null = null;

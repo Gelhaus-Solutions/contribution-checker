@@ -9,7 +9,11 @@ export type NotificationKind =
   | "application.review_submitted"
   | "application.comment_replied"
   | "project.invited"
-  | "pr.blocked";
+  | "pr.blocked"
+  | "cla.ccla_signed"
+  | "cla.roster_changed"
+  | "cla.roster_disputed"
+  | "cla.resign_required";
 
 export async function notifyUser(args: {
   userId: string;

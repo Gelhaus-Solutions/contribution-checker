@@ -76,6 +76,7 @@ model User {
   auditedEvents   AuditEvent[]
   formTemplates   FormTemplate[]
   webhookDeliveries WebhookDelivery[]
+  claSignatures   ClaSignature[]
 }
 
 model Project {
@@ -134,6 +135,38 @@ model Project {
   // 0 = no gate (legacy behavior).
   requireApprovalCount Int @default(0)
 
+  // Disable the *application* requirement only (distinct from checkerEnabled,
+  // which disables the whole checker). When false, the application gate is
+  // skipped (missing/submitted applications no longer block) but CLA + DCO +
+  // quality scoring still apply. Existing DENIED applications still block.
+  applicationRequired Boolean @default(true)
+
+  // ----- CLA (Contributor License Agreement) -----
+  claEnabled             Boolean @default(false)
+  // Gate (block PRs / approval until signed) vs record-only.
+  claRequired            Boolean @default(true)
+  // Allow the Corporate CLA path (company signs + maintains an employee roster).
+  claCorporateEnabled    Boolean @default(true)
+  // Placement: a required acceptance step embedded in the application form,
+  // and/or a standalone signing page at /p/<slug>/cla.
+  claPlacementEmbed      Boolean @default(true)
+  claPlacementStandalone Boolean @default(true)
+  // Separate label for "approved but CLA/DCO unsigned" PRs (distinct from
+  // labelPending so the two block reasons are visually distinct on GitHub).
+  labelClaPending        String  @default("contribution:cla-pending")
+  // Lowest signature version (per kind) that still satisfies the gate. A
+  // require-resign publish sets this to the new version; keep-valid leaves it.
+  minIclaVersion         Int     @default(0)
+  minCclaVersion         Int     @default(0)
+  // Denormalized pointers to the active published document per kind (fast gate).
+  currentIclaVersionId   String?
+  currentCclaVersionId   String?
+  // When a repo-file CLA auto-versions on push, whether that forces re-sign.
+  claAutoVersionRequiresResign Boolean @default(false)
+
+  // ----- DCO (Developer Certificate of Origin) — independent of CLA -----
+  dcoEnabled Boolean @default(false)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -145,6 +178,12 @@ model Project {
   webhookEndpoints  ProjectWebhook[]
   manualDecisions  ManualDecision[]
   template     FormTemplate?    @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  claDocumentVersions ClaDocumentVersion[]
+  claSignatures       ClaSignature[]
+  corporateClas       CorporateCla[]
+  cclaRosterMembers   CclaRosterMember[]
+  claWaivers          ClaWaiver[]
+  claEvents           ClaEventLog[]
 }
 
 /**
@@ -257,6 +296,7 @@ model Application {
   decidedBy User?               @relation("ApplicationDecidedBy", fields: [decidedById], references: [id], onDelete: SetNull)
   notes     ApplicationNote[]
   reviews   ApplicationReview[]
+  claSignatures ClaSignature[]
 
   @@index([projectId, status])
   @@index([userId])
@@ -343,8 +383,12 @@ model PrCheck {
   prNodeId      String
   authorGhLogin String
   authorGhId    Int
-  status        String // "PENDING" | "APPROVED" | "DENIED" | "BYPASSED"
+  status        String // "PENDING" | "APPROVED" | "DENIED" | "BYPASSED" | "CHECK_REQUIRED"
   closedByApp   Boolean  @default(false)
+  // For CHECK_REQUIRED PRs (CLA/DCO): why the Check is failing, so re-checks
+  // and sweeps can find affected PRs. "cla_required" | "cla_stale" | "dco_missing".
+  // Null for all other statuses (which use the close-PR machinery instead).
+  gateReason    String?
 
   // GitHub Check Run id (string to avoid BigInt JSON pitfalls). Null when the
   // check publishing is disabled or the installation lacks `checks:write`.
@@ -490,4 +534,204 @@ model JobQueue {
   updatedAt     DateTime @updatedAt
 
   @@index([status, nextAttemptAt])
+}
+
+// ===== CLA (Contributor License Agreement) =====
+
+/**
+ * A versioned, immutable CLA document for a project. "Editing" a published
+ * document means publishing a new version; old versions are retained forever
+ * because signatures reference the exact text (bodyMarkdown + contentHash).
+ * kind = "ICLA" (individual) | "CCLA" (corporate). Source is manual paste or a
+ * repo file (e.g. CLA.md); for repo files the text is snapshotted at publish.
+ */
+model ClaDocumentVersion {
+  id          String  @id @default(cuid())
+  projectId   String
+  kind        String  // "ICLA" | "CCLA"
+  version     Int
+  bodyMarkdown String  // snapshot of the exact text signed (even for repo-file source)
+  contentHash String  // sha256(bodyMarkdown) — the version hash
+
+  sourceType      String  @default("manual") // "manual" | "repo_file"
+  sourceRepoId    String?
+  sourcePath      String?
+  sourceRef       String?
+  sourceCommitSha String?
+
+  requireResign Boolean @default(false) // whether this publish forced re-sign
+  publishedById String?                 // actor (plain snapshot, no FK)
+  publishedAt   DateTime @default(now())
+  createdAt     DateTime @default(now())
+
+  project    Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  signatures ClaSignature[]
+  corporateClas CorporateCla[]
+
+  @@unique([projectId, kind, version])
+  @@index([projectId, kind])
+}
+
+/**
+ * An immutable click-wrap signature event. NEVER updated or hard-deleted.
+ * Admin "revocation" flips status (append-only); the original record stands.
+ * Identity is snapshotted (ghId/ghLogin/email/legalName) so the record is
+ * self-contained even if the User row is later deleted (userId → SetNull).
+ */
+model ClaSignature {
+  id        String @id @default(cuid())
+  projectId String
+  versionId String
+  kind      String // "ICLA" | "CCLA"
+
+  userId        String?
+  ghId          Int
+  ghLogin       String
+  emailSnapshot String?
+
+  legalName       String
+  affirmation     String  // exact "I agree ..." text shown at signing
+  agreed          Boolean @default(true)
+  documentVersion Int     // snapshot of the version number signed
+  contentHash     String  // snapshot of the version hash signed
+
+  ip        String
+  userAgent String @default("")
+
+  applicationId String? // set when signed embedded in an application
+
+  status       String  @default("ACTIVE") // "ACTIVE" | "REVOKED"
+  revokedById  String?
+  revokedAt    DateTime?
+  revokeReason String?
+
+  signedAt  DateTime @default(now())
+  createdAt DateTime @default(now())
+
+  project     Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  version     ClaDocumentVersion @relation(fields: [versionId], references: [id], onDelete: Restrict)
+  user        User?              @relation(fields: [userId], references: [id], onDelete: SetNull)
+  application Application?       @relation(fields: [applicationId], references: [id], onDelete: SetNull)
+  corporateSignatory CorporateCla? @relation("CclaSignatory")
+
+  @@index([projectId, ghId, status])
+  @@index([ghId])
+  @@index([versionId])
+  @@index([applicationId])
+}
+
+/**
+ * A signed Corporate CLA. The signatory is a ClaSignature (kind=CCLA). The
+ * company maintains a roster (CclaRosterMember) of covered GitHub accounts.
+ */
+model CorporateCla {
+  id          String @id @default(cuid())
+  projectId   String
+  versionId   String
+  signatureId String @unique
+
+  companyName   String
+  signatoryTitle String?
+  contactEmail  String
+
+  status      String @default("ACTIVE") // "ACTIVE" | "REVOKED"
+  revokedById String?
+  revokedAt   DateTime?
+  createdAt   DateTime @default(now())
+
+  project   Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  version   ClaDocumentVersion @relation(fields: [versionId], references: [id], onDelete: Restrict)
+  signature ClaSignature       @relation("CclaSignatory", fields: [signatureId], references: [id], onDelete: Restrict)
+  members   CclaRosterMember[]
+
+  @@index([projectId, status])
+}
+
+/**
+ * A roster entry. Append-only state transitions; never hard-deleted. A member
+ * is added (ACTIVE), revoked (REVOKED) by the signatory, or DISPUTED (the
+ * listed contributor says they aren't affiliated — coverage suspended). A
+ * DISPUTED account cannot be re-added unless the contributor consents.
+ */
+model CclaRosterMember {
+  id          String @id @default(cuid())
+  corporateId String
+  projectId   String
+
+  ghLogin String
+  ghId    Int?
+
+  status String @default("ACTIVE") // "ACTIVE" | "REVOKED" | "DISPUTED"
+
+  addedById   String?
+  addedAt     DateTime @default(now())
+  revokedById String?
+  revokedAt   DateTime?
+  disputedAt  DateTime?
+  disputeNote String?
+
+  corporateCla CorporateCla @relation(fields: [corporateId], references: [id], onDelete: Cascade)
+  project      Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, ghId, status])
+  @@index([projectId, ghLogin, status])
+  @@index([corporateId])
+}
+
+/**
+ * Admin exemption: a specific GitHub account is treated as CLA-satisfied
+ * (e.g. legal-team handshake). Append-only; revocation flips status.
+ */
+model ClaWaiver {
+  id        String @id @default(cuid())
+  projectId String
+  ghLogin   String
+  ghId      Int?
+  reason    String
+
+  grantedById String?
+  grantedAt   DateTime @default(now())
+  status      String   @default("ACTIVE") // "ACTIVE" | "REVOKED"
+  revokedById String?
+  revokedAt   DateTime?
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, ghId, status])
+  @@index([projectId, ghLogin, status])
+}
+
+/**
+ * The per-project append-only, SHA-256 hash-chained legal ledger. Every
+ * CLA-relevant event (signatures, document publications, roster add/revoke/
+ * dispute, signature revocations, waivers) is recorded here. seq is a 0-based
+ * monotonic counter per project (seq 0 = genesis). entryHash chains via
+ * prevHash; @@unique([projectId, seq]) makes gaps/reordering impossible.
+ * Link fields are plain scalars (no FK) — this is an immutable record, never
+ * cascaded or constrained. See src/lib/cla/integrity.ts for the hashing spec.
+ */
+model ClaEventLog {
+  id        String @id @default(cuid())
+  projectId String
+  seq       Int
+  kind      String // genesis | icla.signed | ccla.signed | doc.published | roster.added | roster.revoked | roster.disputed | signature.revoked | waiver.granted | waiver.revoked
+
+  payload     String // canonical (key-sorted) JSON snapshot
+  actorUserId String?
+  actorGhId   Int?
+
+  signatureId       String? @unique
+  documentVersionId String?
+  rosterMemberId    String?
+  corporateId       String?
+  waiverId          String?
+
+  prevHash  String
+  entryHash String
+  createdAt DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, seq])
+  @@index([projectId, kind])
 }

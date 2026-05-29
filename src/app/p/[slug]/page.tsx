@@ -15,8 +15,9 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { ApplyForm } from "./apply-form";
+import { ApplyForm, type ClaEmbed } from "./apply-form";
 import { applyAction } from "./actions";
+import { getClaStatus } from "@/lib/cla/status";
 import { replyToCommentAction } from "@/app/dashboard/projects/[id]/applications/[appId]/actions";
 
 const STATUS_VARIANT: Record<
@@ -43,6 +44,10 @@ export default async function PublicProjectPage({
       slug: true,
       description: true,
       formSchema: true,
+      claEnabled: true,
+      claRequired: true,
+      claPlacementEmbed: true,
+      currentIclaVersionId: true,
       repos: {
         where: { active: true },
         select: { fullName: true },
@@ -54,6 +59,48 @@ export default async function PublicProjectPage({
 
   const session = await auth();
   const fields = parseFormSchema(project.formSchema);
+
+  // Embedded CLA: when the project requires a CLA in the application form and
+  // the signed-in user is not already covered, surface the click-wrap block in
+  // <ApplyForm>. Coverage is checked once here so an already-covered user (e.g.
+  // signed standalone) never sees the block — no double-signing. Bots and
+  // unauthenticated visitors never reach this branch.
+  let claEmbed: ClaEmbed | null = null;
+  if (
+    session?.user &&
+    project.claEnabled &&
+    project.claRequired &&
+    project.claPlacementEmbed &&
+    project.currentIclaVersionId &&
+    typeof session.user.ghId === "number" &&
+    session.user.ghLogin
+  ) {
+    const status = await getClaStatus({
+      projectId: project.id,
+      ghId: session.user.ghId,
+      ghLogin: session.user.ghLogin,
+    });
+    if (!status.satisfied) {
+      const version = await prisma.claDocumentVersion.findUnique({
+        where: { id: project.currentIclaVersionId },
+        select: {
+          id: true,
+          version: true,
+          contentHash: true,
+          bodyMarkdown: true,
+          kind: true,
+        },
+      });
+      if (version && version.kind === "ICLA") {
+        claEmbed = {
+          versionId: version.id,
+          contentHash: version.contentHash,
+          bodyMarkdown: version.bodyMarkdown,
+          version: version.version,
+        };
+      }
+    }
+  }
 
   const existing = session?.user
     ? await prisma.application.findFirst({
@@ -172,6 +219,7 @@ export default async function PublicProjectPage({
                 existing={existing}
                 projectId={project.id}
                 fields={fields}
+                claEmbed={claEmbed}
               />
             )}
           </CardContent>
@@ -344,14 +392,21 @@ function ApplicantSurface({
   existing,
   projectId,
   fields,
+  claEmbed,
 }: {
   existing: ApplicantExisting | null;
   projectId: string;
   fields: ReturnType<typeof parseFormSchema>;
+  claEmbed: ClaEmbed | null;
 }) {
   if (!existing) {
     return (
-      <ApplyForm projectId={projectId} fields={fields} action={applyAction} />
+      <ApplyForm
+        projectId={projectId}
+        fields={fields}
+        action={applyAction}
+        claEmbed={claEmbed}
+      />
     );
   }
   const view = deriveApplicantView(existing);
@@ -359,7 +414,12 @@ function ApplicantSurface({
     <div className="space-y-4">
       <ExistingApplication derivedStatus={view.derivedStatus} info={view.info} />
       {view.canApply && (
-        <ApplyForm projectId={projectId} fields={fields} action={applyAction} />
+        <ApplyForm
+          projectId={projectId}
+          fields={fields}
+          action={applyAction}
+          claEmbed={claEmbed}
+        />
       )}
     </div>
   );

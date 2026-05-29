@@ -33,6 +33,17 @@ export type AuditKind =
   | "quality.backfill_completed"
   | "pr.quality_rescanned"
   | "pr.reevaluate_triggered"
+  | "cla.settings_changed"
+  | "cla.version_published"
+  | "cla.signed"
+  | "cla.ccla_signed"
+  | "cla.signature_revoked"
+  | "cla.roster_added"
+  | "cla.roster_revoked"
+  | "cla.roster_disputed"
+  | "cla.waiver_granted"
+  | "cla.waiver_revoked"
+  | "cla.signatures_exported"
   // App-level (projectId may be null)
   | "vault.resolution_failed"
   | "vault.cache_invalidated";

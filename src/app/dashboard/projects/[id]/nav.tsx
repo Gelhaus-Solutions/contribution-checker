@@ -13,6 +13,7 @@ const items: { href: string; label: string; minRole: Role }[] = [
   { href: "/repos", label: "Repos", minRole: "ADMIN" },
   { href: "/form", label: "Form", minRole: "REVIEWER" },
   { href: "/quality", label: "Quality", minRole: "REVIEWER" },
+  { href: "/cla", label: "CLA", minRole: "ADMIN" },
   { href: "/settings", label: "Settings", minRole: "ADMIN" },
   { href: "/audit", label: "Audit log", minRole: "ADMIN" },
 ];

@@ -12,6 +12,7 @@ import {
   type RepoForDecision,
 } from "@/lib/applications/decide-pr";
 import { buildDecisionMessage } from "@/lib/applications/decision-message";
+import { verifyDco } from "@/lib/cla/dco";
 import { enqueueProjectWebhook } from "@/lib/notifications/webhooks";
 import {
   expectedAudienceForProject,
@@ -165,9 +166,11 @@ export async function POST(req: Request) {
       labelPending: true,
       labelApproved: true,
       labelDenied: true,
+      labelClaPending: true,
       checkerEnabled: true,
       trackWhenDisabled: true,
       checksEnabled: true,
+      dcoEnabled: true,
       qualityEnabled: true,
       qualityConfig: true,
       qualityCommentMin: true,
@@ -242,12 +245,45 @@ export async function POST(req: Request) {
     );
   }
 
-  const decision = await decideForRepo({
+  let decision = await decideForRepo({
     repo: repo as RepoForDecision,
     prAuthorGhLogin: body.pull_request.user.login,
     prAuthorGhId: body.pull_request.user.id,
     isCollaboratorHint: body.isCollaborator,
   });
+
+  // DCO gate (independent of CLA). Only layered on an allowing decision, and
+  // only when the workflow shipped commit metadata — the decision pipeline
+  // never loads commits, so DCO is evaluated here in the side-effect layer
+  // (mirrors the App webhook). If commits aren't available in CI, skip
+  // gracefully (the workflow may be older than the qualityContext schema).
+  if (
+    project.dcoEnabled &&
+    (decision.status === "APPROVED" || decision.status === "BYPASSED")
+  ) {
+    const commits = body.qualityContext?.commits ?? [];
+    if (commits.length > 0) {
+      const dco = verifyDco(
+        commits.map((c) => ({ sha: c.sha, message: c.message }))
+      );
+      if (!dco.ok) {
+        decision = {
+          status: "CHECK_REQUIRED",
+          reason: "dco_missing",
+          repoId: decision.repoId,
+          projectId: decision.projectId,
+        };
+      }
+    } else {
+      logger.info(
+        {
+          projectId: project.id,
+          prNumber: body.pull_request.number,
+        },
+        "DCO enabled but no commits in CI request body; skipping DCO check"
+      );
+    }
+  }
 
   const decisionAttrs: Record<string, string> = {
     "decision.outcome": decision.status,
@@ -270,6 +306,8 @@ export async function POST(req: Request) {
     );
   }
 
+  // CHECK_REQUIRED (CLA/DCO) keeps the PR open — it must never close. Only the
+  // application gates (PENDING/DENIED) close the PR.
   const closePr =
     decision.status === "PENDING" || decision.status === "DENIED";
   const newStatus =
@@ -277,7 +315,13 @@ export async function POST(req: Request) {
       ? "APPROVED"
       : decision.status === "DENIED"
         ? "DENIED"
-        : "PENDING";
+        : decision.status === "CHECK_REQUIRED"
+          ? "CHECK_REQUIRED"
+          : "PENDING";
+  // gateReason records why the Check is failing so re-checks/sweeps can find
+  // the PR (CLA/DCO never close, so the closed-PR machinery doesn't apply).
+  const gateReason =
+    decision.status === "CHECK_REQUIRED" ? decision.reason : null;
 
   const disabledByChecker =
     decision.status === "APPROVED" &&
@@ -298,6 +342,7 @@ export async function POST(req: Request) {
         authorGhId: body.pull_request.user.id,
         status: newStatus,
         closedByApp: closePr,
+        gateReason,
         ...(headSha ? { headSha } : {}),
       },
       create: {
@@ -308,6 +353,7 @@ export async function POST(req: Request) {
         authorGhId: body.pull_request.user.id,
         status: newStatus,
         closedByApp: closePr,
+        gateReason,
         headSha,
       },
     });
@@ -315,11 +361,13 @@ export async function POST(req: Request) {
   }
 
   const applyUrl = `${env.PUBLIC_BASE_URL.replace(/\/$/, "")}/p/${project.slug}`;
+  const claUrl = `${applyUrl}/cla`;
   const message = buildDecisionMessage({
     decision,
     projectName: project.name,
     applyUrl,
     ghLogin: body.pull_request.user.login,
+    claUrl,
   });
 
   let labels: { add: string[]; remove: string[] } | null = null;
@@ -339,6 +387,16 @@ export async function POST(req: Request) {
       labels = {
         add: [project.labelPending],
         remove: [project.labelApproved, project.labelDenied],
+      };
+    } else if (decision.status === "CHECK_REQUIRED") {
+      // CLA/DCO gate: PR stays open, only the cla-pending label is applied.
+      labels = {
+        add: [project.labelClaPending],
+        remove: [
+          project.labelApproved,
+          project.labelPending,
+          project.labelDenied,
+        ],
       };
     } else {
       labels = {
@@ -374,6 +432,7 @@ export async function POST(req: Request) {
           decision: decision as Parameters<typeof buildDecisionCheckPayload>[0]["decision"],
           applyUrl,
           projectName: project.name,
+          claUrl,
         })
       : null;
 
@@ -445,8 +504,12 @@ export async function POST(req: Request) {
     }
   }
 
+  // CHECK_REQUIRED (CLA/DCO) is a non-closing block: the workflow should fail
+  // the Check and apply the cla-pending label, but must NOT close the PR.
+  const gated = decision.status === "CHECK_REQUIRED";
+
   return NextResponse.json({
-    decision: effectiveClosePr ? "block" : "approve",
+    decision: effectiveClosePr || gated ? "block" : "approve",
     closePr: effectiveClosePr,
     disabled: disabledByChecker,
     body: disabledByChecker ? null : message,
