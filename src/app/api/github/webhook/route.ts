@@ -11,6 +11,7 @@ import {
   handleInstallationEvent,
   handleInstallationReposEvent,
   handlePullRequestEvent,
+  handlePushEvent,
 } from "@/lib/github/webhook";
 import {
   BodyTooLargeError,
@@ -154,6 +155,9 @@ export async function POST(req: Request) {
             break;
           case "installation_repositories":
             await handleInstallationReposEvent(payload as never);
+            break;
+          case "push":
+            await handlePushEvent(payload as never);
             break;
           case "ping":
             return NextResponse.json({ pong: true });

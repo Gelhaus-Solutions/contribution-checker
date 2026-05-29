@@ -18,6 +18,7 @@ import { publishDecisionCheck } from "@/lib/github/check-run";
 import { runQualityForPrCheck } from "@/lib/quality/run";
 import { getInstallationOctokit } from "@/lib/github/app";
 import { verifyDco } from "@/lib/cla/dco";
+import { syncRepoFileClaForPush } from "@/lib/cla/repo-source";
 
 type WebhookPayload = {
   action?: string;
@@ -671,5 +672,57 @@ export async function handleInstallationReposEvent(payload: WebhookPayload) {
       installationId: payload.installation.id,
       repos: payload.repositories_added,
     });
+  }
+}
+
+type PushPayload = {
+  ref?: string;
+  repository?: { id: number; default_branch?: string };
+  commits?: Array<{ added?: string[]; modified?: string[]; removed?: string[] }>;
+  head_commit?: {
+    added?: string[];
+    modified?: string[];
+    removed?: string[];
+  } | null;
+};
+
+/**
+ * GitHub `push` event. Auto-track + auto-version: when the file backing a
+ * project's repo-file-sourced CLA changes on its branch, publish a new CLA
+ * version (see syncRepoFileClaForPush). Best-effort; never throws so the
+ * delivery is never retried for a CLA-sync failure.
+ */
+export async function handlePushEvent(payload: PushPayload) {
+  try {
+    const ghRepoId = payload.repository?.id;
+    const ref = payload.ref ?? "";
+    if (!ghRepoId || !ref.startsWith("refs/heads/")) return;
+    const branch = ref.slice("refs/heads/".length);
+    const defaultBranch = payload.repository?.default_branch ?? branch;
+
+    // Collect the paths the push touched (added/modified) from the commit list
+    // and head_commit. GitHub truncates very large pushes; when we have no
+    // commit data at all, pass null to force a re-fetch rather than miss a edit.
+    const changed = new Set<string>();
+    const commits = payload.commits ?? [];
+    for (const c of commits) {
+      (c.added ?? []).forEach((p) => changed.add(p));
+      (c.modified ?? []).forEach((p) => changed.add(p));
+    }
+    if (payload.head_commit) {
+      (payload.head_commit.added ?? []).forEach((p) => changed.add(p));
+      (payload.head_commit.modified ?? []).forEach((p) => changed.add(p));
+    }
+    const changedPaths =
+      commits.length === 0 && !payload.head_commit ? null : changed;
+
+    await syncRepoFileClaForPush({
+      ghRepoId,
+      branch,
+      defaultBranch,
+      changedPaths,
+    });
+  } catch (e) {
+    logger.warn({ err: e }, "handlePushEvent failed");
   }
 }
