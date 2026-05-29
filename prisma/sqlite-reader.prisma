@@ -1,10 +1,27 @@
+// READER schema for the one-off SQLite -> PostgreSQL data migration.
+//
+// This file is a VERBATIM copy of the 27-model block in prisma/schema.prisma.
+// ONLY the `datasource` and `generator` blocks differ:
+//   - datasource points at the legacy SQLite file via SQLITE_READER_URL
+//   - the generator emits to a CUSTOM output dir OUTSIDE the default
+//     node_modules/.prisma/client, so it never clobbers the postgres
+//     @prisma/client used by the app and the migration writer.
+//
+// Keep the models below byte-identical to prisma/schema.prisma. If the main
+// schema changes, re-copy the model block here so the reader's field names
+// stay in sync with the source database.
+//
+// Generate this client with:
+//   pnpm exec prisma generate --schema=prisma/sqlite-reader.prisma
+
 generator client {
   provider = "prisma-client-js"
+  output   = "../node_modules/.prisma/sqlite-reader-client"
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider = "sqlite"
+  url      = env("SQLITE_READER_URL")
 }
 
 // ----- NextAuth tables (Auth.js Prisma adapter) -----
