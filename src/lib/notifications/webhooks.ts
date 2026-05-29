@@ -13,7 +13,10 @@ export type OutboundEvent =
   | "application.approved"
   | "application.denied"
   | "application.revoked"
-  | "pr.blocked";
+  | "pr.blocked"
+  | "cla.ccla_signed"
+  | "cla.roster_changed"
+  | "cla.roster_disputed";
 
 export type WebhookKind = "generic" | "discord";
 
@@ -44,6 +47,9 @@ const DISCORD_COLOR: Record<OutboundEvent, number> = {
   "application.denied": 0xef4444, // red
   "application.revoked": 0xf59e0b, // amber
   "pr.blocked": 0xef4444, // red
+  "cla.ccla_signed": 0x22c55e, // green
+  "cla.roster_changed": 0x3b82f6, // blue
+  "cla.roster_disputed": 0xf59e0b, // amber
 };
 
 const DISCORD_TITLE: Record<OutboundEvent, string> = {
@@ -52,6 +58,9 @@ const DISCORD_TITLE: Record<OutboundEvent, string> = {
   "application.denied": "Application denied",
   "application.revoked": "Application revoked",
   "pr.blocked": "Pull request blocked",
+  "cla.ccla_signed": "Corporate CLA signed",
+  "cla.roster_changed": "CCLA roster changed",
+  "cla.roster_disputed": "CCLA roster membership disputed",
 };
 
 function discordBody(args: {
