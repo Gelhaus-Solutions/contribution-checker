@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { FormRenderer } from "@/components/form-renderer";
+import { SignatureInput } from "@/components/signature-input";
 import { CLA_CUSTOM_FIELD_PREFIX } from "@/lib/cla/schema";
 import type { FormSchema } from "@/lib/applications/schema";
 import type { ClaActionState } from "../actions";
@@ -131,17 +132,11 @@ export function SignCclaForm({
         </div>
 
         <div className="space-y-1.5">
-          <Label htmlFor="signatureText">Signature</Label>
-          <Input
-            id="signatureText"
-            name="signatureText"
-            required
-            placeholder="Type your full legal name to sign"
-            className="font-[cursive] text-base"
-          />
+          <Label>Signature</Label>
+          <SignatureInput required />
           <p className="text-xs text-muted-foreground">
-            Typing your name in this box constitutes your electronic signature
-            binding the company above.
+            Type, draw, or upload your signature. This constitutes your
+            electronic signature binding the company above.
           </p>
         </div>
 

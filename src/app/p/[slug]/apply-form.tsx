@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Markdown } from "@/components/markdown";
 import { FormRenderer, type FormValue } from "@/components/form-renderer";
+import { SignatureInput } from "@/components/signature-input";
 import type { FormSchema } from "@/lib/applications/schema";
 import { CLA_CUSTOM_FIELD_PREFIX } from "@/lib/cla/schema";
 
@@ -150,7 +151,7 @@ export function ApplyForm({
               submit your application.
             </p>
           </div>
-          <div className="max-h-72 overflow-y-auto rounded-md border border-border bg-background p-3">
+          <div className="max-h-96 overflow-y-auto rounded-md border border-border bg-background p-3">
             <Markdown source={claEmbed.bodyMarkdown} />
           </div>
           <input type="hidden" name="cla_versionId" value={claEmbed.versionId} />
@@ -166,16 +167,25 @@ export function ApplyForm({
             />
           )}
           {claEmbed.requireSignature && (
-            <div className="space-y-1">
-              <Label htmlFor="cla_legalName">Full legal name (signature)</Label>
-              <Input
-                id="cla_legalName"
-                name="cla_legalName"
-                required
-                autoComplete="name"
-                placeholder="Type your full legal name to sign"
-              />
-            </div>
+            <>
+              <div className="space-y-1">
+                <Label htmlFor="cla_legalName">Full legal name</Label>
+                <Input
+                  id="cla_legalName"
+                  name="cla_legalName"
+                  required
+                  autoComplete="name"
+                  placeholder="Your full legal name"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label>Signature</Label>
+                <SignatureInput fieldPrefix="cla_" required />
+                <p className="text-xs text-muted-foreground">
+                  Type, draw, or upload your signature.
+                </p>
+              </div>
+            </>
           )}
           <label className="flex items-start gap-2 text-sm">
             <input

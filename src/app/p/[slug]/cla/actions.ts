@@ -13,11 +13,14 @@ import { getClientIp, getClientUserAgent } from "@/lib/http/client";
 import {
   signIclaSchema,
   signCclaSchema,
+  signatureSchema,
+  collectSignature,
   rosterAddSchema,
   rosterRevokeSchema,
   disputeSchema,
   collectClaCustomAnswers,
 } from "@/lib/cla/schema";
+import type { ClaSignatureCapture } from "@/lib/cla/mutations";
 import {
   parseFormSchema,
   buildAnswersSchema,
@@ -191,9 +194,22 @@ export async function signIcla(
     return fail("No CLA has been published for this project yet.");
   }
 
-  // The typed signature (legal name) is required only when the project opts in.
-  if (project.claIclaRequireSignature && input.legalName.length < 2) {
-    return fail("Please type your full legal name to sign.");
+  // A signature (printed legal name + a typed/drawn/uploaded signature) is
+  // required only when the project opts in.
+  let signature: ClaSignatureCapture | null = null;
+  if (project.claIclaRequireSignature) {
+    if (input.legalName.length < 2) {
+      return fail("Please enter your full legal name.");
+    }
+    const sig = signatureSchema.safeParse(collectSignature(formData));
+    if (!sig.success) {
+      return fail("Please provide a signature — type, draw, or upload one.");
+    }
+    signature = {
+      kind: sig.data.signatureKind,
+      text: sig.data.signatureText ?? null,
+      image: sig.data.signatureImage ?? null,
+    };
   }
 
   // Collect + validate admin-defined custom fields.
@@ -233,6 +249,7 @@ export async function signIcla(
       emailSnapshot: user.email,
       legalName: input.legalName,
       affirmation,
+      signature,
       customFields,
       ip,
       userAgent,
@@ -285,14 +302,24 @@ export async function signCcla(
     contactName: String(formData.get("contactName") ?? ""),
     contactEmail: String(formData.get("contactEmail") ?? ""),
     signatoryTitle: String(formData.get("signatoryTitle") ?? ""),
-    signatureText: String(formData.get("signatureText") ?? ""),
   });
   if (!parsed.success) {
     return fail(
-      "Please complete the full corporate signature block (legal entity, registered address, country, point of contact, authorized representative, title, and signature) and check the agreement box."
+      "Please complete the full corporate signature block (legal entity, registered address, country, point of contact, authorized representative, and title) and check the agreement box."
     );
   }
   const input = parsed.data;
+
+  // The corporate signature (type/draw/upload) is required.
+  const sigParsed = signatureSchema.safeParse(collectSignature(formData));
+  if (!sigParsed.success) {
+    return fail("Please provide a signature — type, draw, or upload one.");
+  }
+  const signature: ClaSignatureCapture = {
+    kind: sigParsed.data.signatureKind,
+    text: sigParsed.data.signatureText ?? null,
+    image: sigParsed.data.signatureImage ?? null,
+  };
 
   const project = await prisma.project.findUnique({
     where: { id: input.projectId },
@@ -351,6 +378,7 @@ export async function signCcla(
       emailSnapshot: user.email,
       legalName: input.legalName,
       affirmation,
+      signature,
       customFields,
       ip,
       userAgent,
@@ -359,7 +387,6 @@ export async function signCcla(
       country: input.country,
       contactName: input.contactName,
       signatoryTitle: input.signatoryTitle,
-      signatureText: input.signatureText,
       contactEmail: input.contactEmail,
     });
 

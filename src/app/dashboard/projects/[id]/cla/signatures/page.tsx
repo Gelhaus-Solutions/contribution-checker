@@ -110,7 +110,23 @@ export default async function ClaSignatureLog({
                       </span>
                     </span>
                     <span className="font-mono">{s.ip}</span>
+                    {s.signatureKind && (
+                      <span>signature: {s.signatureKind}</span>
+                    )}
                   </div>
+                  {s.signatureKind === "typed" && s.signatureText && (
+                    <div className="mt-2 font-[cursive] text-lg leading-none">
+                      {s.signatureText}
+                    </div>
+                  )}
+                  {s.signatureImage && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={s.signatureImage}
+                      alt={`Signature of @${s.ghLogin}`}
+                      className="mt-2 max-h-20 rounded-md border border-border bg-white p-1"
+                    />
+                  )}
                   {s.status === "ACTIVE" && (
                     <form
                       action={revokeSignature}

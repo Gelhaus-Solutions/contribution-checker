@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Markdown } from "@/components/markdown";
 import { FormRenderer } from "@/components/form-renderer";
+import { SignatureInput } from "@/components/signature-input";
 import { CLA_CUSTOM_FIELD_PREFIX } from "@/lib/cla/schema";
 import type { FormSchema } from "@/lib/applications/schema";
 import type { ClaActionState } from "./actions";
@@ -93,18 +94,27 @@ export function SignForm({
       )}
 
       {requireSignature && (
-        <div className="space-y-1.5">
-          <Label htmlFor="cla-legal-name">Full legal name (signature)</Label>
-          <Input
-            id="cla-legal-name"
-            name="legalName"
-            required
-            minLength={2}
-            maxLength={200}
-            autoComplete="name"
-            placeholder="Type your full legal name to sign"
-          />
-        </div>
+        <>
+          <div className="space-y-1.5">
+            <Label htmlFor="cla-legal-name">Full legal name</Label>
+            <Input
+              id="cla-legal-name"
+              name="legalName"
+              required
+              minLength={2}
+              maxLength={200}
+              autoComplete="name"
+              placeholder="Your full legal name"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Signature</Label>
+            <SignatureInput required />
+            <p className="text-xs text-muted-foreground">
+              Type, draw, or upload your signature.
+            </p>
+          </div>
+        </>
       )}
 
       <p className="text-xs text-muted-foreground">

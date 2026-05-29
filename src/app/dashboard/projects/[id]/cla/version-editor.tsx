@@ -69,7 +69,7 @@ export function VersionEditor({
           </div>
           <div className="space-y-1">
             <Label className="text-xs">Preview</Label>
-            <div className="min-h-[16rem] rounded-md border border-border bg-background p-3">
+            <div className="min-h-[16rem] max-h-[32rem] overflow-y-auto rounded-md border border-border bg-background p-3">
               {body.trim() ? (
                 <Markdown source={body} />
               ) : (

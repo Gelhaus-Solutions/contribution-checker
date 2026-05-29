@@ -12,9 +12,17 @@ import {
   buildAnswersSchema,
   type FormSchema,
 } from "@/lib/applications/schema";
-import { signIclaSchema, collectClaCustomAnswers } from "@/lib/cla/schema";
+import {
+  signIclaSchema,
+  signatureSchema,
+  collectSignature,
+  collectClaCustomAnswers,
+} from "@/lib/cla/schema";
 import { getClaStatus, invalidateClaCache } from "@/lib/cla/status";
-import { recordIclaSignature } from "@/lib/cla/mutations";
+import {
+  recordIclaSignature,
+  type ClaSignatureCapture,
+} from "@/lib/cla/mutations";
 import { onClaCoverageChanged } from "@/lib/cla/post-sign";
 import { getClientIp, getClientUserAgent } from "@/lib/http/client";
 import type { ApplyState } from "./apply-form";
@@ -104,6 +112,7 @@ export async function applyAction(
   // fields) up front so the user gets the error without consuming a rate-limit
   // slot or touching the DB beyond the coverage read above.
   let claLegalName = "";
+  let claSignature: ClaSignatureCapture | null = null;
   let claCustomFields: Record<string, string | boolean> | null = null;
   if (claRequiredForSubmission) {
     const claParsed = signIclaSchema
@@ -121,13 +130,29 @@ export async function applyAction(
       };
     }
     claLegalName = claParsed.data.legalName;
-    // A typed signature is required only when the project opts in.
-    if (project.claIclaRequireSignature && claLegalName.length < 2) {
-      return {
-        status: "error",
-        reason:
-          "You must provide your full legal name to sign the Contributor License Agreement.",
-        values: submitted,
+    // A signature (printed name + typed/drawn/uploaded signature) is required
+    // only when the project opts in.
+    if (project.claIclaRequireSignature) {
+      if (claLegalName.length < 2) {
+        return {
+          status: "error",
+          reason: "You must provide your full legal name to sign the CLA.",
+          values: submitted,
+        };
+      }
+      const sig = signatureSchema.safeParse(collectSignature(formData, "cla_"));
+      if (!sig.success) {
+        return {
+          status: "error",
+          reason:
+            "You must provide a signature — type, draw, or upload one — to sign the CLA.",
+          values: submitted,
+        };
+      }
+      claSignature = {
+        kind: sig.data.signatureKind,
+        text: sig.data.signatureText ?? null,
+        image: sig.data.signatureImage ?? null,
       };
     }
     const claFieldDefs = parseFormSchema(project.claIclaCustomFields);
@@ -214,6 +239,7 @@ export async function applyAction(
                 emailSnapshot: session.user!.email ?? null,
                 legalName: claLegalName,
                 affirmation: CLA_EMBED_AFFIRMATION,
+                signature: claSignature,
                 customFields: claCustomFields,
                 ip,
                 userAgent,

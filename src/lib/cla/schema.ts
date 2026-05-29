@@ -62,6 +62,9 @@ const iclaSignedPayloadSchema = z.object({
   // May be empty when the project does not require a typed signature for ICLAs.
   legalName: z.string(),
   affirmation: z.string(),
+  signatureKind: z.string().nullable().optional(),
+  signatureText: z.string().nullable().optional(),
+  signatureImageSha256: z.string().nullable().optional(),
   customFields: z.record(z.string(), z.unknown()).nullable().optional(),
   emailSnapshot: z.string().nullable().optional(),
   applicationId: z.string().nullable().optional(),
@@ -81,13 +84,15 @@ const cclaSignedPayloadSchema = z.object({
   ghLogin: z.string().min(1),
   legalName: z.string().min(1),
   affirmation: z.string(),
+  signatureKind: z.string().nullable().optional(),
+  signatureText: z.string().nullable().optional(),
+  signatureImageSha256: z.string().nullable().optional(),
   customFields: z.record(z.string(), z.unknown()).nullable().optional(),
   companyName: z.string().min(1),
   registeredAddress: z.string().nullable().optional(),
   country: z.string().nullable().optional(),
   contactName: z.string().nullable().optional(),
   signatoryTitle: z.string().nullable().optional(),
-  signatureText: z.string().nullable().optional(),
   contactEmail: z.string().min(1),
   emailSnapshot: z.string().nullable().optional(),
   ip: z.string(),
@@ -241,7 +246,8 @@ export const signCclaSchema = signIclaSchema.extend({
   contactName: cclaLine(200, "point of contact name"),
   contactEmail: z.string().trim().email().max(320),
   signatoryTitle: cclaLine(120, "title"), // representative's Title (required)
-  signatureText: cclaLine(200, "signature"), // typed signature
+  // The signature itself (type/draw/upload) is validated separately with
+  // `signatureSchema` from the SignatureInput fields.
 });
 
 export const rosterAddSchema = z.object({
@@ -298,6 +304,47 @@ export const saveCustomFieldsSchema = z.object({
   kind: documentKindSchema,
   schema: z.string(), // JSON-encoded Field[]
 });
+
+// ----- Signature capture (type / draw / upload) -----
+
+// A drawn/uploaded signature is stored as an image data URL. Cap the length so
+// a base64 payload can't bloat the row/ledger (~2 MB binary ≈ 2.7 MB base64).
+const MAX_SIGNATURE_IMAGE_LEN = 2_700_000;
+const signatureImageDataUrl = z
+  .string()
+  .refine(
+    (v) =>
+      /^data:image\/(png|jpe?g|gif|webp);base64,[A-Za-z0-9+/=\s]+$/.test(v) &&
+      v.length <= MAX_SIGNATURE_IMAGE_LEN,
+    "signature image must be a PNG/JPEG/GIF/WebP data URL under ~2 MB"
+  );
+
+export const signatureSchema = z
+  .object({
+    signatureKind: z.enum(["typed", "drawn", "uploaded"]),
+    signatureText: z.string().trim().max(200).optional(),
+    signatureImage: signatureImageDataUrl.optional(),
+  })
+  .refine(
+    (s) =>
+      s.signatureKind === "typed"
+        ? !!s.signatureText && s.signatureText.length >= 2
+        : !!s.signatureImage,
+    { message: "Provide a signature (type, draw, or upload one)." }
+  );
+export type SignatureInputData = z.infer<typeof signatureSchema>;
+
+/** Read the SignatureInput's three fields from FormData (optionally prefixed). */
+export function collectSignature(
+  formData: FormData,
+  prefix = ""
+): { signatureKind: string; signatureText: string; signatureImage: string } {
+  return {
+    signatureKind: String(formData.get(`${prefix}signatureKind`) ?? "typed"),
+    signatureText: String(formData.get(`${prefix}signatureText`) ?? ""),
+    signatureImage: String(formData.get(`${prefix}signatureImage`) ?? ""),
+  };
+}
 
 // Inputs for CLA custom fields are rendered with this prefix so a CLA field set
 // can be embedded alongside the application form without `name` collisions.

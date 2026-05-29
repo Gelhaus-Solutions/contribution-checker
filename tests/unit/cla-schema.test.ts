@@ -2,10 +2,16 @@ import { describe, expect, it } from "vitest";
 import {
   signIclaSchema,
   signCclaSchema,
+  signatureSchema,
+  collectSignature,
   collectClaCustomAnswers,
   CLA_CUSTOM_FIELD_PREFIX,
 } from "@/lib/cla/schema";
 import type { FormSchema } from "@/lib/applications/schema";
+
+// A valid 1x1 transparent PNG as a data URL.
+const PNG_DATA_URL =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
 
 describe("signIclaSchema (optional signature)", () => {
   it("accepts an empty legal name (signature optional at schema level)", () => {
@@ -38,14 +44,13 @@ describe("signCclaSchema (full executed block)", () => {
     contactName: "Alex Contact",
     contactEmail: "legal@acme.com",
     signatoryTitle: "VP Engineering",
-    signatureText: "Jane Q. Signatory",
   };
 
-  it("accepts a complete corporate signature block", () => {
+  it("accepts a complete corporate block (signature validated separately)", () => {
     expect(signCclaSchema.safeParse(base).success).toBe(true);
   });
 
-  it("requires the company, address, country, contact, title, and signature", () => {
+  it("requires the company, address, country, contact, and title", () => {
     for (const key of [
       "companyName",
       "registeredAddress",
@@ -53,7 +58,6 @@ describe("signCclaSchema (full executed block)", () => {
       "contactName",
       "contactEmail",
       "signatoryTitle",
-      "signatureText",
     ] as const) {
       const bad = { ...base, [key]: "" };
       expect(signCclaSchema.safeParse(bad).success, `missing ${key}`).toBe(false);
@@ -70,6 +74,68 @@ describe("signCclaSchema (full executed block)", () => {
     expect(
       signCclaSchema.safeParse({ ...base, contactEmail: "not-an-email" }).success
     ).toBe(false);
+  });
+});
+
+describe("signatureSchema (type / draw / upload)", () => {
+  it("accepts a typed signature of >= 2 chars", () => {
+    expect(
+      signatureSchema.safeParse({ signatureKind: "typed", signatureText: "JD" })
+        .success
+    ).toBe(true);
+  });
+
+  it("rejects a typed signature that is too short", () => {
+    expect(
+      signatureSchema.safeParse({ signatureKind: "typed", signatureText: "J" })
+        .success
+    ).toBe(false);
+  });
+
+  it("accepts a drawn/uploaded signature with a valid image data URL", () => {
+    expect(
+      signatureSchema.safeParse({
+        signatureKind: "drawn",
+        signatureImage: PNG_DATA_URL,
+      }).success
+    ).toBe(true);
+    expect(
+      signatureSchema.safeParse({
+        signatureKind: "uploaded",
+        signatureImage: PNG_DATA_URL,
+      }).success
+    ).toBe(true);
+  });
+
+  it("rejects a drawn signature with no image", () => {
+    expect(signatureSchema.safeParse({ signatureKind: "drawn" }).success).toBe(
+      false
+    );
+  });
+
+  it("rejects a non-image data URL", () => {
+    expect(
+      signatureSchema.safeParse({
+        signatureKind: "uploaded",
+        signatureImage: "data:text/html;base64,PHA+aGk8L3A+",
+      }).success
+    ).toBe(false);
+  });
+});
+
+describe("collectSignature", () => {
+  it("reads the three (optionally prefixed) signature fields", () => {
+    const fd = new FormData();
+    fd.set("cla_signatureKind", "drawn");
+    fd.set("cla_signatureImage", PNG_DATA_URL);
+    const out = collectSignature(fd, "cla_");
+    expect(out.signatureKind).toBe("drawn");
+    expect(out.signatureImage).toBe(PNG_DATA_URL);
+    expect(out.signatureText).toBe("");
+  });
+
+  it("defaults signatureKind to typed when absent", () => {
+    expect(collectSignature(new FormData()).signatureKind).toBe("typed");
   });
 });
 

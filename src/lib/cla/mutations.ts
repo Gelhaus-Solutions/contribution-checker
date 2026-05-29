@@ -23,6 +23,32 @@ function sha256Hex(input: string): string {
   return createHash("sha256").update(input).digest("hex");
 }
 
+/** A captured signature: typed text, or a drawn/uploaded image data URL. */
+export type ClaSignatureCapture = {
+  kind: "typed" | "drawn" | "uploaded";
+  text?: string | null;
+  image?: string | null;
+};
+
+/** Columns + ledger fields for a captured signature (image hashed, not inlined). */
+function signatureColumns(sig?: ClaSignatureCapture | null) {
+  return {
+    signatureKind: sig?.kind ?? null,
+    signatureText: sig?.kind === "typed" ? (sig.text ?? null) : null,
+    signatureImage: sig && sig.kind !== "typed" ? (sig.image ?? null) : null,
+  };
+}
+function signatureLedger(sig?: ClaSignatureCapture | null) {
+  const cols = signatureColumns(sig);
+  return {
+    signatureKind: cols.signatureKind,
+    signatureText: cols.signatureText,
+    signatureImageSha256: cols.signatureImage
+      ? sha256Hex(cols.signatureImage)
+      : null,
+  };
+}
+
 /**
  * Publish a new immutable CLA document version. version = max(existing for
  * kind) + 1; contentHash = sha256(bodyMarkdown). Sets
@@ -138,6 +164,7 @@ export async function recordIclaSignature(a: {
   emailSnapshot?: string | null;
   legalName: string;
   affirmation: string;
+  signature?: ClaSignatureCapture | null;
   customFields?: Record<string, string | boolean> | null;
   ip: string;
   userAgent: string;
@@ -178,6 +205,7 @@ export async function recordIclaSignature(a: {
         agreed: true,
         documentVersion: version.version,
         contentHash: version.contentHash,
+        ...signatureColumns(a.signature),
         customFields:
           a.customFields && Object.keys(a.customFields).length > 0
             ? JSON.stringify(a.customFields)
@@ -207,6 +235,7 @@ export async function recordIclaSignature(a: {
         ghLogin: a.ghLogin,
         legalName: a.legalName,
         affirmation: a.affirmation,
+        ...signatureLedger(a.signature),
         customFields: a.customFields ?? null,
         emailSnapshot: a.emailSnapshot ?? null,
         applicationId: a.applicationId ?? null,
@@ -241,6 +270,7 @@ export async function recordCclaSignature(a: {
   emailSnapshot?: string | null;
   legalName: string; // Authorized representative (name)
   affirmation: string;
+  signature?: ClaSignatureCapture | null;
   customFields?: Record<string, string | boolean> | null;
   ip: string;
   userAgent: string;
@@ -249,7 +279,6 @@ export async function recordCclaSignature(a: {
   country?: string | null;
   contactName?: string | null;
   signatoryTitle?: string | null; // representative's Title
-  signatureText?: string | null; // typed signature
   contactEmail: string;
 }): Promise<{ corporateId: string; signatureId: string }> {
   return prisma.$transaction(async (tx) => {
@@ -286,6 +315,7 @@ export async function recordCclaSignature(a: {
         agreed: true,
         documentVersion: version.version,
         contentHash: version.contentHash,
+        ...signatureColumns(a.signature),
         customFields:
           a.customFields && Object.keys(a.customFields).length > 0
             ? JSON.stringify(a.customFields)
@@ -297,6 +327,16 @@ export async function recordCclaSignature(a: {
       select: { id: true, signedAt: true },
     });
 
+    // Mirror a human-readable signature onto the CorporateCla for the maintainer
+    // view: the typed text, or a "(drawn)"/"(uploaded)" marker. The canonical
+    // signature (incl. the image) lives on the ClaSignature above.
+    const cclaSignatureText =
+      a.signature?.kind === "typed"
+        ? (a.signature.text ?? null)
+        : a.signature
+          ? `(${a.signature.kind})`
+          : null;
+
     const corporate = await tx.corporateCla.create({
       data: {
         projectId: a.projectId,
@@ -307,7 +347,7 @@ export async function recordCclaSignature(a: {
         country: a.country ?? null,
         contactName: a.contactName ?? null,
         signatoryTitle: a.signatoryTitle ?? null,
-        signatureText: a.signatureText ?? null,
+        signatureText: cclaSignatureText,
         contactEmail: a.contactEmail,
         status: "ACTIVE",
       },
@@ -336,13 +376,13 @@ export async function recordCclaSignature(a: {
         ghLogin: a.ghLogin,
         legalName: a.legalName,
         affirmation: a.affirmation,
+        ...signatureLedger(a.signature),
         customFields: a.customFields ?? null,
         companyName: a.companyName,
         registeredAddress: a.registeredAddress ?? null,
         country: a.country ?? null,
         contactName: a.contactName ?? null,
         signatoryTitle: a.signatoryTitle ?? null,
-        signatureText: a.signatureText ?? null,
         contactEmail: a.contactEmail,
         emailSnapshot: a.emailSnapshot ?? null,
         ip: a.ip,

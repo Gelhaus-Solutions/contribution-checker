@@ -598,11 +598,21 @@ model ClaSignature {
   ghLogin       String
   emailSnapshot String?
 
-  legalName       String
+  legalName       String  // printed full legal name (the signer's identity)
   affirmation     String  // exact "I agree ..." text shown at signing
   agreed          Boolean @default(true)
   documentVersion Int     // snapshot of the version number signed
   contentHash     String  // snapshot of the version hash signed
+
+  // Signature capture. A typed name is not always a legally valid signature, so
+  // contributors may type, draw, or upload one. signatureKind selects which:
+  //   "typed"    -> signatureText holds the typed signature
+  //   "drawn"    -> signatureImage holds a PNG data URL from the draw pad
+  //   "uploaded" -> signatureImage holds the uploaded image as a data URL
+  // The image bytes are retained immutably here; the ledger stores their hash.
+  signatureKind  String? // "typed" | "drawn" | "uploaded"
+  signatureText  String?
+  signatureImage String? // data URL (image/png|jpeg|gif|webp)
 
   ip        String
   userAgent String @default("")
