@@ -136,7 +136,7 @@ export async function fetchPrContext(args: {
     if (batch.length < COMMIT_PAGE_SIZE) break;
   }
 
-  // Account snapshot — cached
+  // Account snapshot: cached
   const authorLogin = pr.user?.login ?? "";
   const account = authorLogin
     ? await getAccountSnapshot({

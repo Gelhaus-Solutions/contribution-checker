@@ -257,7 +257,7 @@ export async function setApplicationStatus(args: {
       });
     } else {
       // PENDING: stored as DENIED + resubmit + no cooldown so the apply
-      // page derives "pending — can apply now".
+      // page derives "pending: can apply now".
       await prisma.application.update({
         where: { id: app.id },
         data: {
@@ -294,7 +294,7 @@ const waiveSchema = z.object({
 
 /**
  * Grant a CLA waiver for a specific GitHub account straight from the People
- * dialog — exempts them from signing the CLA. Mirrors the dashboard CLA waiver
+ * dialog. Exempts them from signing the CLA. Mirrors the dashboard CLA waiver
  * action (capture ghId, mutation appends the immutable ledger event, audit).
  */
 export async function waiveClaForUser(args: {
@@ -432,8 +432,8 @@ const overviewSchema = z.object({
  * Fetch everything the People-row dialog needs: original application,
  * manual decision (if any), PR list with computed quality scores.
  *
- * Quality score is computed on the fly using the project's *current* config
- * — flipping a heuristic toggle is reflected immediately without a recompute.
+ * Quality score is computed on the fly using the project's *current* config,
+ * so flipping a heuristic toggle is reflected immediately without a recompute.
  */
 export async function getUserOverview(args: {
   projectId: string;

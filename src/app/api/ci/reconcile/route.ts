@@ -119,7 +119,7 @@ export async function POST(req: Request) {
     reopens.push({
       prCheckId: check.id,
       prNumber: check.prNumber,
-      body: `@${check.authorGhLogin}'s application for **${project.name}** was approved — reopening this PR.`,
+      body: `@${check.authorGhLogin}'s application for **${project.name}** was approved. Reopening this PR.`,
       labels,
     });
   }

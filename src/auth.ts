@@ -70,7 +70,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth(async () => {
     ...authConfig,
     // Pipe Auth.js's own logger into Sentry. Auth.js emits the underlying
     // OAuth provider error (token-exchange failure, profile fetch failure,
-    // state mismatch, …) here before wrapping it in OAuthCallbackError, so
+    // state mismatch, etc.) here before wrapping it in OAuthCallbackError, so
     // this is the only place we can capture the real cause.
     logger: {
       error(error) {
@@ -189,8 +189,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth(async () => {
           });
         } catch (e) {
           // Most likely a P2002 unique-violation on ghId/ghLogin (same GH
-          // identity already attached to another User row). Surface to Sentry
-          // — this is exactly the kind of OAuthCallbackError trigger that's
+          // identity already attached to another User row). Surface to Sentry:
+          // this is exactly the kind of OAuthCallbackError trigger that's
           // hard to diagnose without a captured exception.
           logger.error(
             {

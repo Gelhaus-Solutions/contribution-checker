@@ -6,7 +6,7 @@ import { getClaStatus } from "@/lib/cla/status";
 
 function globToRegex(pattern: string): RegExp {
   // Escape regex metachars, then translate `*` → `.*` and `?` → `.`.
-  // Brackets and other characters are matched literally — GitHub bot
+  // Brackets and other characters are matched literally; GitHub bot
   // logins like `dependabot[bot]` should match `*[bot]` patterns.
   let out = "^";
   for (const ch of pattern) {
@@ -127,7 +127,7 @@ export async function decideForRepo(args: {
   // The "allowing" base decision (APPROVED or BYPASSED{collaborator}) is
   // computed but NOT returned immediately, so the CLA gate below can be layered
   // on top of it. Outcomes that are not allowing (manual/app DENIED, the
-  // application PENDING states) short-circuit with an immediate return — denied
+  // application PENDING states) short-circuit with an immediate return. Denied
   // users are never invited to sign and bots (returned above) are exempt.
   let base:
     | (PrDecision & { repoId: string; projectId: string })
@@ -162,7 +162,7 @@ export async function decideForRepo(args: {
     };
   }
 
-  // 1) Bypass list — bots are EXEMPT from CLA/DCO; return immediately so the
+  // 1) Bypass list: bots are EXEMPT from CLA/DCO; return immediately so the
   //    coverage check below is never queried for them.
   const patterns = parseBypass(repo.project.bypassHandles);
   if (matchesAnyPattern(args.prAuthorGhLogin, patterns)) {
@@ -223,7 +223,7 @@ export async function decideForRepo(args: {
   }
 
   // 3) Application lookup. When `applicationRequired` is off (feature 2), a
-  //    missing/SUBMITTED application no longer blocks — only an existing DENIAL
+  //    missing/SUBMITTED application no longer blocks; only an existing DENIAL
   //    still does. When it is on, behavior is unchanged.
   if (!base) {
     const appRequired = repo.project.applicationRequired !== false;
@@ -243,7 +243,7 @@ export async function decideForRepo(args: {
           projectId: repo.projectId,
         };
       }
-      // applicationRequired:false — no account/application is fine.
+      // applicationRequired:false means no account/application is fine.
       base = { status: "APPROVED", repoId: repo.id, projectId: repo.projectId };
     } else {
       const where = repo.requireOwnApproval
@@ -324,7 +324,7 @@ export async function decideForRepo(args: {
     }
   }
 
-  // CLA gate — layered only on an allowing base (APPROVED or
+  // CLA gate: layered only on an allowing base (APPROVED or
   // BYPASSED{collaborator}). Bots already returned above and are exempt. Runs
   // the coverage lookup at most once. DCO is evaluated in the side-effect layer
   // (it needs the PR's commits), so it is not handled here.

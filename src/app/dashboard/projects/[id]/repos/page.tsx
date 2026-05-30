@@ -328,7 +328,7 @@ export default async function ProjectRepos({
           <CardDescription>
             For repos where you can&apos;t install the GitHub App. Drop these
             two workflows into <code>.github/workflows/</code>; they
-            authenticate via the GitHub Actions OIDC token — no secrets to
+            authenticate via the GitHub Actions OIDC token, with no secrets to
             configure.
           </CardDescription>
         </CardHeader>
@@ -364,7 +364,7 @@ export default async function ProjectRepos({
           <p className="text-xs text-muted-foreground">
             Reopen-on-approval has up to ~10 minutes of latency (matches the
             reconcile cron). Auto-bypass for repository collaborators is not
-            available in CI mode — list collaborators in the project&apos;s
+            available in CI mode. List collaborators in the project&apos;s
             bypass handles instead.
           </p>
         </CardContent>

@@ -13,7 +13,7 @@ describe("bypass list pattern match", () => {
     expect(matchesAnyPattern("octocat", ["*[bot]"])).toBe(false);
   });
 
-  it("matches anchored — does not match substrings", () => {
+  it("matches anchored, does not match substrings", () => {
     expect(matchesAnyPattern("dependabot[bot]-extra", ["*[bot]"])).toBe(false);
   });
 

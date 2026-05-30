@@ -42,7 +42,7 @@ function parseCustomAnswers(json: string | null): [string, unknown][] {
 
 function renderAnswer(v: unknown): string {
   if (typeof v === "boolean") return v ? "Yes" : "No";
-  if (v === null || v === undefined || v === "") return "—";
+  if (v === null || v === undefined || v === "") return "n/a";
   return String(v);
 }
 
@@ -156,7 +156,7 @@ export default async function ClaSignatureLog({
               <CardTitle className="text-base">Signatures</CardTitle>
               <CardDescription>
                 Immutable click-wrap records. Admin revoke is an append-only
-                state change — the original record is retained.
+                state change: the original record is retained.
               </CardDescription>
             </div>
             <div className="flex items-center gap-2">
@@ -337,7 +337,7 @@ export default async function ClaSignatureLog({
         <CardHeader>
           <CardTitle className="text-base">CLA waivers</CardTitle>
           <CardDescription>
-            Exempt a specific GitHub account from signing the CLA — they are
+            Exempt a specific GitHub account from signing the CLA. They are
             treated as covered and won&apos;t be blocked. Revoking re-blocks them.
             Every grant and revoke is recorded in the ledger above.
           </CardDescription>

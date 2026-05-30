@@ -59,7 +59,7 @@ describe("countApprovingReviewers", () => {
     applicationReviewFindMany.mockResolvedValue([
       { authorId: "u1" },
       { authorId: "u2" },
-      { authorId: "u1" }, // duplicate — should collapse
+      { authorId: "u1" }, // duplicate: should collapse
     ]);
     const n = await countApprovingReviewers({
       applicationId: "app1",
@@ -88,7 +88,7 @@ describe("countApprovingReviewers", () => {
   });
 
   it("excludes soft-dismissed reviews via where-clause", async () => {
-    // Confirm via the where-clause shape — the count itself comes from the
+    // Confirm via the where-clause shape: the count itself comes from the
     // mocked return. This guards against accidental removal of the
     // deletedAt filter, which would let dismissed reviews count toward the
     // gate.

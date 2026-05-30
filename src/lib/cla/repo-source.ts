@@ -62,7 +62,7 @@ function sha256Hex(input: string): string {
  * new text and publish a new version (if the content actually changed). The
  * re-sign behavior follows the project's `claAutoVersionRequiresResign` flag.
  *
- * Best-effort and defensive: any failure is logged, never thrown — this runs
+ * Best-effort and defensive: any failure is logged, never thrown. This runs
  * inside the GitHub `push` webhook handler.
  */
 export async function syncRepoFileClaForPush(args: {
@@ -70,7 +70,7 @@ export async function syncRepoFileClaForPush(args: {
   branch: string;
   defaultBranch: string;
   // Set of file paths touched by the push, or null when it can't be determined
-  // (e.g. a truncated commit list) — null forces a re-fetch to be safe.
+  // (e.g. a truncated commit list); null forces a re-fetch to be safe.
   changedPaths: Set<string> | null;
 }): Promise<{ published: { kind: "ICLA" | "CCLA"; version: number }[] }> {
   const published: { kind: "ICLA" | "CCLA"; version: number }[] = [];

@@ -44,7 +44,7 @@ export type PrOverview = {
   createdAt: string;
   updatedAt: string;
   ghUrl: string;
-  // Mode info — drives whether re-evaluate / rescan are available.
+  // Mode info: drives whether re-evaluate / rescan are available.
   mode: "app" | "ci";
   installationId: number | null;
   // Project flags surfaced in the dialog.
@@ -173,7 +173,7 @@ export async function getPrOverview(args: {
     };
   }
 
-  // Author stats across the project. Bounded query — only counts what's tracked.
+  // Author stats across the project. Bounded query: only counts what's tracked.
   const authorChecks = await prisma.prCheck.findMany({
     where: { repo: { projectId }, authorGhLogin: check.authorGhLogin },
     select: { status: true, closedByApp: true },
@@ -195,7 +195,7 @@ export async function getPrOverview(args: {
   }
 
   // Recompute the decision (read-only). Catches drift between stored status
-  // and the current rules — flips after manual decisions, app approvals, etc.
+  // and the current rules. Flips after manual decisions, app approvals, etc.
   let currentDecision: PrOverview["currentDecision"] = null;
   if (check.repo.ghRepoId) {
     try {
@@ -260,7 +260,7 @@ export type RescanResult = {
 
 /**
  * Re-run quality scoring for one or more PrChecks. Skips the public warning
- * comment regardless of score — admin-triggered rescans should never spam
+ * comment regardless of score: admin-triggered rescans should never spam
  * the PR. Only works for App-mode repos (CI mode has no installation).
  */
 export async function rescanPrQuality(args: {
@@ -359,7 +359,7 @@ export type ReevaluateResult = {
  * and runs the full decision pipeline (close/reopen/comment/labels +
  * Check Run + quality), then strips the trigger label.
  *
- * Async by design — applies side effects via the existing webhook path so
+ * Async by design: applies side effects via the existing webhook path so
  * we don't fork the decision logic. CI-mode repos (no installation) are
  * skipped: there's no webhook to fire.
  */
@@ -399,7 +399,7 @@ export async function reEvaluatePrs(args: {
     }
     const ref = repoRef(c.repo.fullName, c.repo.installationId);
     try {
-      // Ensure the trigger label exists before tagging — first-time use on a
+      // Ensure the trigger label exists before tagging. First-time use on a
       // repo that hasn't seen any webhook yet would otherwise 422.
       await ensureLabel(
         ref,

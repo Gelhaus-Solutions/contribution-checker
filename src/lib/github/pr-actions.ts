@@ -148,7 +148,7 @@ export async function setLabels(
   const octokit = await getInstallationOctokit(ref.installationId);
   // Preserve any labels not managed by the bot. The bot only ever owns
   // `contribution:*` labels, so we drop those from the existing set and
-  // re-apply the requested ones — leaving user/team labels untouched.
+  // re-apply the requested ones, leaving user/team labels untouched.
   const existing = await octokit
     .request("GET /repos/{owner}/{repo}/issues/{issue_number}/labels", {
       owner: ref.owner,
@@ -307,13 +307,13 @@ export async function upsertCheckRun(
 
     // A stored check-run id can go stale (the run was deleted, or it belongs to
     // a different repo/installation after a redeploy or DB migration). Updating
-    // it then 404s. Recreate the run instead of silently dropping the check —
+    // it then 404s. Recreate the run instead of silently dropping the check,
     // otherwise the check disappears from the PR permanently while a sibling
     // check with no stored id (e.g. a newly-added one) keeps showing.
     if (existingId && status === 404) {
       logger.warn(
         { ref, existingId, headSha: input.headSha },
-        "check-run update 404 (stale id) — recreating"
+        "check-run update 404 (stale id): recreating"
       );
       try {
         const res = await octokit.request(
@@ -336,7 +336,7 @@ export async function upsertCheckRun(
         if (s2 === 403 || s2 === 404) {
           logger.warn(
             { err: e2, ref, headSha: input.headSha },
-            "check-run recreate forbidden — installation likely missing checks:write"
+            "check-run recreate forbidden: installation likely missing checks:write"
           );
           return null;
         }
@@ -353,7 +353,7 @@ export async function upsertCheckRun(
     if (status === 403 || status === 404) {
       logger.warn(
         { err: e, ref, headSha: input.headSha },
-        "check-run publish forbidden — installation likely missing checks:write"
+        "check-run publish forbidden: installation likely missing checks:write"
       );
       return null;
     }

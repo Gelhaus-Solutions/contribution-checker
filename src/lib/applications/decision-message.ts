@@ -55,7 +55,7 @@ export function buildDecisionMessage(args: {
       return (
         `Hi @${ghLogin}! Before we can accept contributions to **${projectName}** ` +
         `you need to sign the Contributor License Agreement. ` +
-        `Sign here: ${claUrl} — your PR stays open and we'll re-check ` +
+        `Sign here: ${claUrl}. Your PR stays open and we'll re-check ` +
         `automatically once signed.`
       );
     }
@@ -64,11 +64,11 @@ export function buildDecisionMessage(args: {
         `Hi @${ghLogin}! The Contributor License Agreement for ` +
         `**${projectName}** was updated, so we need you to re-sign the ` +
         `current version before we can accept your contributions. ` +
-        `Re-sign here: ${claUrl} — your PR stays open and we'll re-check ` +
+        `Re-sign here: ${claUrl}. Your PR stays open and we'll re-check ` +
         `automatically once signed.`
       );
     }
-    // "dco_missing" — no external URL; explain the Signed-off-by trailer.
+    // "dco_missing": no external URL; explain the Signed-off-by trailer.
     return (
       `Hi @${ghLogin}! Contributions to **${projectName}** require a ` +
       `Developer Certificate of Origin sign-off: every commit needs a ` +

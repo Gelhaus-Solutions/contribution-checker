@@ -16,7 +16,7 @@ import type { ClaActionState } from "./actions";
  * Standalone ICLA click-wrap form. Renders the immutable CLA text in a
  * scrollable bordered box, a required "I agree" checkbox, a required typed
  * full legal name, and a read-only "Signing as @login" line (the login is
- * server-derived and passed in — never editable). No localStorage: a CLA is a
+ * server-derived and passed in, never editable). No localStorage: a CLA is a
  * legal act, not a draft, so we never persist partial input.
  */
 export function SignForm({
@@ -134,7 +134,7 @@ export function SignForm({
 }
 
 /**
- * "I'm not affiliated with this organization — request exemption" form shown on
+ * "I'm not affiliated with this organization, request exemption" form shown on
  * the covered-by-corporate state. Files a dispute against the contributor's own
  * roster membership, which immediately suspends coverage and notifies the
  * maintainers and the corporate contact.
@@ -184,7 +184,7 @@ export function DisputeForm({
         <p className="text-sm text-destructive">{state.reason}</p>
       )}
       <Button type="submit" variant="outline" loading={pending}>
-        I&apos;m not affiliated — request exemption
+        I&apos;m not affiliated, request exemption
       </Button>
     </form>
   );

@@ -1,7 +1,7 @@
 /**
  * In-memory introspection state for the /admin/vault status page. The
  * resolver records each resolution outcome here; the page reads a snapshot.
- * No secret values are stored — only metadata (which name, where it came
+ * No secret values are stored: only metadata (which name, where it came
  * from, last error message).
  */
 

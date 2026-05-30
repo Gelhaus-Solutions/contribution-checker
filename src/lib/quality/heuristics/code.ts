@@ -105,7 +105,7 @@ export const codeHeuristics: Heuristic[] = [
     group: "code",
     label: "Excessive added comments",
     description:
-      "Ratio of added comment lines to added code lines is high — typical AI over-commenting.",
+      "Ratio of added comment lines to added code lines is high: typical AI over-commenting.",
     weight: 2,
     defaultEnabled: true,
     defaultThreshold: 10,
@@ -199,7 +199,7 @@ export const codeHeuristics: Heuristic[] = [
     id: "code.lockfile_only",
     group: "code",
     label: "Lockfile-only PR",
-    description: "PR changes only lockfiles — almost always low-effort.",
+    description: "PR changes only lockfiles: almost always low-effort.",
     weight: 3,
     defaultEnabled: true,
     run(ctx) {

@@ -12,7 +12,7 @@ function pruneIfFull() {
     if (v.windowEnd <= now) memCache.delete(k);
   }
   if (memCache.size < MAX_CACHE_ENTRIES) return;
-  // Still full — drop the oldest 10%.
+  // Still full, so drop the oldest 10%.
   const drop = Math.floor(MAX_CACHE_ENTRIES * 0.1);
   let i = 0;
   for (const k of memCache.keys()) {
@@ -59,7 +59,7 @@ export async function rateLimit(args: {
     };
   }
 
-  // Cache miss or expired — reconcile with DB.
+  // Cache miss or expired: reconcile with DB.
   const windowEnd = now + args.windowMs;
   const existing = await prisma.rateLimitBucket.findUnique({
     where: { key: args.key },

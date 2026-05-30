@@ -97,7 +97,7 @@ describe("getClaStatus", () => {
     const res = await getClaStatus(who);
 
     expect(res).toEqual({ satisfied: false, via: "icla", needsResign: true });
-    // A stale ICLA is terminal — roster is not consulted as a fallback.
+    // A stale ICLA is terminal: roster is not consulted as a fallback.
     expect(rosterFindFirst).not.toHaveBeenCalled();
   });
 

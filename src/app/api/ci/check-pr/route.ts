@@ -253,7 +253,7 @@ export async function POST(req: Request) {
   });
 
   // DCO gate (independent of CLA). Only layered on an allowing decision, and
-  // only when the workflow shipped commit metadata — the decision pipeline
+  // only when the workflow shipped commit metadata. The decision pipeline
   // never loads commits, so DCO is evaluated here in the side-effect layer
   // (mirrors the App webhook). If commits aren't available in CI, skip
   // gracefully (the workflow may be older than the qualityContext schema).
@@ -306,7 +306,7 @@ export async function POST(req: Request) {
     );
   }
 
-  // CHECK_REQUIRED (CLA/DCO) keeps the PR open — it must never close. Only the
+  // CHECK_REQUIRED (CLA/DCO) keeps the PR open: it must never close. Only the
   // application gates (PENDING/DENIED) close the PR.
   const closePr =
     decision.status === "PENDING" || decision.status === "DENIED";
@@ -406,7 +406,7 @@ export async function POST(req: Request) {
     }
   }
 
-  // Disable switch overrides closing — the workflow should NOT close the PR
+  // Disable switch overrides closing: the workflow should NOT close the PR
   // when the checker is off, even if the underlying decision would have.
   const effectiveClosePr = closePr && !disabledByChecker;
 
@@ -425,7 +425,7 @@ export async function POST(req: Request) {
 
   // Build the Check Run payload the workflow should publish via gh api.
   // Skipped when the project has checks disabled. (decision.status is never
-  // IGNORED here — that path returns early above.)
+  // IGNORED here; that path returns early above.)
   const checkPayload =
     project.checksEnabled && headSha
       ? buildDecisionCheckPayload({
@@ -483,7 +483,7 @@ export async function POST(req: Request) {
       };
     }
   } else if (prCheckId && project.qualityEnabled) {
-    // Quality enabled but no context provided — surface what we have on
+    // Quality enabled but no context provided: surface what we have on
     // record so the workflow doesn't think we ran a fresh evaluation.
     const existing = await prisma.prQuality.findUnique({
       where: { prCheckId },

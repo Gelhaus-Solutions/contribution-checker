@@ -16,7 +16,7 @@ export function RuntimeEnvScript() {
       process.env[`NEXT_PUBLIC_${k}`] ?? process.env[k];
     if (v) payload[k] = v;
   }
-  // Stringify safely — escape `</` so a malicious value can't close the script tag.
+  // Stringify safely: escape `</` so a malicious value can't close the script tag.
   const json = JSON.stringify(payload).replace(/</g, "\\u003c");
   return (
     <script

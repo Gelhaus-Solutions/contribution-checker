@@ -99,7 +99,7 @@ export function RosterManager({
                 <span className="font-mono">@{m.ghLogin}</span>
                 {m.disputeNote && (
                   <span className="text-xs text-muted-foreground">
-                    — {m.disputeNote}
+                    ({m.disputeNote})
                   </span>
                 )}
               </li>

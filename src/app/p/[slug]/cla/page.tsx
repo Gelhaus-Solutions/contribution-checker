@@ -47,7 +47,7 @@ export default async function ClaSignPage({
       <main className="mx-auto max-w-2xl space-y-6 px-4 py-10">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">
-            {project.name} — Contributor License Agreement
+            {project.name}: Contributor License Agreement
           </h1>
           <p className="mt-2 text-muted-foreground">
             Sign the CLA to have your contributions accepted. Your pull requests
@@ -167,7 +167,7 @@ async function ClaSurface({
     );
   }
 
-  // Covered by a corporate CLA — offer the exemption/dispute path.
+  // Covered by a corporate CLA: offer the exemption/dispute path.
   if (status.satisfied && status.via === "ccla" && status.corporate) {
     const member = await prisma.cclaRosterMember.findFirst({
       where: {
@@ -189,7 +189,7 @@ async function ClaSurface({
           <CardDescription>
             Your contributions are covered under the Corporate CLA signed by{" "}
             {status.corporate.companyName}. If that&apos;s not right, you can
-            request an exemption — your coverage will be suspended and you can
+            request an exemption. Your coverage will be suspended and you can
             sign individually instead.
           </CardDescription>
         </CardHeader>

@@ -51,7 +51,7 @@ export const sizeHeuristics: Heuristic[] = [
     group: "size",
     label: "Mega PR (huge diff in a single commit)",
     description:
-      "Trips when both file and line counts exceed thresholds AND commit count is 1 — a typical AI-bulk-generation pattern.",
+      "Trips when both file and line counts exceed thresholds AND commit count is 1: a typical AI-bulk-generation pattern.",
     weight: 3,
     defaultEnabled: true,
     defaultThreshold: 50,
@@ -76,7 +76,7 @@ export const sizeHeuristics: Heuristic[] = [
     group: "size",
     label: "Trivial patch (too small to score high)",
     description:
-      "PR changes ≤ N lines in ≤ 1 file with ≤ 1 commit — likely a typo, default-web-UI edit, or probe PR. Caps the score at 50% (or 25% when paired with a vague title or empty body).",
+      "PR changes ≤ N lines in ≤ 1 file with ≤ 1 commit: likely a typo, default-web-UI edit, or probe PR. Caps the score at 50% (or 25% when paired with a vague title or empty body).",
     weight: 3,
     defaultEnabled: true,
     defaultThreshold: 3,

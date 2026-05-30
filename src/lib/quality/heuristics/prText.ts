@@ -37,8 +37,8 @@ const ISSUE_REF_RE = /(?:#\d+|(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#\d+)/
 const HTML_COMMENT_RE = /<!--[\s\S]*?-->/g;
 
 /**
- * Extract the structural pieces of a PR template — headings and checklist
- * items — separately, so heuristics can reason about each. HTML comments
+ * Extract the structural pieces of a PR template (headings and checklist
+ * items) separately, so heuristics can reason about each. HTML comments
  * (typical "delete this" instruction blocks) are stripped first.
  */
 export type TemplateStructure = {
@@ -74,7 +74,7 @@ export function extractTemplateStructure(template: string): TemplateStructure {
 /**
  * Tokenize for fuzzy matching: strip markdown link syntax to plain text,
  * drop punctuation, collapse whitespace, lowercase, and split into words of
- * length >= 2. Stop-words and parenthetical asides are kept — what matters
+ * length >= 2. Stop-words and parenthetical asides are kept; what matters
  * is the proportion of the template's words that survive into the body.
  */
 function fuzzyTokens(s: string): string[] {
@@ -220,7 +220,7 @@ export const prTextHeuristics: Heuristic[] = [
     group: "pr",
     label: "Honeypot keyword hit",
     description:
-      "PR body contains hidden honeypot text from the project's PR template — typically copy-pasted by AI bots.",
+      "PR body contains hidden honeypot text from the project's PR template, typically copy-pasted by AI bots.",
     weight: 4,
     defaultEnabled: true,
     run(ctx) {
@@ -237,7 +237,7 @@ export const prTextHeuristics: Heuristic[] = [
     group: "pr",
     label: "PR doesn't use the repo's PR template",
     description:
-      "Repo ships a PR template (e.g. .github/PULL_REQUEST_TEMPLATE.md). When the template has checklist items, the body must include them — threshold sets how many checkboxes may be missing (default 0). Match strictness is set project-wide (Quality core settings, default 80%). When the template has no checkboxes, at least one heading must appear. Skipped when the repo has no template.",
+      "Repo ships a PR template (e.g. .github/PULL_REQUEST_TEMPLATE.md). When the template has checklist items, the body must include them. Threshold sets how many checkboxes may be missing (default 0). Match strictness is set project-wide (Quality core settings, default 80%). When the template has no checkboxes, at least one heading must appear. Skipped when the repo has no template.",
     weight: 4,
     defaultEnabled: true,
     defaultThreshold: 0,
@@ -255,7 +255,7 @@ export const prTextHeuristics: Heuristic[] = [
         return {
           failed: true,
           value: `0/${checkboxes.length || headings.length}`,
-          reason: "Empty body — template not used",
+          reason: "Empty body: template not used",
         };
       }
       const matchPct = Math.max(0, Math.min(100, ctx.project.templateMatchPct));

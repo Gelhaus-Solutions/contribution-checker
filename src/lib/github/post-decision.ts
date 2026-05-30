@@ -70,7 +70,7 @@ export async function onApplicationApproved(args: {
       await reopenPullRequest(
         ref,
         check.prNumber,
-        `@${app.user.ghLogin}'s application for **${app.project.name}** was approved — reopening this PR.`
+        `@${app.user.ghLogin}'s application for **${app.project.name}** was approved. Reopening this PR.`
       );
       if (app.project.labelsEnabled) {
         await Promise.all([
@@ -96,7 +96,7 @@ export async function onApplicationApproved(args: {
 
 /**
  * On application denial: find PRs we previously closed as PENDING for this
- * user across the project's repos, switch them to denied state — relabel and
+ * user across the project's repos, switch them to denied state: relabel and
  * post the denial message. PRs stay closed; we don't reopen them.
  */
 export async function onApplicationDenied(args: {

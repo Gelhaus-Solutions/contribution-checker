@@ -71,7 +71,7 @@ async function attachInstallationToManualRepos(args: {
 /**
  * Fetch a PR's commits and verify the DCO sign-off on each. Defensive: any
  * failure (API error, missing data) resolves to `ok: true` so DCO can never
- * crash the webhook or block a PR on infrastructure problems — the gate only
+ * crash the webhook or block a PR on infrastructure problems. The gate only
  * fires on a confident "missing sign-off" result.
  */
 async function checkDco(args: {
@@ -133,7 +133,7 @@ type ProjectForSideEffects = {
 
 /**
  * Publish the Check Run and run quality scoring after a decision has been
- * applied (close/comment/label already done). Both paths are best-effort —
+ * applied (close/comment/label already done). Both paths are best-effort;
  * a failure here must not block the webhook response.
  */
 async function postDecisionSideEffects(args: {
@@ -174,7 +174,7 @@ async function postDecisionSideEffects(args: {
     )
   );
 
-  // Dedicated CLA Check Run — only when the project has CLA enabled (claState is
+  // Dedicated CLA Check Run, only when the project has CLA enabled (claState is
   // computed null otherwise). Lets maintainers require `contribution-checker /
   // cla` independently in branch protection.
   if (args.claState) {
@@ -343,7 +343,7 @@ export async function handlePullRequestEvent(payload: WebhookPayload) {
   // collaborator BYPASS) or is already a CLA CHECK_REQUIRED. When DCO fails on
   // an otherwise-allowing decision we override to CHECK_REQUIRED{dco_missing};
   // when CLA is already failing, CLA keeps the gate reason (the comment copy
-  // mentions both). Fully defensive — checkDco never throws.
+  // mentions both). Fully defensive: checkDco never throws.
   const claGateActive =
     decision.status === "CHECK_REQUIRED" &&
     (decision.reason === "cla_required" || decision.reason === "cla_stale");
@@ -491,7 +491,7 @@ export async function handlePullRequestEvent(payload: WebhookPayload) {
   }
 
   // Always strip the evaluate trigger label after a re-eval, regardless of
-  // labelsEnabled — the admin added it to fire this run, leaving it on would
+  // labelsEnabled. The admin added it to fire this run; leaving it on would
   // re-trigger on every subsequent webhook touch.
   const removeEvaluateLabel = async () => {
     if (!isReEvalLabel) return;
@@ -513,7 +513,7 @@ export async function handlePullRequestEvent(payload: WebhookPayload) {
           await reopenPullRequest(
             ref,
             prNumber,
-            `Re-evaluation by **${project.name}** passed — reopening this PR.`
+            `Re-evaluation by **${project.name}** passed. Reopening this PR.`
           );
           await prisma.prCheck.update({
             where: { repoId_prNumber: { repoId: decision.repoId, prNumber } },
@@ -691,7 +691,7 @@ export async function handleInstallationEvent(payload: WebhookPayload) {
   const installationId = payload.installation.id;
 
   // Initial install (and re-activations) carry the repo list inline in the
-  // `repositories` field — no separate `installation_repositories` event is
+  // `repositories` field; no separate `installation_repositories` event is
   // fired for the first batch. Link those to any manually-entered rows so the
   // PR webhook can find them by ghRepoId.
   if (

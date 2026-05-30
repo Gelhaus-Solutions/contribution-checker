@@ -71,7 +71,7 @@ export async function saveCclaCustomFields(formData: FormData) {
 }
 
 // ---------------------------------------------------------------------------
-// CLA settings — mirrors updateGatingSettings (fetch before, update, diff
+// CLA settings: mirrors updateGatingSettings (fetch before, update, diff
 // audit, revalidate). Checkbox fields are present ("1") => true, absent => false.
 // ---------------------------------------------------------------------------
 export async function updateClaSettings(formData: FormData) {
@@ -219,7 +219,7 @@ export async function publishClaVersion(formData: FormData) {
     }
     if (!repo.installationId) {
       throw new Error(
-        "The GitHub App is not installed on this repository yet — cannot fetch the file."
+        "The GitHub App is not installed on this repository yet, so the file cannot be fetched."
       );
     }
     const [owner, name] = repo.fullName.split("/");

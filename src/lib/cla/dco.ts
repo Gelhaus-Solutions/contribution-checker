@@ -5,7 +5,7 @@ export type DcoResult = { ok: boolean; missing: { sha: string; reason: string }[
  * A commit satisfies the DCO when its message contains a trailer line of the
  * form `Signed-off-by: Some Name <email@example.com>`. The match is anchored
  * to a line (multiline) and requires a non-empty name and angle-bracketed
- * address. Pure — no I/O, no Octokit.
+ * address. Pure: no I/O, no Octokit.
  */
 const SIGNED_OFF_BY = /^Signed-off-by: .+ <[^>]+>$/m;
 

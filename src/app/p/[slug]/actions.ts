@@ -82,7 +82,7 @@ export async function applyAction(
   // Echo what the user submitted on every error path so the form can
   // re-populate without losing input on validation failure. `cla_*` fields
   // live in a reserved namespace outside the form schema and are deliberately
-  // never echoed — the signature is captured fresh, never restored.
+  // never echoed: the signature is captured fresh, never restored.
   const submitted = collectAnswers(formData, fields);
 
   // Determine whether an embedded CLA signature is required for THIS
@@ -145,7 +145,7 @@ export async function applyAction(
         return {
           status: "error",
           reason:
-            "You must provide a signature — type, draw, or upload one — to sign the CLA.",
+            "You must provide a signature (type, draw, or upload one) to sign the CLA.",
           values: submitted,
         };
       }
@@ -261,7 +261,7 @@ export async function applyAction(
 
   // Coverage changed: drop the cache and re-check the contributor's open
   // CLA-gated PRs (re-publishes passing Checks / swaps labels for any now
-  // allowed). Best-effort — never blocks the submission response.
+  // allowed). Best-effort: never blocks the submission response.
   if (claRequiredForSubmission && typeof ghId === "number") {
     invalidateClaCache(project.id, ghId);
     try {

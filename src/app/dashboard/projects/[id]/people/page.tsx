@@ -151,7 +151,7 @@ export default async function ProjectPeople({
         <CardHeader>
           <CardTitle className="text-base">People</CardTitle>
           <CardDescription>
-            Everyone who&apos;s been approved or denied — manual decisions and
+            Everyone who&apos;s been approved or denied: manual decisions and
             finalized applications. Click a row to view their PR history and
             quality breakdown.
           </CardDescription>

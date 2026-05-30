@@ -64,7 +64,7 @@ function getClient(): VaultClient {
 /**
  * Resolve a secret value. Resolution order:
  *   1. In-memory cache (TTL = VAULT_CACHE_TTL_SECONDS).
- *   2. Vault — only if VAULT_<NAME>_PATH is set AND VAULT_ADDR is set.
+ *   2. Vault: only if VAULT_<NAME>_PATH is set AND VAULT_ADDR is set.
  *   3. process.env[name] fallback.
  *
  * Throws VaultResolutionError when a Vault path is configured but the read

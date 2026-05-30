@@ -36,7 +36,7 @@ export type PersonRow = {
   ghLogin: string;
   manual?: ManualEntry;
   application?: ApplicationEntry;
-  // Effective status — manual takes precedence per decide-pr.ts.
+  // Effective status: manual takes precedence per decide-pr.ts.
   status: "APPROVED" | "DENIED" | "PENDING";
   latestDecidedAt: string;
   latestDecidedByLogin: string | null;

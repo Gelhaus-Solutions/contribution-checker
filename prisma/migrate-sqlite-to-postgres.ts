@@ -11,7 +11,7 @@
  *  - NO type coercion. Both Prisma clients hydrate/serialize values off the
  *    SAME schema, so Boolean->boolean, DateTime->Date, Int->number,
  *    String->string round-trip end to end. JSON-string columns are declared
- *    `String` (plain TEXT) — they are copied VERBATIM and must NOT be
+ *    `String` (plain TEXT); they are copied VERBATIM and must NOT be
  *    parsed/re-serialized (notably ClaEventLog.payload is a key-sorted,
  *    hash-chained snapshot whose bytes must not change).
  *
@@ -67,7 +67,7 @@ const MIGRATION_ORDER: ReadonlyArray<{
   delegate: string;
   selfRefParent?: "parentId";
 }> = [
-  // Independent tables (no FK in either direction) — order among these is free.
+  // Independent tables (no FK in either direction): order among these is free.
   { model: "VerificationToken", delegate: "verificationToken" },
   { model: "RateLimitBucket", delegate: "rateLimitBucket" },
   { model: "ProcessedWebhookDelivery", delegate: "processedWebhookDelivery" },
@@ -129,7 +129,7 @@ type Delegate = {
 function delegateOf(client: ReaderClient | WriterClient, name: string): Delegate {
   const d = (client as unknown as Record<string, unknown>)[name];
   if (!d) {
-    throw new Error(`Prisma client has no delegate "${name}" — check MIGRATION_ORDER.`);
+    throw new Error(`Prisma client has no delegate "${name}". Check MIGRATION_ORDER.`);
   }
   return d as Delegate;
 }
@@ -150,7 +150,7 @@ async function copyModel(entry: (typeof MIGRATION_ORDER)[number]): Promise<void>
   const src = delegateOf(reader, delegate);
   const dst = delegateOf(writer, delegate);
 
-  // Plain findMany (scalars only — no `include`), so we never pass relation
+  // Plain findMany (scalars only, no `include`), so we never pass relation
   // objects to createMany and never let @default/@updatedAt/cuid()/now()
   // overwrite the original ids/timestamps. createMany writes the explicit
   // column values we read.
@@ -182,7 +182,7 @@ async function copyModel(entry: (typeof MIGRATION_ORDER)[number]): Promise<void>
   }
 
   // On a clean first run the target is empty, so every source row should
-  // insert. A shortfall means skipDuplicates suppressed something — either a
+  // insert. A shortfall means skipDuplicates suppressed something: either a
   // re-run (benign) or a unique constraint postgres enforces that sqlite did
   // not (needs investigation). Surface it now rather than only at verifyCounts.
   if (inserted < rows.length) {
@@ -202,7 +202,7 @@ async function copyModel(entry: (typeof MIGRATION_ORDER)[number]): Promise<void>
  * updates run OUTSIDE any transaction, chunked for throughput. Do NOT wrap the
  * whole pass in one interactive `$transaction`: Prisma's default interactive-
  * transaction timeout is 5s, so a single transaction spanning hundreds of
- * threaded notes would abort with P2028 and roll back every restore — and the
+ * threaded notes would abort with P2028 and roll back every restore, and the
  * count-only verifier would not catch the lost thread structure. An interrupted
  * pass here is safely resumed by just re-running the script.
  */
@@ -249,7 +249,7 @@ async function verifyCounts(): Promise<boolean> {
   }
 
   // Row counts alone cannot prove the ApplicationNote.parentId self-FK graph
-  // was reproduced — it is written in the deferred pass 2, and a partial/failed
+  // was reproduced: it is written in the deferred pass 2, and a partial/failed
   // restore would leave parentId NULL while counts still match. Verify it
   // explicitly by comparing the number of rows with a non-null parentId.
   const [srcLinked, dstLinked] = await Promise.all([
@@ -288,12 +288,12 @@ async function main(): Promise<void> {
   const ok = await verifyCounts();
   if (!ok) {
     throw new Error(
-      "Row count mismatch between source and target — migration is INCOMPLETE. " +
+      "Row count mismatch between source and target: migration is INCOMPLETE. " +
         "See the FAIL lines above. The copy is idempotent (skipDuplicates), so " +
         "you can re-run this script after resolving the cause.",
     );
   }
-  console.log("\nMigration complete — all row counts match.");
+  console.log("\nMigration complete. All row counts match.");
 }
 
 main()

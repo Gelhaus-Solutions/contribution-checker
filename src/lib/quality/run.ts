@@ -124,7 +124,7 @@ export async function runQualityFromContext(args: {
  * scoring should not run (feature off, fetch failed, etc.).
  *
  * When the score falls below `project.qualityCommentMin`, posts a public
- * PR comment with a brief breakdown — the only public-facing surface for
+ * PR comment with a brief breakdown: the only public-facing surface for
  * quality. Otherwise, scores are admin-only.
  */
 export async function runQualityForPrCheck(args: {
@@ -224,7 +224,7 @@ export async function runQualityForPrCheck(args: {
   });
 
   // Public warning comment when score is concerning. Only posted once
-  // (idempotent via PrQuality having no commentedAt — we use a JobQueue
+  // (idempotent via PrQuality having no commentedAt; we use a JobQueue
   // entry to avoid duplicate comments on synchronize re-runs).
   if (
     !args.skipComment &&
@@ -264,7 +264,7 @@ async function postQualityWarningComment(args: {
     .map((id) => {
       const h = ALL_HEURISTICS.find((x) => x.id === id);
       const sig = args.signals[id];
-      return h ? `- **${h.label}**${sig?.reason ? ` — ${sig.reason}` : ""}` : null;
+      return h ? `- **${h.label}**${sig?.reason ? `: ${sig.reason}` : ""}` : null;
     })
     .filter(Boolean);
   const body = [

@@ -31,7 +31,7 @@ export const diffCohesionHeuristics: Heuristic[] = [
     id: "diff.suspicious_renames",
     group: "diff",
     label: "Suspicious renames",
-    description: "Many file renames in a single PR — often AI bulk-rename slop.",
+    description: "Many file renames in a single PR: often AI bulk-rename slop.",
     weight: 1,
     defaultEnabled: true,
     defaultThreshold: 10,

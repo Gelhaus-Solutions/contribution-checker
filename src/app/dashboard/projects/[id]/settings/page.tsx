@@ -153,7 +153,7 @@ export default async function ProjectSettings({
               <span>
                 <span className="font-medium">Checker enabled</span>
                 <span className="block text-xs text-muted-foreground">
-                  When off, every PR is treated as approved &mdash; the
+                  When off, every PR is treated as approved: the
                   &quot;approved&quot; label is applied and PRs are not closed.
                 </span>
               </span>
@@ -309,7 +309,7 @@ export default async function ProjectSettings({
                 Admins add this label to a PR to force the checker to re-run
                 (reopens closed-by-app PRs that now pass, or evaluates PRs
                 opened before the App was installed). The bot strips the label
-                after processing &mdash; even when labels are otherwise off.
+                after processing, even when labels are otherwise off.
               </p>
             </div>
             <SubmitButton>Save labels</SubmitButton>
@@ -374,7 +374,7 @@ export default async function ProjectSettings({
                     </div>
                     <div className="space-y-1 md:col-span-2">
                       <Label htmlFor={`secret-${ep.id}`}>
-                        Secret (generic only — used to sign payloads)
+                        Secret (generic only, used to sign payloads)
                       </Label>
                       <Input
                         id={`secret-${ep.id}`}
@@ -473,7 +473,7 @@ export default async function ProjectSettings({
             </div>
             <div className="space-y-1 md:col-span-2">
               <Label htmlFor="new-secret">
-                Secret (generic only — leave blank for Discord)
+                Secret (generic only, leave blank for Discord)
               </Label>
               <Input
                 id="new-secret"

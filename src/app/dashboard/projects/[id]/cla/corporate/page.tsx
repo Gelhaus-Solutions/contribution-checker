@@ -91,7 +91,7 @@ export default async function CorporateClaPage({
           <CardTitle className="text-base">Corporate CLAs</CardTitle>
           <CardDescription>
             Companies that have signed a Corporate CLA, and their employee
-            rosters. Rosters are self-service &mdash; the signatory adds and
+            rosters. Rosters are self-service: the signatory adds and
             removes members. This is your maintainer view; you can revoke a
             roster entry or an entire corporate agreement here.
           </CardDescription>

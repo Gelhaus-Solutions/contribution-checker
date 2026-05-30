@@ -71,7 +71,7 @@ export default async function ClaSettings({
           <CardDescription>
             Require contributors to sign a Contributor License Agreement before
             their PRs are accepted. Failing PRs stay open with a{" "}
-            <code>cla-pending</code> label and a failing Check &mdash; they are
+            <code>cla-pending</code> label and a failing Check. They are
             never closed.
           </CardDescription>
         </CardHeader>
@@ -218,7 +218,7 @@ export default async function ClaSettings({
             </div>
 
             <p className="rounded-md border border-border bg-muted/40 p-3 text-xs text-muted-foreground">
-              Everyone except bypass-listed bots must sign &mdash; collaborators
+              Everyone except bypass-listed bots must sign, collaborators
               and manually-approved users included.
             </p>
 
