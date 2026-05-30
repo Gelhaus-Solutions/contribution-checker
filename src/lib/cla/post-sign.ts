@@ -7,7 +7,11 @@ import {
   decisionRepoInclude,
   type PrDecision,
 } from "@/lib/applications/decide-pr";
-import { publishDecisionCheck } from "@/lib/github/check-run";
+import {
+  publishDecisionCheck,
+  publishClaCheck,
+  type ClaCheckState,
+} from "@/lib/github/check-run";
 import {
   removeLabelIfPresent,
   setLabels,
@@ -77,6 +81,7 @@ export async function onClaCoverageChanged(args: {
   if (checks.length === 0) return { rechecked: 0 };
 
   const applyUrl = buildApplyUrl(project.slug);
+  const claUrl = `${applyUrl}/cla`;
 
   let rechecked = 0;
   for (const check of checks) {
@@ -109,6 +114,35 @@ export async function onClaCoverageChanged(args: {
         },
         decision,
         applyUrl,
+        claUrl,
+      });
+
+      // Re-publish the dedicated `contribution-checker / cla` check too. The
+      // webhook publishes both checks, but only the decision check was being
+      // refreshed here, so a maintainer who required the CLA check in branch
+      // protection saw it stay stuck on "CLA required" after the signature.
+      // An allowing decision means decideForRepo's CLA gate passed (coverage is
+      // satisfied); bot/disabled edge cases are mapped explicitly to mirror the
+      // webhook's claState computation.
+      const claState: ClaCheckState =
+        decision.status === "BYPASSED" && decision.reason === "bot"
+          ? "exempt"
+          : decision.status === "APPROVED" &&
+              decision.bypassReason === "checker_disabled"
+            ? "not_required"
+            : "satisfied";
+      await publishClaCheck({
+        installationId: check.repo.installationId,
+        repoFullName: check.repo.fullName,
+        prCheckId: check.id,
+        headSha: check.headSha,
+        project: {
+          id: project.id,
+          name: project.name,
+          checksEnabled: project.checksEnabled,
+        },
+        state: claState,
+        claUrl,
       });
 
       if (project.labelsEnabled) {
