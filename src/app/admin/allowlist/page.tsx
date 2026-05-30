@@ -1,4 +1,5 @@
 import Image from "next/image";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { requireSuperAdmin } from "@/lib/authz";
 import { SiteHeader } from "@/components/site-header";
@@ -13,29 +14,59 @@ import { SubmitButton } from "@/components/ui/submit-button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { SearchInput } from "@/components/ui/search-input";
+import { Pagination } from "@/components/ui/pagination";
+import { parsePageParams, type SearchParamRecord } from "@/lib/pagination";
 import {
   grantCreatorByGhLogin,
   revokeCreator,
   toggleSuperAdmin,
 } from "./actions";
 
-export default async function AllowlistPage() {
+export default async function AllowlistPage({
+  searchParams,
+}: {
+  searchParams: Promise<SearchParamRecord>;
+}) {
   await requireSuperAdmin();
+  const sp = await searchParams;
+  const { page, perPage, skip, take, q } = parsePageParams(sp);
 
-  const users = await prisma.user.findMany({
-    where: {
-      OR: [{ canCreateProj: true }, { isSuperAdmin: true }],
-    },
-    select: {
-      id: true,
-      ghLogin: true,
-      name: true,
-      image: true,
-      canCreateProj: true,
-      isSuperAdmin: true,
-    },
-    orderBy: { ghLogin: "asc" },
-  });
+  const where: Prisma.UserWhereInput = {
+    AND: [
+      { OR: [{ canCreateProj: true }, { isSuperAdmin: true }] },
+      ...(q
+        ? [
+            {
+              OR: [
+                { ghLogin: { contains: q, mode: "insensitive" as const } },
+                { name: { contains: q, mode: "insensitive" as const } },
+              ],
+            },
+          ]
+        : []),
+    ],
+  };
+
+  const [users, total] = await prisma.$transaction([
+    prisma.user.findMany({
+      where,
+      select: {
+        id: true,
+        ghLogin: true,
+        name: true,
+        image: true,
+        canCreateProj: true,
+        isSuperAdmin: true,
+      },
+      orderBy: { ghLogin: "asc" },
+      skip,
+      take,
+    }),
+    prisma.user.count({ where }),
+  ]);
+
+  const basePath = "/admin/allowlist";
 
   return (
     <>
@@ -74,9 +105,16 @@ export default async function AllowlistPage() {
             <CardTitle className="text-base">Allowlisted users</CardTitle>
           </CardHeader>
           <CardContent className="p-0">
+            <div className="border-b border-border px-6 py-3">
+              <SearchInput
+                pathname={basePath}
+                q={q}
+                placeholder="Search login or name"
+              />
+            </div>
             {users.length === 0 ? (
-              <div className="px-6 pb-6 text-sm text-muted-foreground">
-                None yet. Grant access above.
+              <div className="px-6 py-6 text-sm text-muted-foreground">
+                {q ? "No users match your search." : "None yet. Grant access above."}
               </div>
             ) : (
               <ul className="divide-y divide-border">
@@ -126,6 +164,13 @@ export default async function AllowlistPage() {
                 ))}
               </ul>
             )}
+            <Pagination
+              pathname={basePath}
+              searchParams={sp}
+              page={page}
+              perPage={perPage}
+              total={total}
+            />
           </CardContent>
         </Card>
       </main>

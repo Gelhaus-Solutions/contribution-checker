@@ -1,5 +1,6 @@
 import Link from "next/link";
 import Image from "next/image";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { requireProjectRole } from "@/lib/authz";
 import {
@@ -9,6 +10,9 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { SearchInput } from "@/components/ui/search-input";
+import { Pagination } from "@/components/ui/pagination";
+import { parsePageParams, type SearchParamRecord } from "@/lib/pagination";
 
 const STATUS_OPTIONS = [
   { value: "SUBMITTED", label: "Submitted" },
@@ -30,23 +34,49 @@ export default async function ProjectApplications({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ status?: string }>;
+  searchParams: Promise<SearchParamRecord>;
 }) {
   const { id } = await params;
-  const { status } = await searchParams;
+  const sp = await searchParams;
   await requireProjectRole(id, "REVIEWER");
 
-  const filterStatus =
-    status && STATUS_OPTIONS.some((s) => s.value === status) ? status : "SUBMITTED";
+  const { page, perPage, skip, take, q } = parsePageParams(sp);
 
-  const apps = await prisma.application.findMany({
-    where: { projectId: id, status: filterStatus },
-    include: {
-      user: { select: { ghLogin: true, image: true, name: true } },
-    },
-    orderBy: { createdAt: "desc" },
-    take: 200,
-  });
+  const status = typeof sp.status === "string" ? sp.status : undefined;
+  const filterStatus =
+    status && STATUS_OPTIONS.some((s) => s.value === status)
+      ? status
+      : "SUBMITTED";
+
+  const where: Prisma.ApplicationWhereInput = {
+    projectId: id,
+    status: filterStatus,
+    ...(q
+      ? {
+          user: {
+            OR: [
+              { ghLogin: { contains: q, mode: "insensitive" } },
+              { name: { contains: q, mode: "insensitive" } },
+            ],
+          },
+        }
+      : {}),
+  };
+
+  const [apps, total] = await prisma.$transaction([
+    prisma.application.findMany({
+      where,
+      include: {
+        user: { select: { ghLogin: true, image: true, name: true } },
+      },
+      orderBy: { createdAt: "desc" },
+      skip,
+      take,
+    }),
+    prisma.application.count({ where }),
+  ]);
+
+  const basePath = `/dashboard/projects/${id}/applications`;
 
   return (
     <Card>
@@ -56,7 +86,7 @@ export default async function ProjectApplications({
           {STATUS_OPTIONS.map((s) => (
             <Link
               key={s.value}
-              href={`/dashboard/projects/${id}/applications?status=${s.value}`}
+              href={`${basePath}?status=${s.value}`}
               className={
                 filterStatus === s.value
                   ? "rounded-md bg-muted px-2.5 py-1 text-xs font-medium"
@@ -69,16 +99,24 @@ export default async function ProjectApplications({
         </nav>
       </CardHeader>
       <CardContent className="p-0">
+        <div className="border-b border-border px-6 py-3">
+          <SearchInput
+            pathname={basePath}
+            q={q}
+            placeholder="Search login or name"
+            hiddenParams={{ status: filterStatus }}
+          />
+        </div>
         {apps.length === 0 ? (
-          <div className="px-6 pb-6 text-sm text-muted-foreground">
-            Nothing in this bucket.
+          <div className="px-6 py-6 text-sm text-muted-foreground">
+            {q ? "No applications match your search." : "Nothing in this bucket."}
           </div>
         ) : (
           <ul className="divide-y divide-border">
             {apps.map((a) => (
               <li key={a.id}>
                 <Link
-                  href={`/dashboard/projects/${id}/applications/${a.id}`}
+                  href={`${basePath}/${a.id}`}
                   className="flex items-center justify-between gap-3 px-6 py-3 transition-colors hover:bg-muted/50"
                 >
                   <div className="flex items-center gap-3">
@@ -113,6 +151,13 @@ export default async function ProjectApplications({
             ))}
           </ul>
         )}
+        <Pagination
+          pathname={basePath}
+          searchParams={sp}
+          page={page}
+          perPage={perPage}
+          total={total}
+        />
       </CardContent>
     </Card>
   );
