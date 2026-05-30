@@ -1,15 +1,11 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
-const projectFindUnique = vi.fn();
 const waiverFindFirst = vi.fn();
 const signatureFindFirst = vi.fn();
 const rosterFindMany = vi.fn();
 
 vi.mock("@/lib/db", () => ({
   prisma: {
-    project: {
-      findUnique: (...args: unknown[]) => projectFindUnique(...args),
-    },
     claWaiver: {
       findFirst: (...args: unknown[]) => waiverFindFirst(...args),
     },
@@ -29,19 +25,37 @@ import {
 } from "@/lib/cla/status";
 
 beforeEach(() => {
-  projectFindUnique.mockReset();
   waiverFindFirst.mockReset();
   signatureFindFirst.mockReset();
   rosterFindMany.mockReset();
 
-  // Default: floors at 1 for both kinds; nothing on file.
-  projectFindUnique.mockResolvedValue({ minIclaVersion: 1, minCclaVersion: 1 });
+  // Default: nothing on file.
   waiverFindFirst.mockResolvedValue(null);
   signatureFindFirst.mockResolvedValue(null);
   rosterFindMany.mockResolvedValue([]);
 });
 
 const who = { projectId: "proj1", ghId: 42, ghLogin: "Octocat" };
+
+// A CCLA roster member shape with a signatory signature on a version with the
+// given resignRequired flag.
+function member(opts: {
+  id: string;
+  corpId: string;
+  company: string;
+  corpStatus: string;
+  resignRequired: boolean;
+}) {
+  return {
+    id: opts.id,
+    corporateCla: {
+      id: opts.corpId,
+      companyName: opts.company,
+      status: opts.corpStatus,
+      signature: { version: { resignRequired: opts.resignRequired } },
+    },
+  };
+}
 
 describe("getClaStatus", () => {
   it("is satisfied via an active waiver (short-circuits other checks)", async () => {
@@ -70,8 +84,9 @@ describe("getClaStatus", () => {
     });
   });
 
-  it("is satisfied via ICLA at the minimum version", async () => {
-    signatureFindFirst.mockResolvedValueOnce({ documentVersion: 1 });
+  it("is satisfied via an ICLA on a non-stale version", async () => {
+    // First query (valid filter) finds a signature on a resignRequired=false version.
+    signatureFindFirst.mockResolvedValueOnce({ id: "s1" });
 
     const res = await getClaStatus(who);
 
@@ -79,51 +94,49 @@ describe("getClaStatus", () => {
     expect(rosterFindMany).not.toHaveBeenCalled();
   });
 
-  it("is satisfied via ICLA above the minimum version", async () => {
-    signatureFindFirst.mockResolvedValueOnce({ documentVersion: 3 });
+  it("queries for any ACTIVE ICLA signature on a non-stale version first", async () => {
+    signatureFindFirst.mockResolvedValueOnce({ id: "s1" });
 
-    const res = await getClaStatus(who);
+    await getClaStatus(who);
 
-    expect(res).toEqual({ satisfied: true, via: "icla" });
+    expect(signatureFindFirst).toHaveBeenNthCalledWith(1, {
+      where: {
+        projectId: "proj1",
+        ghId: 42,
+        kind: "ICLA",
+        status: "ACTIVE",
+        version: { is: { resignRequired: false } },
+      },
+      select: { id: true },
+    });
   });
 
-  it("is stale (needsResign, not satisfied) when the ICLA is below the minimum", async () => {
-    projectFindUnique.mockResolvedValueOnce({
-      minIclaVersion: 2,
-      minCclaVersion: 1,
-    });
-    signatureFindFirst.mockResolvedValueOnce({ documentVersion: 1 });
+  it("is stale (needsResign) when every ICLA signature is on a resignRequired version", async () => {
+    // No valid signature, but an ACTIVE ICLA signature exists -> must re-sign.
+    signatureFindFirst
+      .mockResolvedValueOnce(null) // valid-version query
+      .mockResolvedValueOnce({ id: "s1" }); // any-signature query
 
     const res = await getClaStatus(who);
 
     expect(res).toEqual({ satisfied: false, via: "icla", needsResign: true });
     // A stale ICLA is terminal: roster is not consulted as a fallback.
     expect(rosterFindMany).not.toHaveBeenCalled();
-  });
-
-  it("queries the newest active ICLA signature for this ghId", async () => {
-    signatureFindFirst.mockResolvedValueOnce({ documentVersion: 5 });
-
-    await getClaStatus(who);
-
-    expect(signatureFindFirst).toHaveBeenCalledWith({
+    expect(signatureFindFirst).toHaveBeenNthCalledWith(2, {
       where: { projectId: "proj1", ghId: 42, kind: "ICLA", status: "ACTIVE" },
-      orderBy: { documentVersion: "desc" },
-      select: { documentVersion: true },
+      select: { id: true },
     });
   });
 
   it("is satisfied via an active roster member under an active corporate", async () => {
     rosterFindMany.mockResolvedValueOnce([
-      {
+      member({
         id: "m1",
-        corporateCla: {
-          id: "corp1",
-          companyName: "Acme Inc",
-          status: "ACTIVE",
-          signature: { documentVersion: 2 },
-        },
-      },
+        corpId: "corp1",
+        company: "Acme Inc",
+        corpStatus: "ACTIVE",
+        resignRequired: false,
+      }),
     ]);
 
     const res = await getClaStatus(who);
@@ -147,7 +160,13 @@ describe("getClaStatus", () => {
         OR: [{ ghId: 42 }, { ghLogin: "octocat" }],
         corporateCla: { is: { status: "ACTIVE" } },
       },
-      include: { corporateCla: { include: { signature: true } } },
+      include: {
+        corporateCla: {
+          include: {
+            signature: { include: { version: { select: { resignRequired: true } } } },
+          },
+        },
+      },
     });
   });
 
@@ -155,24 +174,20 @@ describe("getClaStatus", () => {
     // A contributor on several rosters: a REVOKED corporate and an ACTIVE one.
     // The active one must win (regression against the old findFirst behavior).
     rosterFindMany.mockResolvedValueOnce([
-      {
+      member({
         id: "revoked-member",
-        corporateCla: {
-          id: "corpRevoked",
-          companyName: "Old Co",
-          status: "REVOKED",
-          signature: { documentVersion: 5 },
-        },
-      },
-      {
+        corpId: "corpRevoked",
+        company: "Old Co",
+        corpStatus: "REVOKED",
+        resignRequired: false,
+      }),
+      member({
         id: "active-member",
-        corporateCla: {
-          id: "corpActive",
-          companyName: "Acme Inc",
-          status: "ACTIVE",
-          signature: { documentVersion: 2 },
-        },
-      },
+        corpId: "corpActive",
+        company: "Acme Inc",
+        corpStatus: "ACTIVE",
+        resignRequired: false,
+      }),
     ]);
 
     const res = await getClaStatus(who);
@@ -185,18 +200,14 @@ describe("getClaStatus", () => {
   });
 
   it("is not satisfied when only a PENDING corporate covers the contributor", async () => {
-    // PENDING corporates are excluded by the relation filter at the DB; the JS
-    // guard is the belt-and-suspenders for the same condition.
     rosterFindMany.mockResolvedValueOnce([
-      {
+      member({
         id: "m1",
-        corporateCla: {
-          id: "corp1",
-          companyName: "Acme Inc",
-          status: "PENDING",
-          signature: { documentVersion: 5 },
-        },
-      },
+        corpId: "corp1",
+        company: "Acme Inc",
+        corpStatus: "PENDING",
+        resignRequired: false,
+      }),
     ]);
 
     const res = await getClaStatus(who);
@@ -206,15 +217,13 @@ describe("getClaStatus", () => {
 
   it("is not satisfied when the corporate is REVOKED", async () => {
     rosterFindMany.mockResolvedValueOnce([
-      {
+      member({
         id: "m1",
-        corporateCla: {
-          id: "corp1",
-          companyName: "Acme Inc",
-          status: "REVOKED",
-          signature: { documentVersion: 5 },
-        },
-      },
+        corpId: "corp1",
+        company: "Acme Inc",
+        corpStatus: "REVOKED",
+        resignRequired: false,
+      }),
     ]);
 
     const res = await getClaStatus(who);
@@ -222,21 +231,15 @@ describe("getClaStatus", () => {
     expect(res).toEqual({ satisfied: false });
   });
 
-  it("is not satisfied when the signatory's CCLA version is stale", async () => {
-    projectFindUnique.mockResolvedValueOnce({
-      minIclaVersion: 1,
-      minCclaVersion: 3,
-    });
+  it("is not satisfied when the signatory's CCLA version is stale (resignRequired)", async () => {
     rosterFindMany.mockResolvedValueOnce([
-      {
+      member({
         id: "m1",
-        corporateCla: {
-          id: "corp1",
-          companyName: "Acme Inc",
-          status: "ACTIVE",
-          signature: { documentVersion: 2 },
-        },
-      },
+        corpId: "corp1",
+        company: "Acme Inc",
+        corpStatus: "ACTIVE",
+        resignRequired: true,
+      }),
     ]);
 
     const res = await getClaStatus(who);
@@ -245,9 +248,6 @@ describe("getClaStatus", () => {
   });
 
   it("is not satisfied when there is no active roster membership", async () => {
-    // The query filters status:"ACTIVE" and an ACTIVE corporate, so a
-    // REVOKED/DISPUTED member (or a member under a non-active corporate) returns
-    // nothing; coverage is therefore not granted.
     rosterFindMany.mockResolvedValueOnce([]);
 
     const res = await getClaStatus(who);
@@ -258,15 +258,6 @@ describe("getClaStatus", () => {
   it("is not satisfied with nothing on file", async () => {
     const res = await getClaStatus(who);
     expect(res).toEqual({ satisfied: false });
-  });
-
-  it("treats missing min-version columns as 0", async () => {
-    projectFindUnique.mockResolvedValueOnce(null);
-    signatureFindFirst.mockResolvedValueOnce({ documentVersion: 0 });
-
-    const res = await getClaStatus(who);
-
-    expect(res).toEqual({ satisfied: true, via: "icla" });
   });
 });
 
@@ -287,8 +278,7 @@ describe("isClaSatisfied + cache", () => {
 
     expect(first).toBe(true);
     expect(second).toBe(true);
-    // Cached: project + waiver each queried only once.
-    expect(projectFindUnique).toHaveBeenCalledTimes(1);
+    // Cached: waiver queried only once.
     expect(waiverFindFirst).toHaveBeenCalledTimes(1);
   });
 

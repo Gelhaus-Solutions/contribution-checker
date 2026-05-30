@@ -89,7 +89,7 @@ export default async function GitHubAppSetup() {
                   <li>Pull requests: <strong>Read &amp; write</strong></li>
                   <li>Issues: <strong>Read &amp; write</strong></li>
                   <li>Checks: <strong>Read &amp; write</strong></li>
-                  <li>Contents: Read (needed for PR Quality scoring, reads PR file diffs)</li>
+                  <li>Contents: Read (needed for PR Quality scoring and for repo-file CLA sources; reads PR file diffs and tracked CLA files)</li>
                   <li>Metadata: Read (auto-selected)</li>
                 </ul>
                 <p className="mt-2 text-xs text-muted-foreground">
@@ -117,13 +117,19 @@ export default async function GitHubAppSetup() {
                 (with the <code>synchronize</code> action enabled so we
                 re-evaluate on push),{" "}
                 <code className="rounded bg-muted px-1 py-0.5 text-xs">
+                  Push
+                </code>{" "}
+                (so a tracked CLA file change auto-publishes or queues a new
+                version),{" "}
+                <code className="rounded bg-muted px-1 py-0.5 text-xs">
                   Installation target
                 </code>{" "}
                 (also called Installation), and{" "}
                 <code className="rounded bg-muted px-1 py-0.5 text-xs">
                   Installation repositories
                 </code>
-                .
+                . If you skip <code>Push</code>, use the <strong>Sync now</strong>{" "}
+                button on the CLA page to publish repo-file changes manually.
               </li>
               <li>
                 Under &ldquo;Where can this GitHub App be installed?&rdquo;,

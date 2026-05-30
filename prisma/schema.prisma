@@ -158,15 +158,22 @@ model Project {
   // Separate label for "approved but CLA/DCO unsigned" PRs (distinct from
   // labelPending so the two block reasons are visually distinct on GitHub).
   labelClaPending        String  @default("contribution:cla-pending")
-  // Lowest signature version (per kind) that still satisfies the gate. A
-  // require-resign publish sets this to the new version; keep-valid leaves it.
+  // DERIVED/ADVISORY (no longer the gate): lowest signature version per kind that
+  // still satisfied the gate under the old monotonic-floor model. Coverage now
+  // reads ClaDocumentVersion.resignRequired per-version (see src/lib/cla/status.ts).
+  // Still written by publishClaVersion for backward-compat and UI hints.
   minIclaVersion         Int     @default(0)
   minCclaVersion         Int     @default(0)
   // Denormalized pointers to the active published document per kind (fast gate).
   currentIclaVersionId   String?
   currentCclaVersionId   String?
-  // When a repo-file CLA auto-versions on push, whether that forces re-sign.
+  // When a repo-file CLA auto-versions on push, whether that forces re-sign. In
+  // review mode this only pre-fills the approval form's re-sign default.
   claAutoVersionRequiresResign Boolean @default(false)
+  // When true, a detected repo-file change (push or manual sync) creates a
+  // pending ClaPendingChange for admin review instead of auto-publishing. Takes
+  // precedence over claAutoVersionRequiresResign for the publish-vs-queue choice.
+  claRepoFileReviewMode  Boolean @default(false)
   // Whether an ICLA requires a typed signature (full legal name). When false,
   // the "I agree" checkbox alone is a valid individual click-wrap. (CCLA always
   // requires the full executed signature block.)
@@ -197,6 +204,7 @@ model Project {
   cclaRosterMembers   CclaRosterMember[]
   claWaivers          ClaWaiver[]
   claEvents           ClaEventLog[]
+  claPendingChanges   ClaPendingChange[]
 }
 
 /**
@@ -576,7 +584,13 @@ model ClaDocumentVersion {
   sourceRef       String?
   sourceCommitSha String?
 
-  requireResign Boolean @default(false) // whether this publish forced re-sign
+  requireResign Boolean @default(false) // immutable: whether THIS publish forced re-sign at the time
+  // Mutable per-version gate input: when true, a signature on this version no
+  // longer satisfies coverage (the signer must re-sign). The current version is
+  // never marked. This replaces the monotonic floor as the source of truth for
+  // coverage; see src/lib/cla/status.ts. Toggled via setVersionResign (laddered
+  // as doc.resign_set) or selected at publish time.
+  resignRequired Boolean @default(false)
   publishedById String?                 // actor (plain snapshot, no FK)
   publishedAt   DateTime @default(now())
   createdAt     DateTime @default(now())
@@ -766,7 +780,7 @@ model ClaEventLog {
   id        String @id @default(cuid())
   projectId String
   seq       Int
-  kind      String // genesis | icla.signed | ccla.signed | ccla.approved | ccla.rejected | doc.published | roster.added | roster.revoked | roster.disputed | signature.revoked | waiver.granted | waiver.revoked
+  kind      String // genesis | icla.signed | ccla.signed | ccla.approved | ccla.rejected | doc.published | doc.resign_set | roster.added | roster.revoked | roster.disputed | signature.revoked | waiver.granted | waiver.revoked
 
   payload     String // canonical (key-sorted) JSON snapshot
   actorUserId String?
@@ -786,4 +800,43 @@ model ClaEventLog {
 
   @@unique([projectId, seq])
   @@index([projectId, kind])
+}
+
+/**
+ * A detected-but-unpublished repo-file CLA change awaiting admin review. Created
+ * only when Project.claRepoFileReviewMode is on: a push (or manual sync) that
+ * changes the tracked file's content upserts the single PENDING row for
+ * (projectId, kind, sourcePath) in place, so repeated pushes refresh one row
+ * rather than spawning many. This is operational workflow state, NOT a legal
+ * fact: it is audited but never written to the ClaEventLog hash chain. Approving
+ * publishes a new ClaDocumentVersion (which IS laddered) and flips this to
+ * APPROVED; rejecting flips to REJECTED; a content revert to the current
+ * published hash flips to SUPERSEDED. detectedContent/contentHash snapshot what
+ * was on the branch at detection so the approval can guard against drift.
+ */
+model ClaPendingChange {
+  id        String @id @default(cuid())
+  projectId String
+  kind      String // "ICLA" | "CCLA"
+
+  sourceRepoId    String
+  sourcePath      String
+  sourceRef       String?
+  detectedCommitSha String?
+  detectedContent   String
+  contentHash       String // sha256(detectedContent) at detection time
+
+  status String @default("PENDING") // "PENDING" | "APPROVED" | "REJECTED" | "SUPERSEDED"
+
+  detectedAt   DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  reviewedById String?
+  reviewedAt   DateTime?
+  publishedVersionId String? // set on approve (plain pointer, no FK)
+  rejectReason String?
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, status])
+  @@index([projectId, kind, sourcePath, status])
 }

@@ -16,7 +16,8 @@ export type NotificationKind =
   | "cla.ccla_rejected"
   | "cla.roster_changed"
   | "cla.roster_disputed"
-  | "cla.resign_required";
+  | "cla.resign_required"
+  | "cla.pending_change";
 
 export async function notifyUser(args: {
   userId: string;

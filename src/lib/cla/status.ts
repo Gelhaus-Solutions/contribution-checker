@@ -35,13 +35,18 @@ export type ClaStatusResult = {
  *
  * Satisfied if ANY of:
  *  - an ACTIVE ClaWaiver matching ghId or lowercased ghLogin;
- *  - an ACTIVE ICLA ClaSignature whose documentVersion >= minIclaVersion;
+ *  - an ACTIVE ICLA ClaSignature on a version that is NOT resignRequired;
  *  - an ACTIVE CclaRosterMember (matched by ghId, else lowercased ghLogin)
- *    under an ACTIVE CorporateCla whose signatory signature documentVersion
- *    >= minCclaVersion.
+ *    under an ACTIVE CorporateCla whose signatory signed a version that is NOT
+ *    resignRequired.
  *
- * `needsResign` is true when an ACTIVE ICLA signature exists but its
- * documentVersion is below minIclaVersion (=> the gate reports cla_stale).
+ * Coverage reads the per-version `ClaDocumentVersion.resignRequired` flag, not
+ * the old monotonic floor: a contributor may hold an older still-valid signature
+ * alongside a newer stale one, so we test for the EXISTENCE of any active
+ * signature on a non-stale version rather than only inspecting the newest.
+ *
+ * `needsResign` is true when an ACTIVE ICLA signature exists but every one of
+ * them is on a resignRequired version (=> the gate reports cla_stale).
  */
 export async function getClaStatus(a: {
   projectId: string;
@@ -50,13 +55,6 @@ export async function getClaStatus(a: {
 }): Promise<ClaStatusResult> {
   const { projectId, ghId } = a;
   const ghLogin = a.ghLogin.toLowerCase();
-
-  const project = await prisma.project.findUnique({
-    where: { id: projectId },
-    select: { minIclaVersion: true, minCclaVersion: true },
-  });
-  const minIclaVersion = project?.minIclaVersion ?? 0;
-  const minCclaVersion = project?.minCclaVersion ?? 0;
 
   // 1) Waiver: admin exemption short-circuits everything else.
   const waiver = await prisma.claWaiver.findFirst({
@@ -71,27 +69,40 @@ export async function getClaStatus(a: {
     return { satisfied: true, via: "waiver" };
   }
 
-  // 2) Individual CLA: newest active signature for this ghId.
-  const icla = await prisma.claSignature.findFirst({
-    where: { projectId, ghId, kind: "ICLA", status: "ACTIVE" },
-    orderBy: { documentVersion: "desc" },
-    select: { documentVersion: true },
+  // 2) Individual CLA: any ACTIVE signature on a non-stale (resignRequired=false)
+  //    version covers. If one exists, covered. If none does but the contributor
+  //    has at least one ACTIVE ICLA signature, every signature is stale -> they
+  //    must re-sign.
+  const validIcla = await prisma.claSignature.findFirst({
+    where: {
+      projectId,
+      ghId,
+      kind: "ICLA",
+      status: "ACTIVE",
+      version: { is: { resignRequired: false } },
+    },
+    select: { id: true },
   });
-  if (icla) {
-    if (icla.documentVersion >= minIclaVersion) {
-      return { satisfied: true, via: "icla" };
-    }
-    // A signature exists but is below the floor: stale, must re-sign.
+  if (validIcla) {
+    return { satisfied: true, via: "icla" };
+  }
+  const anyIcla = await prisma.claSignature.findFirst({
+    where: { projectId, ghId, kind: "ICLA", status: "ACTIVE" },
+    select: { id: true },
+  });
+  if (anyIcla) {
+    // Signatures exist but all are on resignRequired versions: must re-sign.
     return { satisfied: false, via: "icla", needsResign: true };
   }
 
   // 3) Corporate CLA: active roster membership under an active corporate whose
-  //    signatory signed a version at or above the floor. A contributor may be on
-  //    several rosters (multiple CCLAs, some PENDING/REJECTED/REVOKED), so the
-  //    relation filter keeps only memberships under an ACTIVE corporate and we
-  //    pick the first that also clears the version floor. Without this filter a
-  //    findFirst could land on a non-active corporate and wrongly report
-  //    not-covered even when another active corporate covers the same person.
+  //    signatory signed a non-stale version. A contributor may be on several
+  //    rosters (multiple CCLAs, some PENDING/REJECTED/REVOKED), so the relation
+  //    filter keeps only memberships under an ACTIVE corporate and we pick the
+  //    first whose signatory signature is on a resignRequired=false version.
+  //    Without this filter a findFirst could land on a non-active corporate and
+  //    wrongly report not-covered even when another active corporate covers the
+  //    same person.
   const members = await prisma.cclaRosterMember.findMany({
     where: {
       projectId,
@@ -99,13 +110,17 @@ export async function getClaStatus(a: {
       OR: [{ ghId }, { ghLogin }],
       corporateCla: { is: { status: "ACTIVE" } },
     },
-    include: { corporateCla: { include: { signature: true } } },
+    include: {
+      corporateCla: {
+        include: { signature: { include: { version: { select: { resignRequired: true } } } } },
+      },
+    },
   });
   const covering = members.find(
     (m) =>
       m.corporateCla?.status === "ACTIVE" &&
       m.corporateCla.signature != null &&
-      m.corporateCla.signature.documentVersion >= minCclaVersion
+      m.corporateCla.signature.version?.resignRequired === false
   );
   if (covering && covering.corporateCla) {
     return {

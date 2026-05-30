@@ -12,13 +12,16 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { SubmitButton } from "@/components/ui/submit-button";
-import { Badge } from "@/components/ui/badge";
 import { FormBuilder } from "../form/builder";
 import { parseFormSchema } from "@/lib/applications/schema";
 import { VersionEditor } from "./version-editor";
+import { RepoSourcePanel } from "./repo-source-panel";
+import { RepoFilePublishForm } from "./repo-file-publish-form";
+import { VersionHistory, type HistoryVersion } from "./version-history";
+import { PendingChanges, type PendingItem } from "./pending-changes";
+import type { PriorVersion } from "./prior-version-resign-list";
 import {
   updateClaSettings,
-  publishClaVersion,
   saveIclaCustomFields,
   saveCclaCustomFields,
 } from "./actions";
@@ -34,7 +37,7 @@ export default async function ClaSettings({
   const project = await prisma.project.findUnique({ where: { id } });
   if (!project) return null;
 
-  const [repos, versions] = await Promise.all([
+  const [repos, versions, pending] = await Promise.all([
     prisma.repo.findMany({
       where: { projectId: id },
       orderBy: { fullName: "asc" },
@@ -49,18 +52,79 @@ export default async function ClaSettings({
         version: true,
         contentHash: true,
         sourceType: true,
+        sourceRepoId: true,
+        sourcePath: true,
+        sourceRef: true,
+        sourceCommitSha: true,
         requireResign: true,
+        resignRequired: true,
         publishedAt: true,
+      },
+    }),
+    prisma.claPendingChange.findMany({
+      where: { projectId: id, status: "PENDING" },
+      orderBy: { detectedAt: "desc" },
+      select: {
+        id: true,
+        kind: true,
+        sourcePath: true,
+        sourceRef: true,
+        detectedCommitSha: true,
+        detectedContent: true,
+        detectedAt: true,
       },
     }),
   ]);
 
+  const repoNameById = new Map(repos.map((r) => [r.id, r.fullName]));
   const currentIcla = versions.find(
     (v) => v.id === project.currentIclaVersionId
   );
   const currentCcla = versions.find(
     (v) => v.id === project.currentCclaVersionId
   );
+
+  // Prior versions per kind (for the "require re-sign for earlier versions"
+  // controls), newest first.
+  const priorVersions = (kind: "ICLA" | "CCLA"): PriorVersion[] =>
+    versions
+      .filter((v) => v.kind === kind)
+      .map((v) => ({
+        id: v.id,
+        version: v.version,
+        resignRequired: v.resignRequired,
+      }));
+
+  const historyVersions: HistoryVersion[] = versions.map((v) => ({
+    id: v.id,
+    kind: v.kind,
+    version: v.version,
+    contentHash: v.contentHash,
+    sourceType: v.sourceType,
+    sourcePath: v.sourcePath,
+    sourceRef: v.sourceRef,
+    sourceCommitSha: v.sourceCommitSha,
+    resignRequired: v.resignRequired,
+    isCurrent:
+      v.id === project.currentIclaVersionId ||
+      v.id === project.currentCclaVersionId,
+    publishedAt: v.publishedAt.toISOString(),
+    repoFullName: v.sourceRepoId ? repoNameById.get(v.sourceRepoId) ?? null : null,
+  }));
+
+  const pendingItems: PendingItem[] = pending.map((p) => ({
+    id: p.id,
+    kind: p.kind as "ICLA" | "CCLA",
+    sourcePath: p.sourcePath,
+    sourceRef: p.sourceRef,
+    detectedCommitSha: p.detectedCommitSha,
+    detectedContent: p.detectedContent,
+    detectedAt: p.detectedAt.toISOString(),
+    currentVersionId:
+      p.kind === "ICLA"
+        ? project.currentIclaVersionId
+        : project.currentCclaVersionId,
+  }));
 
   return (
     <div className="space-y-6">
@@ -78,6 +142,14 @@ export default async function ClaSettings({
         <CardContent>
           <form action={updateClaSettings} className="space-y-4">
             <input type="hidden" name="projectId" value={project.id} />
+            {/* Preserve the repo-file source policy (edited in the Source card)
+                so saving general settings doesn't reset it. */}
+            {project.claAutoVersionRequiresResign && (
+              <input type="hidden" name="claAutoVersionRequiresResign" value="1" />
+            )}
+            {project.claRepoFileReviewMode && (
+              <input type="hidden" name="claRepoFileReviewMode" value="1" />
+            )}
 
             <label className="flex items-start gap-3 text-sm">
               <input
@@ -298,6 +370,26 @@ export default async function ClaSettings({
             <label className="flex items-start gap-3 text-sm">
               <input
                 type="checkbox"
+                name="claRepoFileReviewMode"
+                value="1"
+                defaultChecked={project.claRepoFileReviewMode}
+                className="mt-0.5 h-4 w-4 rounded border-border"
+              />
+              <span>
+                <span className="font-medium">
+                  Review &amp; approve repo-file changes
+                </span>
+                <span className="block text-xs text-muted-foreground">
+                  When a tracked CLA file changes on push (or you click Sync
+                  now), queue it for review instead of auto-publishing. You then
+                  approve it, choosing whether to require re-sign. Off =
+                  auto-publish on change.
+                </span>
+              </span>
+            </label>
+            <label className="flex items-start gap-3 text-sm">
+              <input
+                type="checkbox"
                 name="claAutoVersionRequiresResign"
                 value="1"
                 defaultChecked={project.claAutoVersionRequiresResign}
@@ -305,17 +397,33 @@ export default async function ClaSettings({
               />
               <span>
                 <span className="font-medium">
-                  Repo-file auto-versions require re-sign
+                  Auto-published versions require re-sign
                 </span>
                 <span className="block text-xs text-muted-foreground">
-                  When a tracked CLA file changes on push and a new version is
-                  auto-published, force everyone to re-sign. Off = keep existing
-                  signatures valid.
+                  When a change is auto-published (review mode off), force
+                  everyone to re-sign. In review mode this only pre-fills the
+                  approval default. Off = keep existing signatures valid.
                 </span>
               </span>
             </label>
-            <SubmitButton>Save auto-version policy</SubmitButton>
+            <SubmitButton>Save repo-file policy</SubmitButton>
           </form>
+
+          {/* Live source view + drift + manual sync, per repo-file kind. */}
+          {currentIcla?.sourceType === "repo_file" && (
+            <RepoSourcePanel
+              projectId={project.id}
+              kind="ICLA"
+              label="Individual CLA"
+            />
+          )}
+          {currentCcla?.sourceType === "repo_file" && (
+            <RepoSourcePanel
+              projectId={project.id}
+              kind="CCLA"
+              label="Corporate CLA"
+            />
+          )}
 
           <div className="space-y-3 rounded-md border border-dashed border-border p-4">
             <h4 className="text-sm font-medium">Publish from a repo file</h4>
@@ -336,82 +444,24 @@ export default async function ClaSettings({
                 .
               </p>
             ) : (
-              <form
-                action={publishClaVersion}
-                className="grid grid-cols-1 gap-3 md:grid-cols-2"
-              >
-                <input type="hidden" name="projectId" value={project.id} />
-                <input type="hidden" name="sourceType" value="repo_file" />
-                <div className="space-y-1">
-                  <Label htmlFor="rf-kind">Agreement</Label>
-                  <select
-                    id="rf-kind"
-                    name="kind"
-                    defaultValue="ICLA"
-                    className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm"
-                  >
-                    <option value="ICLA">Individual (ICLA)</option>
-                    <option value="CCLA">Corporate (CCLA)</option>
-                  </select>
-                </div>
-                <div className="space-y-1">
-                  <Label htmlFor="rf-repo">Repository</Label>
-                  <select
-                    id="rf-repo"
-                    name="sourceRepoId"
-                    className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm"
-                  >
-                    {repos.map((r) => (
-                      <option
-                        key={r.id}
-                        value={r.id}
-                        disabled={!r.installationId}
-                      >
-                        {r.fullName}
-                        {r.installationId ? "" : " (App not installed)"}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="space-y-1">
-                  <Label htmlFor="rf-path">File path</Label>
-                  <Input
-                    id="rf-path"
-                    name="sourcePath"
-                    defaultValue="CLA.md"
-                    placeholder="CLA.md"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label htmlFor="rf-ref">Ref (optional)</Label>
-                  <Input
-                    id="rf-ref"
-                    name="sourceRef"
-                    placeholder="(default branch)"
-                  />
-                </div>
-                <label className="flex items-start gap-3 text-sm md:col-span-2">
-                  <input
-                    type="checkbox"
-                    name="requireResign"
-                    value="1"
-                    className="mt-0.5 h-4 w-4 rounded border-border"
-                  />
-                  <span>
-                    <span className="font-medium">Require re-sign</span>
-                    <span className="block text-xs text-muted-foreground">
-                      Invalidates prior signatures of this kind.
-                    </span>
-                  </span>
-                </label>
-                <div className="md:col-span-2">
-                  <SubmitButton size="sm">Fetch &amp; publish</SubmitButton>
-                </div>
-              </form>
+              <RepoFilePublishForm
+                projectId={project.id}
+                repos={repos}
+                iclaVersions={priorVersions("ICLA")}
+                cclaVersions={priorVersions("CCLA")}
+              />
             )}
           </div>
         </CardContent>
       </Card>
+
+      {/* ----- Repo-file changes to review (review mode) ----- */}
+      <PendingChanges
+        projectId={project.id}
+        items={pendingItems}
+        iclaVersions={priorVersions("ICLA")}
+        cclaVersions={priorVersions("CCLA")}
+      />
 
       {/* ----- ICLA editor ----- */}
       <Card>
@@ -435,6 +485,7 @@ export default async function ClaSettings({
                   }
                 : null
             }
+            priorVersions={priorVersions("ICLA")}
           />
         </CardContent>
       </Card>
@@ -461,6 +512,7 @@ export default async function ClaSettings({
                   }
                 : null
             }
+            priorVersions={priorVersions("CCLA")}
           />
         </CardContent>
       </Card>
@@ -509,49 +561,12 @@ export default async function ClaSettings({
           <CardTitle className="text-base">Version history</CardTitle>
           <CardDescription>
             Every published version is retained immutably with its content hash.
+            Expand a version to preview its text, and mark earlier versions as
+            requiring a re-sign (for example a version published in error).
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {versions.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              No versions have been published yet.
-            </p>
-          ) : (
-            <ul className="divide-y divide-border rounded-md border border-border">
-              {versions.map((v) => {
-                const isCurrent =
-                  v.id === project.currentIclaVersionId ||
-                  v.id === project.currentCclaVersionId;
-                return (
-                  <li
-                    key={v.id}
-                    className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-xs"
-                  >
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Badge variant="outline">{v.kind}</Badge>
-                      <span className="font-medium">v{v.version}</span>
-                      <span className="font-mono text-muted-foreground">
-                        {v.contentHash.slice(0, 12)}
-                      </span>
-                      <span className="text-muted-foreground">
-                        {v.sourceType}
-                      </span>
-                      {v.requireResign && (
-                        <Badge variant="warning">required re-sign</Badge>
-                      )}
-                      {isCurrent && <Badge variant="success">current</Badge>}
-                    </div>
-                    <span className="text-muted-foreground">
-                      {v.publishedAt
-                        .toISOString()
-                        .replace("T", " ")
-                        .slice(0, 16)}
-                    </span>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
+          <VersionHistory projectId={project.id} versions={historyVersions} />
         </CardContent>
       </Card>
 
