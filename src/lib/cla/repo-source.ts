@@ -5,12 +5,15 @@ import { getInstallationOctokit } from "@/lib/github/app";
 import { recordAudit } from "@/lib/audit";
 import { notifyProjectReviewers } from "@/lib/notifications/inbox";
 import { publishClaVersion } from "@/lib/cla/mutations";
+import { onClaCoverageRevoked } from "@/lib/cla/post-sign";
 
 /**
  * Fetch a single file's UTF-8 content (and blob sha) from a repo via the
  * installation Octokit. Returns null if the path is missing or not a file.
+ *
+ * Exported so the publish/preview/sync server actions share one fetch path.
  */
-async function fetchRepoFile(args: {
+export async function fetchRepoFile(args: {
   installationId: number;
   fullName: string;
   path: string;
@@ -52,15 +55,235 @@ async function fetchRepoFile(args: {
   }
 }
 
-function sha256Hex(input: string): string {
+export function sha256Hex(input: string): string {
   return createHash("sha256").update(input).digest("hex");
 }
+
+/** Per-kind outcome of a sync (push or manual) over a repo-file CLA source. */
+export type SyncOutcome =
+  | { kind: "ICLA" | "CCLA"; status: "unchanged" }
+  | { kind: "ICLA" | "CCLA"; status: "published"; version: number }
+  | { kind: "ICLA" | "CCLA"; status: "pending"; pendingChangeId: string }
+  | { kind: "ICLA" | "CCLA"; status: "error"; message: string };
+
+type RepoRef = { id: string; fullName: string; installationId: number };
+type ProjectFlags = {
+  id: string;
+  claAutoVersionRequiresResign: boolean;
+  claRepoFileReviewMode: boolean;
+};
+type SourceVersion = {
+  id: string;
+  kind: string;
+  sourceType: string;
+  sourceRepoId: string | null;
+  sourcePath: string | null;
+  sourceRef: string | null;
+  contentHash: string;
+};
+
+/**
+ * Detect drift on one repo-file-backed current version and apply the project's
+ * policy. The single code path shared by the push webhook and the manual Sync
+ * action so the two never diverge:
+ *  - unchanged content (or empty/whitespace fetch failure) -> no-op, and any
+ *    stale PENDING change for the same (project, kind, path) is superseded;
+ *  - review mode -> upsert ONE pending change (dedup by project+kind+path);
+ *  - auto mode -> publish a new version (requireResign from the project flag)
+ *    and re-gate signers whose coverage was revoked.
+ *
+ * Never throws: returns an `error` outcome instead, so the best-effort push
+ * caller and the admin-facing manual caller can each decide what to surface.
+ */
+async function detectAndApply(args: {
+  repo: RepoRef;
+  project: ProjectFlags;
+  version: SourceVersion;
+}): Promise<SyncOutcome | null> {
+  const { repo, project, version: v } = args;
+  const kind = v.kind as "ICLA" | "CCLA";
+  if (!v.sourcePath) return null;
+
+  const fetched = await fetchRepoFile({
+    installationId: repo.installationId,
+    fullName: repo.fullName,
+    path: v.sourcePath,
+    ref: v.sourceRef,
+  });
+  if (!fetched || !fetched.content.trim()) {
+    return { kind, status: "error", message: "Could not read the file from the repo." };
+  }
+
+  // No-op when the content is unchanged. Also supersede any open pending change
+  // (e.g. the file was edited then reverted to the published content).
+  if (sha256Hex(fetched.content) === v.contentHash) {
+    await supersedePendingChanges(project.id, kind, v.sourcePath);
+    return { kind, status: "unchanged" };
+  }
+
+  if (project.claRepoFileReviewMode) {
+    const pending = await upsertPendingChange({
+      projectId: project.id,
+      kind,
+      sourceRepoId: repo.id,
+      sourcePath: v.sourcePath,
+      sourceRef: v.sourceRef,
+      detectedCommitSha: fetched.sha,
+      detectedContent: fetched.content,
+      contentHash: sha256Hex(fetched.content),
+    });
+    await recordAudit({
+      projectId: project.id,
+      actorId: null,
+      kind: "cla.pending_change_detected",
+      payload: {
+        kind,
+        repo: repo.fullName,
+        path: v.sourcePath,
+        pendingChangeId: pending.id,
+      },
+    }).catch(() => undefined);
+    await notifyProjectReviewers({
+      projectId: project.id,
+      kind: "cla.pending_change",
+      payload: { kind, repo: repo.fullName, path: v.sourcePath },
+    }).catch(() => undefined);
+    return { kind, status: "pending", pendingChangeId: pending.id };
+  }
+
+  // Auto mode: publish a new version.
+  const requireResign = project.claAutoVersionRequiresResign;
+  const result = await publishClaVersion({
+    projectId: project.id,
+    kind,
+    bodyMarkdown: fetched.content,
+    sourceType: "repo_file",
+    sourceRepoId: repo.id,
+    sourcePath: v.sourcePath,
+    sourceRef: v.sourceRef,
+    sourceCommitSha: fetched.sha,
+    requireResign,
+    actorUserId: null,
+  });
+
+  await recordAudit({
+    projectId: project.id,
+    actorId: null,
+    kind: "cla.version_published",
+    payload: {
+      kind,
+      version: result.version,
+      contentHash: result.contentHash,
+      source: "repo_file_auto",
+      repo: repo.fullName,
+      path: v.sourcePath,
+      requireResign,
+    },
+  }).catch(() => undefined);
+
+  if (requireResign) {
+    await notifyProjectReviewers({
+      projectId: project.id,
+      kind: "cla.resign_required",
+      payload: {
+        kind,
+        version: result.version,
+        reason: "auto-published from repo file; re-sign required",
+      },
+    }).catch(() => undefined);
+    // Re-gate contributors whose coverage was revoked by the forced re-sign.
+    if (result.affectedGhIds.length > 0) {
+      await onClaCoverageRevoked({
+        projectId: project.id,
+        ghIds: result.affectedGhIds,
+      }).catch(() => undefined);
+    }
+  }
+
+  return { kind, status: "published", version: result.version };
+}
+
+/**
+ * Upsert the single PENDING change for (projectId, kind, sourcePath): refresh
+ * the existing row in place across repeated pushes, else create one. Prisma has
+ * no portable partial-unique on status=PENDING, so we find-then-write.
+ */
+async function upsertPendingChange(a: {
+  projectId: string;
+  kind: "ICLA" | "CCLA";
+  sourceRepoId: string;
+  sourcePath: string;
+  sourceRef: string | null;
+  detectedCommitSha: string | null;
+  detectedContent: string;
+  contentHash: string;
+}): Promise<{ id: string }> {
+  const existing = await prisma.claPendingChange.findFirst({
+    where: {
+      projectId: a.projectId,
+      kind: a.kind,
+      sourcePath: a.sourcePath,
+      status: "PENDING",
+    },
+    select: { id: true },
+  });
+  if (existing) {
+    await prisma.claPendingChange.update({
+      where: { id: existing.id },
+      data: {
+        sourceRepoId: a.sourceRepoId,
+        sourceRef: a.sourceRef,
+        detectedCommitSha: a.detectedCommitSha,
+        detectedContent: a.detectedContent,
+        contentHash: a.contentHash,
+      },
+    });
+    return existing;
+  }
+  return prisma.claPendingChange.create({
+    data: {
+      projectId: a.projectId,
+      kind: a.kind,
+      sourceRepoId: a.sourceRepoId,
+      sourcePath: a.sourcePath,
+      sourceRef: a.sourceRef,
+      detectedCommitSha: a.detectedCommitSha,
+      detectedContent: a.detectedContent,
+      contentHash: a.contentHash,
+    },
+    select: { id: true },
+  });
+}
+
+/** Mark any open PENDING change for (project, kind, path) as SUPERSEDED. */
+async function supersedePendingChanges(
+  projectId: string,
+  kind: "ICLA" | "CCLA",
+  sourcePath: string
+): Promise<void> {
+  await prisma.claPendingChange
+    .updateMany({
+      where: { projectId, kind, sourcePath, status: "PENDING" },
+      data: { status: "SUPERSEDED", reviewedAt: new Date() },
+    })
+    .catch(() => undefined);
+}
+
+const SOURCE_VERSION_SELECT = {
+  id: true,
+  kind: true,
+  sourceType: true,
+  sourceRepoId: true,
+  sourcePath: true,
+  sourceRef: true,
+  contentHash: true,
+} as const;
 
 /**
  * Auto-track + auto-version: when a push lands on the branch that backs a
  * project's repo-file-sourced CLA and the configured file changed, fetch the
- * new text and publish a new version (if the content actually changed). The
- * re-sign behavior follows the project's `claAutoVersionRequiresResign` flag.
+ * new text and apply the project's policy (auto-publish, or queue a pending
+ * change in review mode).
  *
  * Best-effort and defensive: any failure is logged, never thrown. This runs
  * inside the GitHub `push` webhook handler.
@@ -86,6 +309,7 @@ export async function syncRepoFileClaForPush(args: {
           id: true,
           claEnabled: true,
           claAutoVersionRequiresResign: true,
+          claRepoFileReviewMode: true,
           currentIclaVersionId: true,
           currentCclaVersionId: true,
         },
@@ -104,16 +328,19 @@ export async function syncRepoFileClaForPush(args: {
 
   const versions = await prisma.claDocumentVersion.findMany({
     where: { id: { in: versionIds } },
-    select: {
-      id: true,
-      kind: true,
-      sourceType: true,
-      sourceRepoId: true,
-      sourcePath: true,
-      sourceRef: true,
-      contentHash: true,
-    },
+    select: SOURCE_VERSION_SELECT,
   });
+
+  const repoRef: RepoRef = {
+    id: repo.id,
+    fullName: repo.fullName,
+    installationId: repo.installationId,
+  };
+  const projectFlags: ProjectFlags = {
+    id: project.id,
+    claAutoVersionRequiresResign: project.claAutoVersionRequiresResign,
+    claRepoFileReviewMode: project.claRepoFileReviewMode,
+  };
 
   for (const v of versions) {
     if (v.sourceType !== "repo_file") continue;
@@ -128,69 +355,124 @@ export async function syncRepoFileClaForPush(args: {
     // Skip when we know the push didn't touch the file.
     if (args.changedPaths && !args.changedPaths.has(v.sourcePath)) continue;
 
-    const fetched = await fetchRepoFile({
-      installationId: repo.installationId,
-      fullName: repo.fullName,
-      path: v.sourcePath,
-      ref: v.sourceRef,
-    });
-    if (!fetched || !fetched.content.trim()) continue;
-
-    // No-op when the content is unchanged (avoid version churn on unrelated
-    // edits to the same file path that produce identical bytes).
-    if (sha256Hex(fetched.content) === v.contentHash) continue;
-
-    const kind = v.kind as "ICLA" | "CCLA";
-    const requireResign = project.claAutoVersionRequiresResign;
     try {
-      const result = await publishClaVersion({
-        projectId: project.id,
-        kind,
-        bodyMarkdown: fetched.content,
-        sourceType: "repo_file",
-        sourceRepoId: repo.id,
-        sourcePath: v.sourcePath,
-        sourceRef: v.sourceRef,
-        sourceCommitSha: fetched.sha,
-        requireResign,
-        actorUserId: null,
+      const outcome = await detectAndApply({
+        repo: repoRef,
+        project: projectFlags,
+        version: v,
       });
-      published.push({ kind, version: result.version });
-
-      await recordAudit({
-        projectId: project.id,
-        actorId: null,
-        kind: "cla.version_published",
-        payload: {
-          kind,
-          version: result.version,
-          contentHash: result.contentHash,
-          source: "repo_file_auto",
-          repo: repo.fullName,
-          path: v.sourcePath,
-          requireResign,
-        },
-      }).catch(() => undefined);
-
-      // Only the require-resign case is actionable for prior signers.
-      if (requireResign) {
-        await notifyProjectReviewers({
-          projectId: project.id,
-          kind: "cla.resign_required",
-          payload: {
-            kind,
-            version: result.version,
-            reason: "auto-published from repo file; re-sign required",
-          },
-        }).catch(() => undefined);
+      if (outcome?.status === "published") {
+        published.push({ kind: outcome.kind, version: outcome.version });
       }
     } catch (err) {
       logger.warn(
-        { err, projectId: project.id, kind, repo: repo.fullName },
+        { err, projectId: project.id, kind: v.kind, repo: repo.fullName },
         "cla: auto-version publish failed"
       );
     }
   }
 
   return { published };
+}
+
+/**
+ * Manual "Sync now": re-fetch the live repo file for each repo-file-sourced
+ * current version of a project (optionally one kind) and apply the project's
+ * policy. Unlike the push path this is admin-initiated, so errors are surfaced
+ * in the returned structured result rather than swallowed. Runs the SAME
+ * detect/apply core as the push sync.
+ */
+export async function syncClaRepoSourceNow(args: {
+  projectId: string;
+  kind?: "ICLA" | "CCLA";
+}): Promise<{ results: SyncOutcome[] }> {
+  const project = await prisma.project.findUnique({
+    where: { id: args.projectId },
+    select: {
+      id: true,
+      claAutoVersionRequiresResign: true,
+      claRepoFileReviewMode: true,
+      currentIclaVersionId: true,
+      currentCclaVersionId: true,
+    },
+  });
+  if (!project) return { results: [] };
+
+  const versionIds = [
+    project.currentIclaVersionId,
+    project.currentCclaVersionId,
+  ].filter((v): v is string => !!v);
+  if (versionIds.length === 0) return { results: [] };
+
+  const versions = await prisma.claDocumentVersion.findMany({
+    where: { id: { in: versionIds } },
+    select: SOURCE_VERSION_SELECT,
+  });
+
+  // ClaDocumentVersion.sourceRepoId is a plain scalar (no relation), so resolve
+  // the source repos in one query and index them by id.
+  const repoIds = Array.from(
+    new Set(versions.map((v) => v.sourceRepoId).filter((id): id is string => !!id))
+  );
+  const repos = repoIds.length
+    ? await prisma.repo.findMany({
+        where: { id: { in: repoIds } },
+        select: { id: true, fullName: true, installationId: true },
+      })
+    : [];
+  const repoById = new Map(repos.map((r) => [r.id, r]));
+
+  const projectFlags: ProjectFlags = {
+    id: project.id,
+    claAutoVersionRequiresResign: project.claAutoVersionRequiresResign,
+    claRepoFileReviewMode: project.claRepoFileReviewMode,
+  };
+
+  const results: SyncOutcome[] = [];
+  for (const v of versions) {
+    const kind = v.kind as "ICLA" | "CCLA";
+    if (args.kind && kind !== args.kind) continue;
+    if (v.sourceType !== "repo_file") continue;
+    if (!v.sourcePath || !v.sourceRepoId) continue;
+    const sourceRepo = repoById.get(v.sourceRepoId);
+    if (!sourceRepo || sourceRepo.installationId == null) {
+      results.push({
+        kind,
+        status: "error",
+        message: "The source repo has no GitHub App installation.",
+      });
+      continue;
+    }
+    try {
+      const outcome = await detectAndApply({
+        repo: {
+          id: sourceRepo.id,
+          fullName: sourceRepo.fullName,
+          installationId: sourceRepo.installationId,
+        },
+        project: projectFlags,
+        version: v,
+      });
+      if (outcome) results.push(outcome);
+    } catch (err) {
+      logger.warn(
+        { err, projectId: project.id, kind, repo: sourceRepo.fullName },
+        "cla: manual sync failed"
+      );
+      results.push({
+        kind,
+        status: "error",
+        message: "Sync failed; see server logs.",
+      });
+    }
+  }
+
+  await recordAudit({
+    projectId: project.id,
+    actorId: null,
+    kind: "cla.repo_sync_run",
+    payload: { results },
+  }).catch(() => undefined);
+
+  return { results };
 }
