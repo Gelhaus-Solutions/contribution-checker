@@ -51,6 +51,8 @@ export type AuditKind =
   | "cla.waiver_granted"
   | "cla.waiver_revoked"
   | "cla.signatures_exported"
+  | "cla.notify_unsigned_started"
+  | "cla.notify_unsigned_completed"
   // App-level (projectId may be null)
   | "vault.resolution_failed"
   | "vault.cache_invalidated";

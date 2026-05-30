@@ -43,7 +43,7 @@ function statusOf(e: unknown): number | undefined {
 export async function closePullRequest(
   ref: RepoRef,
   prNumber: number,
-  comment?: string
+  comment?: string,
 ): Promise<void> {
   const octokit = await getInstallationOctokit(ref.installationId);
   if (comment) {
@@ -77,7 +77,7 @@ export async function closePullRequest(
 export async function reopenPullRequest(
   ref: RepoRef,
   prNumber: number,
-  comment?: string
+  comment?: string,
 ): Promise<void> {
   const octokit = await getInstallationOctokit(ref.installationId);
   try {
@@ -112,7 +112,7 @@ export async function ensureLabel(
   ref: RepoRef,
   name: string,
   color = "ededed",
-  description?: string
+  description?: string,
 ): Promise<void> {
   const octokit = await getInstallationOctokit(ref.installationId);
   try {
@@ -132,7 +132,7 @@ export async function ensureLabel(
           description,
         })
         .catch((createErr: unknown) =>
-          logger.debug({ err: createErr }, "label create race")
+          logger.debug({ err: createErr }, "label create race"),
         );
     } else {
       throw e;
@@ -143,7 +143,7 @@ export async function ensureLabel(
 export async function setLabels(
   ref: RepoRef,
   prNumber: number,
-  labels: string[]
+  labels: string[],
 ): Promise<void> {
   const octokit = await getInstallationOctokit(ref.installationId);
   // Preserve any labels not managed by the bot. The bot only ever owns
@@ -160,32 +160,38 @@ export async function setLabels(
     .catch(() => [] as string[]);
   const preserved = existing.filter((n) => !n.startsWith("contribution:"));
   const merged = Array.from(new Set([...preserved, ...labels]));
-  await octokit.request("PUT /repos/{owner}/{repo}/issues/{issue_number}/labels", {
-    owner: ref.owner,
-    repo: ref.repo,
-    issue_number: prNumber,
-    labels: merged,
-  });
+  await octokit.request(
+    "PUT /repos/{owner}/{repo}/issues/{issue_number}/labels",
+    {
+      owner: ref.owner,
+      repo: ref.repo,
+      issue_number: prNumber,
+      labels: merged,
+    },
+  );
 }
 
 export async function addLabel(
   ref: RepoRef,
   prNumber: number,
-  label: string
+  label: string,
 ): Promise<void> {
   const octokit = await getInstallationOctokit(ref.installationId);
-  await octokit.request("POST /repos/{owner}/{repo}/issues/{issue_number}/labels", {
-    owner: ref.owner,
-    repo: ref.repo,
-    issue_number: prNumber,
-    labels: [label],
-  });
+  await octokit.request(
+    "POST /repos/{owner}/{repo}/issues/{issue_number}/labels",
+    {
+      owner: ref.owner,
+      repo: ref.repo,
+      issue_number: prNumber,
+      labels: [label],
+    },
+  );
 }
 
 export async function removeLabelIfPresent(
   ref: RepoRef,
   prNumber: number,
-  label: string
+  label: string,
 ): Promise<void> {
   const octokit = await getInstallationOctokit(ref.installationId);
   await octokit
@@ -196,7 +202,7 @@ export async function removeLabelIfPresent(
         repo: ref.repo,
         issue_number: prNumber,
         name: label,
-      }
+      },
     )
     .catch((e: unknown) => {
       if (statusOf(e) !== 404) throw e;
@@ -206,7 +212,7 @@ export async function removeLabelIfPresent(
 export async function commentOnPr(
   ref: RepoRef,
   prNumber: number,
-  body: string
+  body: string,
 ): Promise<void> {
   const octokit = await getInstallationOctokit(ref.installationId);
   await octokit.request(
@@ -216,8 +222,45 @@ export async function commentOnPr(
       repo: ref.repo,
       issue_number: prNumber,
       body,
-    }
+    },
   );
+}
+
+/**
+ * Whether any existing comment on the PR contains `needle` (e.g. the CLA
+ * signing URL). Used to avoid posting a duplicate CLA reminder when one was
+ * already posted out-of-band: a prior webhook re-evaluation, a manual
+ * re-evaluation, or an earlier sweep. Best-effort: on API failure it returns
+ * false so the caller falls back to its own (DB-state) dedup.
+ */
+export async function prHasCommentContaining(
+  ref: RepoRef,
+  prNumber: number,
+  needle: string,
+): Promise<boolean> {
+  try {
+    const octokit = await getInstallationOctokit(ref.installationId);
+    // Single page (up to 100). The DB-state check is the primary dedup; this is
+    // a secondary net, so one page is an acceptable bound on API cost.
+    const res = await octokit.request(
+      "GET /repos/{owner}/{repo}/issues/{issue_number}/comments",
+      {
+        owner: ref.owner,
+        repo: ref.repo,
+        issue_number: prNumber,
+        per_page: 100,
+      },
+    );
+    recordGithubMetric("list_comments", "ok", ref, res.status);
+    const comments = res.data as Array<{ body?: string | null }>;
+    return comments.some(
+      (c) => typeof c.body === "string" && c.body.includes(needle),
+    );
+  } catch (e) {
+    recordGithubMetric("list_comments", "error", ref, statusOf(e));
+    logger.warn({ err: e, prNumber }, "prHasCommentContaining failed");
+    return false;
+  }
 }
 
 // ----- Check Runs -----
@@ -251,7 +294,7 @@ export type CheckRunInput = {
 export async function upsertCheckRun(
   ref: RepoRef,
   input: CheckRunInput,
-  existingId: string | null
+  existingId: string | null,
 ): Promise<string | null> {
   const octokit = await getInstallationOctokit(ref.installationId);
   const body = {
@@ -275,7 +318,7 @@ export async function upsertCheckRun(
           repo: ref.repo,
           check_run_id: Number(existingId),
           ...body,
-        }
+        },
       );
       recordGithubMetric("check_run.update", "ok", ref);
       Sentry.metrics.count("github.check_run", 1, {
@@ -288,10 +331,11 @@ export async function upsertCheckRun(
       });
       return String((res.data as { id: number | string }).id);
     }
-    const res = await octokit.request(
-      "POST /repos/{owner}/{repo}/check-runs",
-      { owner: ref.owner, repo: ref.repo, ...body }
-    );
+    const res = await octokit.request("POST /repos/{owner}/{repo}/check-runs", {
+      owner: ref.owner,
+      repo: ref.repo,
+      ...body,
+    });
     recordGithubMetric("check_run.create", "ok", ref);
     Sentry.metrics.count("github.check_run", 1, {
       attributes: {
@@ -313,12 +357,12 @@ export async function upsertCheckRun(
     if (existingId && status === 404) {
       logger.warn(
         { ref, existingId, headSha: input.headSha },
-        "check-run update 404 (stale id): recreating"
+        "check-run update 404 (stale id): recreating",
       );
       try {
         const res = await octokit.request(
           "POST /repos/{owner}/{repo}/check-runs",
-          { owner: ref.owner, repo: ref.repo, ...body }
+          { owner: ref.owner, repo: ref.repo, ...body },
         );
         recordGithubMetric("check_run.create", "ok", ref);
         Sentry.metrics.count("github.check_run", 1, {
@@ -336,7 +380,7 @@ export async function upsertCheckRun(
         if (s2 === 403 || s2 === 404) {
           logger.warn(
             { err: e2, ref, headSha: input.headSha },
-            "check-run recreate forbidden: installation likely missing checks:write"
+            "check-run recreate forbidden: installation likely missing checks:write",
           );
           return null;
         }
@@ -353,7 +397,7 @@ export async function upsertCheckRun(
     if (status === 403 || status === 404) {
       logger.warn(
         { err: e, ref, headSha: input.headSha },
-        "check-run publish forbidden: installation likely missing checks:write"
+        "check-run publish forbidden: installation likely missing checks:write",
       );
       return null;
     }
@@ -361,7 +405,10 @@ export async function upsertCheckRun(
   }
 }
 
-const checksPermCache = new Map<number, { value: boolean; expiresAt: number }>();
+const checksPermCache = new Map<
+  number,
+  { value: boolean; expiresAt: number }
+>();
 const CHECKS_PERM_TTL_MS = 5 * 60 * 1000;
 
 /**
@@ -370,17 +417,21 @@ const CHECKS_PERM_TTL_MS = 5 * 60 * 1000;
  * permission isn't granted (existing installs that haven't accepted).
  */
 export async function installationHasChecksWrite(
-  installationId: number
+  installationId: number,
 ): Promise<boolean> {
   const now = Date.now();
   const hit = checksPermCache.get(installationId);
   if (hit && hit.expiresAt > now) return hit.value;
   const octokit = await getInstallationOctokit(installationId);
   try {
-    const res = await octokit.request("GET /app/installations/{installation_id}", {
-      installation_id: installationId,
-    });
-    const perms = (res.data as { permissions?: Record<string, string> }).permissions;
+    const res = await octokit.request(
+      "GET /app/installations/{installation_id}",
+      {
+        installation_id: installationId,
+      },
+    );
+    const perms = (res.data as { permissions?: Record<string, string> })
+      .permissions;
     const value = perms?.checks === "write";
     checksPermCache.set(installationId, {
       value,

@@ -1,5 +1,6 @@
 import nodemailer from "nodemailer";
 import { env } from "@/lib/env";
+import { prisma } from "@/lib/db";
 import { getSecret } from "@/lib/vault/resolver";
 import { logger } from "@/lib/logger";
 
@@ -64,6 +65,24 @@ export async function sendEmail(args: {
     logger.warn({ err: e, to: args.to }, "email delivery failed");
     return false;
   }
+}
+
+/**
+ * Resolve a user's email and send them a message. No-ops when the user has no
+ * email on file (and `sendEmail` itself no-ops when SMTP is unconfigured), so
+ * callers can fire-and-forget. Used by the CLA applicant-reminder flow.
+ */
+export async function emailUserById(args: {
+  userId: string;
+  subject: string;
+  text: string;
+}): Promise<void> {
+  const u = await prisma.user.findUnique({
+    where: { id: args.userId },
+    select: { email: true },
+  });
+  if (!u?.email) return;
+  await sendEmail({ to: u.email, subject: args.subject, text: args.text });
 }
 
 export function applyUrl(slug: string): string {

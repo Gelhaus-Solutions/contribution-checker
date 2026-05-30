@@ -12,6 +12,8 @@ const publishDecisionCheck = vi.fn();
 const publishClaCheck = vi.fn();
 const invalidateClaCache = vi.fn();
 const notifyUser = vi.fn();
+const commentOnPr = vi.fn();
+const prHasCommentContaining = vi.fn();
 
 vi.mock("@/lib/db", () => ({
   prisma: {
@@ -36,6 +38,9 @@ vi.mock("@/lib/github/pr-actions", () => ({
   ensureLabel: (...args: unknown[]) => ensureLabel(...args),
   removeLabelIfPresent: (...args: unknown[]) => removeLabelIfPresent(...args),
   setLabels: (...args: unknown[]) => setLabels(...args),
+  commentOnPr: (...args: unknown[]) => commentOnPr(...args),
+  prHasCommentContaining: (...args: unknown[]) =>
+    prHasCommentContaining(...args),
   repoRef: (fullName: string, installationId: number) => {
     const [owner, repo] = fullName.split("/");
     return { owner, repo, installationId };
@@ -64,7 +69,11 @@ vi.mock("@/lib/cla/status", () => ({
   invalidateClaCache: (...args: unknown[]) => invalidateClaCache(...args),
 }));
 
-import { onClaCoverageChanged, onClaCoverageRevoked } from "@/lib/cla/post-sign";
+import {
+  onClaCoverageChanged,
+  onClaCoverageRevoked,
+  reapplyClaGateForApprovedAuthor,
+} from "@/lib/cla/post-sign";
 
 const baseProject = {
   id: "proj1",
@@ -76,7 +85,14 @@ const baseProject = {
   labelClaPending: "contribution:cla-pending",
 };
 
-function check(id: string, repoId: string, prNumber: number, installationId = 11) {
+function check(
+  id: string,
+  repoId: string,
+  prNumber: number,
+  installationId = 11,
+  status = "CHECK_REQUIRED",
+  gateReason: string | null = "cla_required",
+) {
   return {
     id,
     repoId,
@@ -84,6 +100,8 @@ function check(id: string, repoId: string, prNumber: number, installationId = 11
     authorGhLogin: "octocat",
     authorGhId: 42,
     headSha: "sha-" + id,
+    status,
+    gateReason,
     repo: { id: repoId, fullName: "owner/r1", installationId },
   };
 }
@@ -101,6 +119,8 @@ beforeEach(() => {
   publishClaCheck.mockReset();
   invalidateClaCache.mockReset();
   notifyUser.mockReset();
+  commentOnPr.mockReset();
+  prHasCommentContaining.mockReset();
   removeLabelIfPresent.mockResolvedValue(undefined);
   setLabels.mockResolvedValue(undefined);
   ensureLabel.mockResolvedValue(undefined);
@@ -109,6 +129,8 @@ beforeEach(() => {
   publishClaCheck.mockResolvedValue(undefined);
   userFindMany.mockResolvedValue([]);
   notifyUser.mockResolvedValue(undefined);
+  commentOnPr.mockResolvedValue(undefined);
+  prHasCommentContaining.mockResolvedValue(false);
 });
 
 describe("onClaCoverageChanged", () => {
@@ -142,18 +164,16 @@ describe("onClaCoverageChanged", () => {
         prCheckId: "c1",
         state: "satisfied",
         claUrl: "https://example.com/p/acme/cla",
-      })
+      }),
     );
     expect(removeLabelIfPresent).toHaveBeenCalledWith(
       expect.anything(),
       7,
-      "contribution:cla-pending"
+      "contribution:cla-pending",
     );
-    expect(setLabels).toHaveBeenCalledWith(
-      expect.anything(),
-      7,
-      ["contribution:approved"]
-    );
+    expect(setLabels).toHaveBeenCalledWith(expect.anything(), 7, [
+      "contribution:approved",
+    ]);
     expect(prCheckUpdate).toHaveBeenCalledWith({
       where: { id: "c1" },
       data: { status: "APPROVED", gateReason: null },
@@ -197,7 +217,7 @@ describe("onClaCoverageChanged", () => {
     await onClaCoverageChanged({ projectId: "proj1", ghId: 42 });
 
     expect(publishClaCheck).toHaveBeenCalledWith(
-      expect.objectContaining({ prCheckId: "c1", state: "exempt" })
+      expect.objectContaining({ prCheckId: "c1", state: "exempt" }),
     );
   });
 
@@ -218,7 +238,7 @@ describe("onClaCoverageChanged", () => {
           status: "CHECK_REQUIRED",
           gateReason: { in: ["cla_required", "cla_stale"] },
         }),
-      })
+      }),
     );
   });
 
@@ -241,8 +261,16 @@ describe("onClaCoverageChanged", () => {
       check("c2", "repo1", 9),
     ]);
     decideForRepo
-      .mockResolvedValueOnce({ status: "APPROVED", repoId: "repo1", projectId: "proj1" })
-      .mockResolvedValueOnce({ status: "APPROVED", repoId: "repo1", projectId: "proj1" });
+      .mockResolvedValueOnce({
+        status: "APPROVED",
+        repoId: "repo1",
+        projectId: "proj1",
+      })
+      .mockResolvedValueOnce({
+        status: "APPROVED",
+        repoId: "repo1",
+        projectId: "proj1",
+      });
     publishDecisionCheck
       .mockRejectedValueOnce(new Error("boom"))
       .mockResolvedValueOnce(undefined);
@@ -271,7 +299,7 @@ describe("onClaCoverageRevoked", () => {
     expect(invalidateClaCache).toHaveBeenCalledTimes(2);
     expect(notifyUser).toHaveBeenCalledTimes(2);
     expect(notifyUser).toHaveBeenCalledWith(
-      expect.objectContaining({ userId: "u1", kind: "cla.resign_required" })
+      expect.objectContaining({ userId: "u1", kind: "cla.resign_required" }),
     );
   });
 
@@ -288,24 +316,25 @@ describe("onClaCoverageRevoked", () => {
       projectId: "proj1",
     });
 
-    const result = await onClaCoverageRevoked({ projectId: "proj1", ghIds: [42] });
+    const result = await onClaCoverageRevoked({
+      projectId: "proj1",
+      ghIds: [42],
+    });
 
     expect(result).toEqual({ regated: 1 });
     expect(publishDecisionCheck).toHaveBeenCalledTimes(1);
     expect(publishClaCheck).toHaveBeenCalledWith(
-      expect.objectContaining({ prCheckId: "c1", state: "stale" })
+      expect.objectContaining({ prCheckId: "c1", state: "stale" }),
     );
     expect(ensureLabel).toHaveBeenCalled();
     expect(removeLabelIfPresent).toHaveBeenCalledWith(
       expect.anything(),
       7,
-      "contribution:approved"
+      "contribution:approved",
     );
-    expect(setLabels).toHaveBeenCalledWith(
-      expect.anything(),
-      7,
-      ["contribution:cla-pending"]
-    );
+    expect(setLabels).toHaveBeenCalledWith(expect.anything(), 7, [
+      "contribution:cla-pending",
+    ]);
     expect(prCheckUpdate).toHaveBeenCalledWith({
       where: { id: "c1" },
       data: { status: "CHECK_REQUIRED", gateReason: "cla_stale" },
@@ -328,7 +357,7 @@ describe("onClaCoverageRevoked", () => {
     await onClaCoverageRevoked({ projectId: "proj1", ghIds: [42] });
 
     expect(publishClaCheck).toHaveBeenCalledWith(
-      expect.objectContaining({ prCheckId: "c1", state: "required" })
+      expect.objectContaining({ prCheckId: "c1", state: "required" }),
     );
   });
 
@@ -345,7 +374,10 @@ describe("onClaCoverageRevoked", () => {
       projectId: "proj1",
     });
 
-    const result = await onClaCoverageRevoked({ projectId: "proj1", ghIds: [42] });
+    const result = await onClaCoverageRevoked({
+      projectId: "proj1",
+      ghIds: [42],
+    });
 
     expect(result).toEqual({ regated: 0 });
     expect(publishDecisionCheck).not.toHaveBeenCalled();
@@ -368,7 +400,118 @@ describe("onClaCoverageRevoked", () => {
           authorGhId: { in: [42, 99] },
           status: "APPROVED",
         }),
-      })
+      }),
     );
+  });
+});
+
+describe("reapplyClaGateForApprovedAuthor", () => {
+  const projectWithRepo = () => ({
+    ...baseProject,
+    repos: [{ id: "repo1", fullName: "owner/r1", installationId: 11 }],
+  });
+
+  it("gates an approved PR and posts the reminder when none exists yet", async () => {
+    projectFindUnique.mockResolvedValueOnce(projectWithRepo());
+    prCheckFindMany.mockResolvedValueOnce([
+      check("c1", "repo1", 7, 11, "APPROVED", null),
+    ]);
+    decideForRepo.mockResolvedValueOnce({
+      status: "CHECK_REQUIRED",
+      reason: "cla_required",
+      repoId: "repo1",
+      projectId: "proj1",
+    });
+    prHasCommentContaining.mockResolvedValueOnce(false);
+
+    const result = await reapplyClaGateForApprovedAuthor({
+      projectId: "proj1",
+      ghId: 42,
+    });
+
+    expect(result).toEqual({ gated: 1 });
+    expect(prHasCommentContaining).toHaveBeenCalledWith(
+      expect.anything(),
+      7,
+      "https://example.com/p/acme/cla",
+    );
+    expect(commentOnPr).toHaveBeenCalledTimes(1);
+    expect(publishClaCheck).toHaveBeenCalledWith(
+      expect.objectContaining({ prCheckId: "c1", state: "required" }),
+    );
+    expect(setLabels).toHaveBeenCalledWith(expect.anything(), 7, [
+      "contribution:cla-pending",
+    ]);
+    expect(prCheckUpdate).toHaveBeenCalledWith({
+      where: { id: "c1" },
+      data: { status: "CHECK_REQUIRED", gateReason: "cla_required" },
+    });
+  });
+
+  it("does not re-post when the PR already has the CLA reminder on GitHub", async () => {
+    projectFindUnique.mockResolvedValueOnce(projectWithRepo());
+    prCheckFindMany.mockResolvedValueOnce([
+      check("c1", "repo1", 7, 11, "APPROVED", null),
+    ]);
+    decideForRepo.mockResolvedValueOnce({
+      status: "CHECK_REQUIRED",
+      reason: "cla_required",
+      repoId: "repo1",
+      projectId: "proj1",
+    });
+    prHasCommentContaining.mockResolvedValueOnce(true);
+
+    const result = await reapplyClaGateForApprovedAuthor({
+      projectId: "proj1",
+      ghId: 42,
+    });
+
+    expect(result).toEqual({ gated: 1 });
+    expect(commentOnPr).not.toHaveBeenCalled();
+    // The check + label are still (idempotently) applied.
+    expect(publishDecisionCheck).toHaveBeenCalledTimes(1);
+    expect(prCheckUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  it("skips the comment and the GitHub lookup when the row is already CLA-gated", async () => {
+    projectFindUnique.mockResolvedValueOnce(projectWithRepo());
+    prCheckFindMany.mockResolvedValueOnce([
+      check("c1", "repo1", 7, 11, "CHECK_REQUIRED", "cla_required"),
+    ]);
+    decideForRepo.mockResolvedValueOnce({
+      status: "CHECK_REQUIRED",
+      reason: "cla_required",
+      repoId: "repo1",
+      projectId: "proj1",
+    });
+
+    await reapplyClaGateForApprovedAuthor({ projectId: "proj1", ghId: 42 });
+
+    expect(prHasCommentContaining).not.toHaveBeenCalled();
+    expect(commentOnPr).not.toHaveBeenCalled();
+    expect(publishDecisionCheck).toHaveBeenCalledTimes(1);
+  });
+
+  it("never closes a PR: a now-denied decision is left untouched", async () => {
+    projectFindUnique.mockResolvedValueOnce(projectWithRepo());
+    prCheckFindMany.mockResolvedValueOnce([
+      check("c1", "repo1", 7, 11, "APPROVED", null),
+    ]);
+    decideForRepo.mockResolvedValueOnce({
+      status: "DENIED",
+      reason: "manual",
+      repoId: "repo1",
+      projectId: "proj1",
+    });
+
+    const result = await reapplyClaGateForApprovedAuthor({
+      projectId: "proj1",
+      ghId: 42,
+    });
+
+    expect(result).toEqual({ gated: 0 });
+    expect(commentOnPr).not.toHaveBeenCalled();
+    expect(publishDecisionCheck).not.toHaveBeenCalled();
+    expect(prCheckUpdate).not.toHaveBeenCalled();
   });
 });

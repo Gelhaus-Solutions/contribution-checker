@@ -2,12 +2,7 @@ import Link from "next/link";
 import { requireSession } from "@/lib/authz";
 import { listNotifications } from "@/lib/notifications/inbox";
 import { SiteHeader } from "@/components/site-header";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { SubmitButton } from "@/components/ui/submit-button";
 import { SearchInput } from "@/components/ui/search-input";
 import { Pagination } from "@/components/ui/pagination";
@@ -25,6 +20,10 @@ const KIND_LABELS: Record<string, string> = {
   "cla.ccla_signed": "Corporate CLA signed",
   "cla.ccla_approved": "Corporate CLA approved",
   "cla.ccla_rejected": "Corporate CLA rejected",
+  "cla.roster_changed": "Corporate CLA roster changed",
+  "cla.roster_disputed": "Corporate CLA membership disputed",
+  "cla.signature_required": "Sign the CLA",
+  "cla.resign_required": "Re-sign the CLA",
 };
 
 export default async function NotificationsPage({
@@ -69,7 +68,9 @@ export default async function NotificationsPage({
             </div>
             {items.length === 0 ? (
               <div className="px-6 py-6 text-sm text-muted-foreground">
-                {q ? "No notifications match your search." : "Nothing here yet."}
+                {q
+                  ? "No notifications match your search."
+                  : "Nothing here yet."}
               </div>
             ) : (
               <ul className="divide-y divide-border">
@@ -98,12 +99,15 @@ export default async function NotificationsPage({
                       ? payload.applicationId
                       : null;
                   const ghLogin =
-                    typeof payload.ghLogin === "string" ? payload.ghLogin : null;
+                    typeof payload.ghLogin === "string"
+                      ? payload.ghLogin
+                      : null;
                   const reason =
                     typeof payload.reason === "string" ? payload.reason : null;
 
                   // Reviewer-side notifications go to the application detail
-                  // page; applicant-side go to the public apply page.
+                  // page; CLA-sign reminders go to the standalone signing page;
+                  // other applicant-side go to the public apply page.
                   const href =
                     n.kind === "application.submitted" &&
                     projectId &&
@@ -111,9 +115,13 @@ export default async function NotificationsPage({
                       ? `/dashboard/projects/${projectId}/applications/${applicationId}`
                       : n.kind === "project.invited" && projectId
                         ? `/dashboard/projects/${projectId}`
-                        : projectSlug
-                          ? `/p/${projectSlug}`
-                          : null;
+                        : (n.kind === "cla.signature_required" ||
+                              n.kind === "cla.resign_required") &&
+                            projectSlug
+                          ? `/p/${projectSlug}/cla`
+                          : projectSlug
+                            ? `/p/${projectSlug}`
+                            : null;
 
                   const body = (
                     <>
@@ -122,7 +130,10 @@ export default async function NotificationsPage({
                           {KIND_LABELS[n.kind] ?? n.kind}
                         </div>
                         <time className="text-xs text-muted-foreground">
-                          {n.createdAt.toISOString().replace("T", " ").slice(0, 16)}
+                          {n.createdAt
+                            .toISOString()
+                            .replace("T", " ")
+                            .slice(0, 16)}
                         </time>
                       </div>
                       <div className="mt-1 text-muted-foreground">
@@ -132,9 +143,7 @@ export default async function NotificationsPage({
                             {ghLogin ? ` · @${ghLogin}` : ""}
                           </span>
                         )}
-                        {reason && (
-                          <div className="mt-1">Reason: {reason}</div>
-                        )}
+                        {reason && <div className="mt-1">Reason: {reason}</div>}
                       </div>
                     </>
                   );
@@ -173,4 +182,3 @@ export default async function NotificationsPage({
     </>
   );
 }
-

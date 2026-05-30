@@ -23,7 +23,11 @@ import {
   type SyncOutcome,
   type RepoSourceView,
 } from "@/lib/cla/repo-source";
-import { onClaCoverageChanged, onClaCoverageRevoked } from "@/lib/cla/post-sign";
+import {
+  onClaCoverageChanged,
+  onClaCoverageRevoked,
+} from "@/lib/cla/post-sign";
+import { sweepUnsignedApplicants } from "@/lib/cla/notify";
 
 function revalidateCla(projectId: string) {
   revalidatePath(`/dashboard/projects/${projectId}/cla`);
@@ -110,8 +114,7 @@ export async function updateClaSettings(formData: FormData) {
     claPlacementStandalone: formData.get("claPlacementStandalone") ?? undefined,
     claAutoVersionRequiresResign:
       formData.get("claAutoVersionRequiresResign") ?? undefined,
-    claRepoFileReviewMode:
-      formData.get("claRepoFileReviewMode") ?? undefined,
+    claRepoFileReviewMode: formData.get("claRepoFileReviewMode") ?? undefined,
     claIclaRequireSignature:
       formData.get("claIclaRequireSignature") ?? undefined,
     dcoEnabled: formData.get("dcoEnabled") ?? undefined,
@@ -140,6 +143,7 @@ export async function updateClaSettings(formData: FormData) {
       claIclaRequireSignature: true,
       dcoEnabled: true,
       labelClaPending: true,
+      currentIclaVersionId: true,
     },
   });
   if (!before) throw new Error("Project not found");
@@ -202,10 +206,25 @@ export async function updateClaSettings(formData: FormData) {
           ],
           dcoEnabled: [before.dcoEnabled, after.dcoEnabled],
           labelClaPending: [before.labelClaPending, after.labelClaPending],
-        }).filter(([, [a, b]]) => a !== b)
+        }).filter(([, [a, b]]) => a !== b),
       ),
     },
   });
+
+  // Retroactive nudge: when the CLA requirement first turns on and there is
+  // already a published ICLA to sign, remind existing applicants (and re-gate
+  // approved contributors' open PRs). The "publish the first ICLA" moment is
+  // handled in publishClaVersion. Best-effort; never fails the settings save.
+  const becameRequired =
+    !(before.claEnabled && before.claRequired) &&
+    after.claEnabled &&
+    after.claRequired;
+  if (becameRequired && before.currentIclaVersionId) {
+    await sweepUnsignedApplicants({
+      projectId: parsed.projectId,
+      actorId: session.user.id,
+    }).catch(() => undefined);
+  }
 
   revalidateCla(parsed.projectId);
 }
@@ -235,10 +254,23 @@ export async function publishClaVersion(formData: FormData) {
     sourcePath: opt("sourcePath"),
     sourceRef: opt("sourceRef"),
     requireResign: formData.get("requireResign") ?? false,
-    resignVersionIds: resignVersionIds.length > 0 ? resignVersionIds : undefined,
+    resignVersionIds:
+      resignVersionIds.length > 0 ? resignVersionIds : undefined,
   });
 
   const { session } = await requireProjectRole(parsed.projectId, "ADMIN");
+
+  // Capture whether an ICLA already existed BEFORE publishing: the publish
+  // mutation overwrites currentIclaVersionId, and the prior value detects the
+  // "first ICLA" moment that first makes the CLA signable for applicants.
+  const projectBefore = await prisma.project.findUnique({
+    where: { id: parsed.projectId },
+    select: {
+      claEnabled: true,
+      claRequired: true,
+      currentIclaVersionId: true,
+    },
+  });
 
   // Validate any selected prior versions belong to this project + kind, so the
   // per-version selection can't reference another project's versions.
@@ -263,7 +295,9 @@ export async function publishClaVersion(formData: FormData) {
 
   if (parsed.sourceType === "repo_file") {
     if (!parsed.sourceRepoId || !parsed.sourcePath) {
-      throw new Error("Repo and file path are required for a repo-file source.");
+      throw new Error(
+        "Repo and file path are required for a repo-file source.",
+      );
     }
     const repo = await prisma.repo.findUnique({
       where: { id: parsed.sourceRepoId },
@@ -279,7 +313,7 @@ export async function publishClaVersion(formData: FormData) {
     }
     if (!repo.installationId) {
       throw new Error(
-        "The GitHub App is not installed on this repository yet, so the file cannot be fetched."
+        "The GitHub App is not installed on this repository yet, so the file cannot be fetched.",
       );
     }
     const fetched = await fetchRepoFile({
@@ -290,7 +324,7 @@ export async function publishClaVersion(formData: FormData) {
     });
     if (!fetched) {
       throw new Error(
-        `Could not read ${parsed.sourcePath} from ${repo.fullName}. Check the path and ref.`
+        `Could not read ${parsed.sourcePath} from ${repo.fullName}. Check the path and ref.`,
       );
     }
     if (!fetched.content.trim()) {
@@ -339,6 +373,23 @@ export async function publishClaVersion(formData: FormData) {
   // A publish only ever makes PRIOR signers stale (the new version has no
   // signers yet), so re-gate the affected contributors' open passing PRs.
   await driveCoverage(parsed.projectId, published.affectedGhIds);
+
+  // First ICLA published while the CLA is required: retroactively remind
+  // existing applicants now that there is finally something to sign. (The
+  // enable-toggle path covers the case where a version already existed.) Only
+  // ICLA gates individuals; a CCLA publish never creates newly-uncovered
+  // individuals. Best-effort.
+  if (
+    parsed.kind === "ICLA" &&
+    projectBefore?.claEnabled &&
+    projectBefore.claRequired &&
+    !projectBefore.currentIclaVersionId
+  ) {
+    await sweepUnsignedApplicants({
+      projectId: parsed.projectId,
+      actorId: session.user.id,
+    }).catch(() => undefined);
+  }
 
   revalidateCla(parsed.projectId);
 }
@@ -413,7 +464,11 @@ export async function grantWaiver(formData: FormData) {
     projectId: parsed.projectId,
     actorId: session.user.id,
     kind: "cla.waiver_granted",
-    payload: { waiverId: waiver.id, ghLogin: parsed.ghLogin, reason: parsed.reason },
+    payload: {
+      waiverId: waiver.id,
+      ghLogin: parsed.ghLogin,
+      reason: parsed.reason,
+    },
   });
 
   revalidatePath(`/dashboard/projects/${parsed.projectId}/cla/signatures`);
@@ -498,7 +553,8 @@ export async function approvePendingChange(formData: FormData) {
     projectId: formData.get("projectId"),
     pendingChangeId: formData.get("pendingChangeId"),
     requireResign: formData.get("requireResign") ?? false,
-    resignVersionIds: resignVersionIds.length > 0 ? resignVersionIds : undefined,
+    resignVersionIds:
+      resignVersionIds.length > 0 ? resignVersionIds : undefined,
   });
 
   const { session } = await requireProjectRole(parsed.projectId, "ADMIN");
@@ -541,7 +597,7 @@ export async function approvePendingChange(formData: FormData) {
   });
   if (!head || sha256Hex(head.content) !== pending.contentHash) {
     throw new Error(
-      "The file changed on the branch since this was queued. Re-sync and review the latest version."
+      "The file changed on the branch since this was queued. Re-sync and review the latest version.",
     );
   }
 
@@ -638,7 +694,7 @@ export async function rejectPendingChange(formData: FormData) {
 // ---------------------------------------------------------------------------
 export async function runClaRepoSync(
   projectId: string,
-  kind?: "ICLA" | "CCLA"
+  kind?: "ICLA" | "CCLA",
 ): Promise<{ results: SyncOutcome[] }> {
   await requireProjectRole(projectId, "ADMIN");
 
@@ -666,7 +722,7 @@ export async function runClaRepoSync(
  */
 export async function fetchClaRepoSource(
   projectId: string,
-  kind: "ICLA" | "CCLA"
+  kind: "ICLA" | "CCLA",
 ): Promise<RepoSourceView> {
   await requireProjectRole(projectId, "ADMIN");
 
@@ -742,7 +798,10 @@ export async function previewRepoFile(args: {
   sourceRepoId: string;
   path: string;
   ref?: string | null;
-}): Promise<{ ok: true; content: string; sha: string | null } | { ok: false; error: string }> {
+}): Promise<
+  | { ok: true; content: string; sha: string | null }
+  | { ok: false; error: string }
+> {
   await requireProjectRole(args.projectId, "ADMIN");
 
   const repo = await prisma.repo.findUnique({
@@ -753,7 +812,10 @@ export async function previewRepoFile(args: {
     return { ok: false, error: "Repository not found for this project." };
   }
   if (repo.installationId == null) {
-    return { ok: false, error: "The GitHub App is not installed on this repo." };
+    return {
+      ok: false,
+      error: "The GitHub App is not installed on this repo.",
+    };
   }
   const fetched = await fetchRepoFile({
     installationId: repo.installationId,
@@ -762,7 +824,10 @@ export async function previewRepoFile(args: {
     ref: args.ref,
   });
   if (!fetched) {
-    return { ok: false, error: `Could not read ${args.path} from ${repo.fullName}.` };
+    return {
+      ok: false,
+      error: `Could not read ${args.path} from ${repo.fullName}.`,
+    };
   }
   return { ok: true, content: fetched.content, sha: fetched.sha };
 }
@@ -770,7 +835,7 @@ export async function previewRepoFile(args: {
 /** Read a historical version's stored body for the Version history preview. */
 export async function getClaVersionBody(
   projectId: string,
-  versionId: string
+  versionId: string,
 ): Promise<{ bodyMarkdown: string }> {
   await requireProjectRole(projectId, "ADMIN");
   const version = await prisma.claDocumentVersion.findUnique({
@@ -781,4 +846,22 @@ export async function getClaVersionBody(
     throw new Error("Version not found for this project.");
   }
   return { bodyMarkdown: version.bodyMarkdown };
+}
+
+// ---------------------------------------------------------------------------
+// Manually remind unsigned applicants. Sweeps SUBMITTED + APPROVED applicants
+// who are not CLA-covered, sending in-app + email reminders (and re-gating
+// approved contributors' open PRs, deduping any reminder already on the PR).
+// Bounded to 200 applications per run and idempotent, so it is safe to press
+// repeatedly. Mirrors the quality "Backfill" admin action.
+// ---------------------------------------------------------------------------
+export async function notifyUnsignedApplicants(formData: FormData) {
+  const projectId = String(formData.get("projectId") ?? "");
+  if (!projectId) throw new Error("Missing project.");
+
+  const { session } = await requireProjectRole(projectId, "ADMIN");
+
+  await sweepUnsignedApplicants({ projectId, actorId: session.user.id });
+
+  revalidateCla(projectId);
 }
