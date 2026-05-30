@@ -24,6 +24,7 @@ import {
   updateClaSettings,
   saveIclaCustomFields,
   saveCclaCustomFields,
+  notifyUnsignedApplicants,
 } from "./actions";
 
 export default async function ClaSettings({
@@ -322,6 +323,45 @@ export default async function ClaSettings({
             </p>
 
             <SubmitButton>Save CLA settings</SubmitButton>
+          </form>
+        </CardContent>
+      </Card>
+
+      {/* ----- Notify unsigned applicants ----- */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">
+            Notify unsigned applicants
+          </CardTitle>
+          <CardDescription>
+            Remind applicants who have not signed the CLA (in-app and by email),
+            and re-apply the CLA check to the open PRs of approved contributors.
+            Covers submitted and approved applications, up to 200 per run.
+            Reminders already sent (in the inbox or on a PR) are not repeated, so
+            this is safe to run more than once.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form action={notifyUnsignedApplicants}>
+            <input type="hidden" name="projectId" value={project.id} />
+            <SubmitButton
+              variant="outline"
+              disabled={
+                !project.claEnabled ||
+                !project.claRequired ||
+                !project.currentIclaVersionId
+              }
+            >
+              Notify unsigned applicants
+            </SubmitButton>
+            {(!project.claEnabled ||
+              !project.claRequired ||
+              !project.currentIclaVersionId) && (
+              <p className="mt-2 text-xs text-muted-foreground">
+                Enable and require the CLA and publish an ICLA version before
+                sending reminders.
+              </p>
+            )}
           </form>
         </CardContent>
       </Card>
