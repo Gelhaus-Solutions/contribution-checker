@@ -227,6 +227,49 @@ export async function commentOnPr(
 }
 
 /**
+ * List a PR's issue comments (single page, up to 100) as {id, body}. Used to
+ * find a previously-posted bot comment so it can be edited in place.
+ */
+export async function listIssueComments(
+  ref: RepoRef,
+  prNumber: number,
+): Promise<Array<{ id: number; body: string }>> {
+  const octokit = await getInstallationOctokit(ref.installationId);
+  const res = await octokit.request(
+    "GET /repos/{owner}/{repo}/issues/{issue_number}/comments",
+    {
+      owner: ref.owner,
+      repo: ref.repo,
+      issue_number: prNumber,
+      per_page: 100,
+    },
+  );
+  recordGithubMetric("list_comments", "ok", ref, res.status);
+  return (res.data as Array<{ id: number; body?: string | null }>).map((c) => ({
+    id: c.id,
+    body: c.body ?? "",
+  }));
+}
+
+/** Edit an existing issue/PR comment by id. */
+export async function updateIssueComment(
+  ref: RepoRef,
+  commentId: number,
+  body: string,
+): Promise<void> {
+  const octokit = await getInstallationOctokit(ref.installationId);
+  await octokit.request(
+    "PATCH /repos/{owner}/{repo}/issues/comments/{comment_id}",
+    {
+      owner: ref.owner,
+      repo: ref.repo,
+      comment_id: commentId,
+      body,
+    },
+  );
+}
+
+/**
  * Whether any existing comment on the PR contains `needle` (e.g. the CLA
  * signing URL). Used to avoid posting a duplicate CLA reminder when one was
  * already posted out-of-band: a prior webhook re-evaluation, a manual

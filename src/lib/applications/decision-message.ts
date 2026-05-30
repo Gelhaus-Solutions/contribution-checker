@@ -1,6 +1,19 @@
 import type { PrDecision } from "@/lib/applications/decide-pr";
 
 /**
+ * The CLA heads-up appended to a pending PR comment when the project requires a
+ * CLA the author hasn't signed. Exported so the retroactive backfill can append
+ * the same copy to comments already on GitHub, keeping the wording in one place.
+ */
+export function claPendingReminderNote(claUrl: string): string {
+  return (
+    `\n\nThis project also requires a signed Contributor License Agreement. ` +
+    `You can sign it now at ${claUrl} so you're ready as soon as your ` +
+    `application is approved.`
+  );
+}
+
+/**
  * Build the PR-comment body for PENDING/DENIED/CHECK_REQUIRED decisions.
  * Returns null when the decision is APPROVED, BYPASSED, or IGNORED (no
  * comment needed).
@@ -21,22 +34,25 @@ export function buildDecisionMessage(args: {
   applyUrl: string;
   ghLogin: string;
   claUrl?: string;
+  /**
+   * When true, the PENDING message also tells the contributor they'll need to
+   * sign the CLA (approval is blocked until both the application is approved and
+   * the CLA is signed), so it's surfaced on GitHub up front.
+   */
+  needsCla?: boolean;
 }): string | null {
   const { decision, projectName, applyUrl, ghLogin } = args;
   const claUrl = args.claUrl ?? `${applyUrl}/cla`;
   if (decision.status === "PENDING") {
-    if (decision.reason === "submitted") {
-      return (
-        `Hi @${ghLogin}! Your application for **${projectName}** is awaiting review. ` +
-        `We'll reopen this PR once it's approved. Status: ${applyUrl}`
-      );
-    }
-    // "no-application" or "cooldown-elapsed" → invite the user to apply.
-    return (
-      `Hi @${ghLogin}! Thanks for the PR. ` +
-      `Contributions to **${projectName}** are gated behind an application. ` +
-      `Please apply at ${applyUrl} and we'll reopen this PR once you're approved.`
-    );
+    const base =
+      decision.reason === "submitted"
+        ? `Hi @${ghLogin}! Your application for **${projectName}** is awaiting review. ` +
+          `We'll reopen this PR once it's approved. Status: ${applyUrl}`
+        : // "no-application" or "cooldown-elapsed" → invite the user to apply.
+          `Hi @${ghLogin}! Thanks for the PR. ` +
+          `Contributions to **${projectName}** are gated behind an application. ` +
+          `Please apply at ${applyUrl} and we'll reopen this PR once you're approved.`;
+    return args.needsCla ? base + claPendingReminderNote(claUrl) : base;
   }
   if (decision.status === "DENIED") {
     const reasonPart = decision.reason ? `: ${decision.reason}` : "";

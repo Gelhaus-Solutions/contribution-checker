@@ -57,13 +57,17 @@ async function attachInstallationToManualRepos(args: {
     await prisma.repo
       .updateMany({
         where: { fullName: r.full_name, installationId: null },
-        data: { ghRepoId: r.id, installationId: args.installationId, active: true },
+        data: {
+          ghRepoId: r.id,
+          installationId: args.installationId,
+          active: true,
+        },
       })
       .catch((e) =>
         logger.warn(
           { err: e, fullName: r.full_name },
-          "linking manual repo to installation failed"
-        )
+          "linking manual repo to installation failed",
+        ),
       );
   }
 }
@@ -94,7 +98,7 @@ async function checkDco(args: {
           pull_number: args.prNumber,
           per_page: COMMIT_PAGE_SIZE,
           page,
-        }
+        },
       );
       const batch = res.data as Array<{
         sha: string;
@@ -111,7 +115,7 @@ async function checkDco(args: {
   } catch (e) {
     logger.warn(
       { err: e, owner: args.owner, repo: args.repo, prNumber: args.prNumber },
-      "DCO commit check failed; treating as satisfied"
+      "DCO commit check failed; treating as satisfied",
     );
     return { ok: true };
   }
@@ -170,8 +174,8 @@ async function postDecisionSideEffects(args: {
   }).catch((e) =>
     logger.warn(
       { err: e, prCheckId: args.prCheckId },
-      "publishDecisionCheck failed"
-    )
+      "publishDecisionCheck failed",
+    ),
   );
 
   // Dedicated CLA Check Run, only when the project has CLA enabled (claState is
@@ -191,7 +195,10 @@ async function postDecisionSideEffects(args: {
       state: args.claState,
       claUrl: args.claUrl,
     }).catch((e) =>
-      logger.warn({ err: e, prCheckId: args.prCheckId }, "publishClaCheck failed")
+      logger.warn(
+        { err: e, prCheckId: args.prCheckId },
+        "publishClaCheck failed",
+      ),
     );
   }
 
@@ -207,8 +214,8 @@ async function postDecisionSideEffects(args: {
     }).catch((e) =>
       logger.warn(
         { err: e, prCheckId: args.prCheckId },
-        "runQualityForPrCheck failed"
-      )
+        "runQualityForPrCheck failed",
+      ),
     );
   }
 }
@@ -230,10 +237,13 @@ async function ensureProjectLabels(args: {
       ref,
       args.evaluate,
       "5319e7",
-      "Add to trigger a re-evaluation by the contribution checker"
+      "Add to trigger a re-evaluation by the contribution checker",
     ),
   ]).catch((e) =>
-    logger.warn({ err: e, fullName: args.fullName }, "ensureProjectLabels failed")
+    logger.warn(
+      { err: e, fullName: args.fullName },
+      "ensureProjectLabels failed",
+    ),
   );
 }
 
@@ -245,8 +255,9 @@ export async function handlePullRequestEvent(payload: WebhookPayload) {
     !payload.repository ||
     !payload.installation ||
     !(
-      ["opened", "reopened", "ready_for_review", "synchronize"].includes(action) ||
-      isReEvalLabel
+      ["opened", "reopened", "ready_for_review", "synchronize"].includes(
+        action,
+      ) || isReEvalLabel
     )
   ) {
     return;
@@ -271,7 +282,10 @@ export async function handlePullRequestEvent(payload: WebhookPayload) {
       where: { ghRepoId },
       select: { project: { select: { labelEvaluate: true } } },
     });
-    if (!repoForLabelGate || repoForLabelGate.project.labelEvaluate !== labelName) {
+    if (
+      !repoForLabelGate ||
+      repoForLabelGate.project.labelEvaluate !== labelName
+    ) {
       return;
     }
   }
@@ -375,7 +389,8 @@ export async function handlePullRequestEvent(payload: WebhookPayload) {
   }
 
   const disabledByChecker =
-    decision.status === "APPROVED" && decision.bypassReason === "checker_disabled";
+    decision.status === "APPROVED" &&
+    decision.bypassReason === "checker_disabled";
 
   // Dedicated CLA-check state (independent of the overall decision), so the
   // `contribution-checker / cla` check accurately reflects the author's CLA
@@ -495,8 +510,8 @@ export async function handlePullRequestEvent(payload: WebhookPayload) {
   // re-trigger on every subsequent webhook touch.
   const removeEvaluateLabel = async () => {
     if (!isReEvalLabel) return;
-    await removeLabelIfPresent(ref, prNumber, project.labelEvaluate).catch(() =>
-      undefined
+    await removeLabelIfPresent(ref, prNumber, project.labelEvaluate).catch(
+      () => undefined,
     );
   };
 
@@ -513,7 +528,7 @@ export async function handlePullRequestEvent(payload: WebhookPayload) {
           await reopenPullRequest(
             ref,
             prNumber,
-            `Re-evaluation by **${project.name}** passed. Reopening this PR.`
+            `Re-evaluation by **${project.name}** passed. Reopening this PR.`,
           );
           await prisma.prCheck.update({
             where: { repoId_prNumber: { repoId: decision.repoId, prNumber } },
@@ -522,17 +537,25 @@ export async function handlePullRequestEvent(payload: WebhookPayload) {
         } catch (e) {
           logger.warn(
             { err: e, repoFullName, prNumber },
-            "re-eval reopen failed"
+            "re-eval reopen failed",
           );
         }
       }
     }
     if (project.labelsEnabled) {
       await Promise.all([
-        removeLabelIfPresent(ref, prNumber, project.labelPending).catch(() => undefined),
-        removeLabelIfPresent(ref, prNumber, project.labelDenied).catch(() => undefined),
-        removeLabelIfPresent(ref, prNumber, project.labelClaPending).catch(() => undefined),
-        setLabels(ref, prNumber, [project.labelApproved]).catch(() => undefined),
+        removeLabelIfPresent(ref, prNumber, project.labelPending).catch(
+          () => undefined,
+        ),
+        removeLabelIfPresent(ref, prNumber, project.labelDenied).catch(
+          () => undefined,
+        ),
+        removeLabelIfPresent(ref, prNumber, project.labelClaPending).catch(
+          () => undefined,
+        ),
+        setLabels(ref, prNumber, [project.labelApproved]).catch(
+          () => undefined,
+        ),
       ]);
     }
     await removeEvaluateLabel();
@@ -570,8 +593,8 @@ export async function handlePullRequestEvent(payload: WebhookPayload) {
           await commentOnPr(ref, prNumber, body).catch((e) =>
             logger.warn(
               { err: e, repoFullName, prNumber },
-              "CLA/DCO gate comment failed"
-            )
+              "CLA/DCO gate comment failed",
+            ),
           );
         }
       }
@@ -583,19 +606,27 @@ export async function handlePullRequestEvent(payload: WebhookPayload) {
           ref,
           project.labelClaPending,
           "fbca04",
-          "Awaiting CLA signature / DCO sign-off"
+          "Awaiting CLA signature / DCO sign-off",
         ).catch(() => undefined);
         await Promise.all([
-          removeLabelIfPresent(ref, prNumber, project.labelApproved).catch(() => undefined),
-          removeLabelIfPresent(ref, prNumber, project.labelPending).catch(() => undefined),
-          removeLabelIfPresent(ref, prNumber, project.labelDenied).catch(() => undefined),
+          removeLabelIfPresent(ref, prNumber, project.labelApproved).catch(
+            () => undefined,
+          ),
+          removeLabelIfPresent(ref, prNumber, project.labelPending).catch(
+            () => undefined,
+          ),
+          removeLabelIfPresent(ref, prNumber, project.labelDenied).catch(
+            () => undefined,
+          ),
         ]);
-        await setLabels(ref, prNumber, [project.labelClaPending]).catch(() => undefined);
+        await setLabels(ref, prNumber, [project.labelClaPending]).catch(
+          () => undefined,
+        );
       }
     } catch (e) {
       logger.warn(
         { err: e, repoFullName, prNumber },
-        "CLA/DCO gate side-effects failed"
+        "CLA/DCO gate side-effects failed",
       );
     }
 
@@ -626,6 +657,10 @@ export async function handlePullRequestEvent(payload: WebhookPayload) {
       projectName: project.name,
       applyUrl,
       ghLogin: author.login,
+      // A pending applicant is blocked on review; if the project also requires a
+      // CLA they haven't signed, surface it on the PR now so they can sign in
+      // parallel (claState is "required"/"stale" exactly when uncovered/stale).
+      needsCla: claState === "required" || claState === "stale",
     }) ?? "";
 
   try {
@@ -653,16 +688,20 @@ export async function handlePullRequestEvent(payload: WebhookPayload) {
     }
     if (project.labelsEnabled) {
       const targetLabel =
-        decision.status === "PENDING" ? project.labelPending : project.labelDenied;
+        decision.status === "PENDING"
+          ? project.labelPending
+          : project.labelDenied;
       const otherLabels = [
         project.labelApproved,
         project.labelClaPending,
-        decision.status === "PENDING" ? project.labelDenied : project.labelPending,
+        decision.status === "PENDING"
+          ? project.labelDenied
+          : project.labelPending,
       ];
       await Promise.all(
         otherLabels.map((l) =>
-          removeLabelIfPresent(ref, prNumber, l).catch(() => undefined)
-        )
+          removeLabelIfPresent(ref, prNumber, l).catch(() => undefined),
+        ),
       );
       await setLabels(ref, prNumber, [targetLabel]).catch(() => undefined);
     }
@@ -752,7 +791,11 @@ export async function handleInstallationReposEvent(payload: WebhookPayload) {
 type PushPayload = {
   ref?: string;
   repository?: { id: number; default_branch?: string };
-  commits?: Array<{ added?: string[]; modified?: string[]; removed?: string[] }>;
+  commits?: Array<{
+    added?: string[];
+    modified?: string[];
+    removed?: string[];
+  }>;
   head_commit?: {
     added?: string[];
     modified?: string[];

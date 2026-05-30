@@ -4,7 +4,10 @@ import { recordAudit } from "@/lib/audit";
 import { notifyUser } from "@/lib/notifications/inbox";
 import { applyUrl, emailUserById } from "@/lib/notifications/email";
 import { getClaStatus } from "@/lib/cla/status";
-import { reapplyClaGateForApprovedAuthor } from "@/lib/cla/post-sign";
+import {
+  reapplyClaGateForApprovedAuthor,
+  refreshPendingClaReminders,
+} from "@/lib/cla/post-sign";
 
 const PROJECT_SELECT = {
   id: true,
@@ -172,6 +175,13 @@ export async function sweepUnsignedApplicants(args: {
       }).catch(() => undefined);
     }
   }
+
+  // Retroactively add the "sign the CLA" note to existing pending-PR comments
+  // (visible on GitHub for not-yet-approved applicants). Project-wide, bounded,
+  // and idempotent; best-effort so it never fails the sweep.
+  await refreshPendingClaReminders({ projectId: args.projectId }).catch(
+    () => undefined,
+  );
 
   await recordAudit({
     projectId: args.projectId,

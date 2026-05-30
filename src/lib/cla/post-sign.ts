@@ -18,16 +18,24 @@ import {
   setLabels,
   commentOnPr,
   prHasCommentContaining,
+  listIssueComments,
+  updateIssueComment,
   repoRef,
 } from "@/lib/github/pr-actions";
-import { buildDecisionMessage } from "@/lib/applications/decision-message";
-import { invalidateClaCache } from "@/lib/cla/status";
+import {
+  buildDecisionMessage,
+  claPendingReminderNote,
+} from "@/lib/applications/decision-message";
+import { getClaStatus, invalidateClaCache } from "@/lib/cla/status";
 import { notifyUser } from "@/lib/notifications/inbox";
 
 const CLA_PROJECT_SELECT = {
   id: true,
   slug: true,
   name: true,
+  claEnabled: true,
+  claRequired: true,
+  currentIclaVersionId: true,
   checksEnabled: true,
   labelsEnabled: true,
   labelApproved: true,
@@ -493,4 +501,85 @@ export async function reapplyClaGateForApprovedAuthor(args: {
     }
   }
   return { gated };
+}
+
+/**
+ * Retroactively add the "sign the CLA" note to the pending-close comments of a
+ * project's currently-pending PRs whose authors have not signed. For a pending
+ * applicant the PR is held by the application gate (not the CLA), so we never
+ * gate or comment fresh here; we EDIT the existing pending comment in place so
+ * the CLA requirement is visible on GitHub. Idempotent: a comment that already
+ * links the /cla page is left alone. Bounded to 200 PRs per run; best-effort.
+ */
+export async function refreshPendingClaReminders(args: {
+  projectId: string;
+}): Promise<{ edited: number }> {
+  if (!env.githubAppConfigured) return { edited: 0 };
+
+  const project = await prisma.project.findUnique({
+    where: { id: args.projectId },
+    select: CLA_PROJECT_SELECT,
+  });
+  if (!project) return { edited: 0 };
+  if (!project.claEnabled || !project.claRequired) return { edited: 0 };
+  if (!project.currentIclaVersionId) return { edited: 0 };
+
+  const repoIds = project.repos.map((r) => r.id);
+  if (repoIds.length === 0) return { edited: 0 };
+
+  const checks = await prisma.prCheck.findMany({
+    where: { repoId: { in: repoIds }, status: "PENDING" },
+    select: {
+      id: true,
+      prNumber: true,
+      authorGhId: true,
+      authorGhLogin: true,
+      repo: { select: { fullName: true, installationId: true } },
+    },
+    take: 200,
+  });
+  if (checks.length === 0) return { edited: 0 };
+
+  const applyUrl = buildApplyUrl(project.slug);
+  const claUrl = `${applyUrl}/cla`;
+
+  let edited = 0;
+  for (const check of checks) {
+    if (check.repo.installationId == null) continue;
+    const ref = repoRef(check.repo.fullName, check.repo.installationId);
+    try {
+      // Skip authors who have since become covered (signed / roster / waiver).
+      const coverage = await getClaStatus({
+        projectId: project.id,
+        ghId: check.authorGhId,
+        ghLogin: check.authorGhLogin,
+      });
+      if (coverage.satisfied) continue;
+
+      // Find the bot's pending-close comment ("...reopen this PR...") and append
+      // the CLA heads-up. Skip if it already links the CLA page (already
+      // refreshed) so repeat runs don't duplicate the note.
+      const comments = await listIssueComments(ref, check.prNumber);
+      const target = comments.find(
+        (c) =>
+          c.body.includes("reopen this PR") &&
+          c.body.includes(applyUrl) &&
+          !c.body.includes(claUrl),
+      );
+      if (!target) continue;
+
+      await updateIssueComment(
+        ref,
+        target.id,
+        target.body + claPendingReminderNote(claUrl),
+      ).catch(() => undefined);
+      edited++;
+    } catch (e) {
+      logger.warn(
+        { err: e, prNumber: check.prNumber },
+        "cla pending-reminder refresh failed",
+      );
+    }
+  }
+  return { edited };
 }

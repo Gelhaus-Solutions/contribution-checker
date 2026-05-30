@@ -26,6 +26,7 @@ vi.mock("@/lib/cla/status", () => ({ getClaStatus: vi.fn() }));
 
 vi.mock("@/lib/cla/post-sign", () => ({
   reapplyClaGateForApprovedAuthor: vi.fn(),
+  refreshPendingClaReminders: vi.fn(async () => ({ edited: 0 })),
 }));
 
 vi.mock("@/lib/audit", () => ({ recordAudit: vi.fn() }));
