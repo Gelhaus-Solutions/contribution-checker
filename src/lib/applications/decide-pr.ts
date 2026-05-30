@@ -71,8 +71,6 @@ export type RepoForDecision = Prisma.RepoGetPayload<{
         applicationRequired: true;
         claEnabled: true;
         claRequired: true;
-        minIclaVersion: true;
-        minCclaVersion: true;
       };
     };
   };
@@ -88,8 +86,6 @@ export const decisionRepoInclude = {
       applicationRequired: true,
       claEnabled: true,
       claRequired: true,
-      minIclaVersion: true,
-      minCclaVersion: true,
     },
   },
 } as const satisfies Prisma.RepoInclude;
