@@ -22,6 +22,9 @@ const KIND_LABELS: Record<string, string> = {
   "application.note_added": "Note added",
   "project.invited": "Invited to a project",
   "pr.blocked": "PR blocked",
+  "cla.ccla_signed": "Corporate CLA signed",
+  "cla.ccla_approved": "Corporate CLA approved",
+  "cla.ccla_rejected": "Corporate CLA rejected",
 };
 
 export default async function NotificationsPage({
