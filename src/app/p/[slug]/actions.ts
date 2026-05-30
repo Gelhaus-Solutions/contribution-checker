@@ -130,16 +130,16 @@ export async function applyAction(
       };
     }
     claLegalName = claParsed.data.legalName;
-    // A signature (printed name + typed/drawn/uploaded signature) is required
-    // only when the project opts in.
+    // The full legal name is always required to sign.
+    if (claLegalName.length < 2) {
+      return {
+        status: "error",
+        reason: "You must provide your full legal name to sign the CLA.",
+        values: submitted,
+      };
+    }
+    // A drawn/typed/uploaded signature artifact is required only when opted in.
     if (project.claIclaRequireSignature) {
-      if (claLegalName.length < 2) {
-        return {
-          status: "error",
-          reason: "You must provide your full legal name to sign the CLA.",
-          values: submitted,
-        };
-      }
       const sig = signatureSchema.safeParse(collectSignature(formData, "cla_"));
       if (!sig.success) {
         return {

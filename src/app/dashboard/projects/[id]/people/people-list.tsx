@@ -593,13 +593,32 @@ function UserOverviewDialog({
                       Individual signature: v{data.cla.signature.version}
                       {data.cla.currentVersion != null &&
                         ` (current v${data.cla.currentVersion})`}{" "}
-                      • signed {data.cla.signature.signedAt.slice(0, 10)} as{" "}
-                      <span className="font-medium">
-                        {data.cla.signature.legalName}
-                      </span>
+                      • signed {data.cla.signature.signedAt.slice(0, 10)}
+                      {data.cla.signature.legalName && (
+                        <>
+                          {" "}
+                          as{" "}
+                          <span className="font-medium">
+                            {data.cla.signature.legalName}
+                          </span>
+                        </>
+                      )}
                       {data.cla.signature.status === "REVOKED" && (
                         <span className="text-destructive"> • REVOKED</span>
                       )}
+                    </p>
+                  )}
+                  {data.cla.via && (
+                    <p className="mt-2 text-[11px] text-muted-foreground">
+                      See the full entered details (custom fields, signature,
+                      company block) on the{" "}
+                      <Link
+                        href={`/dashboard/projects/${projectId}/cla/signatures`}
+                        className="underline"
+                      >
+                        CLA signature log
+                      </Link>
+                      .
                     </p>
                   )}
                   {data.cla.blockedPrCount > 0 && (

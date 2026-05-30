@@ -174,12 +174,13 @@ export default async function ClaSettings({
               />
               <span>
                 <span className="font-medium">
-                  Require a typed signature for individual CLAs
+                  Require a signature artifact for individual CLAs
                 </span>
                 <span className="block text-xs text-muted-foreground">
-                  Contributors must type their full legal name to sign. When off,
-                  the &ldquo;I agree&rdquo; checkbox alone is a valid individual
-                  click-wrap. (Corporate CLAs always require the full signature
+                  The signer&apos;s full legal name is always collected. With this
+                  on, they must also provide a typed, drawn, or uploaded
+                  signature; off = full legal name + &ldquo;I agree&rdquo;
+                  checkbox. (Corporate CLAs always require the full signature
                   block.)
                 </span>
               </span>

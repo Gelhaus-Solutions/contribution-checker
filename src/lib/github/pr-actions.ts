@@ -304,6 +304,46 @@ export async function upsertCheckRun(
     return String((res.data as { id: number | string }).id);
   } catch (e) {
     const status = statusOf(e);
+
+    // A stored check-run id can go stale (the run was deleted, or it belongs to
+    // a different repo/installation after a redeploy or DB migration). Updating
+    // it then 404s. Recreate the run instead of silently dropping the check —
+    // otherwise the check disappears from the PR permanently while a sibling
+    // check with no stored id (e.g. a newly-added one) keeps showing.
+    if (existingId && status === 404) {
+      logger.warn(
+        { ref, existingId, headSha: input.headSha },
+        "check-run update 404 (stale id) — recreating"
+      );
+      try {
+        const res = await octokit.request(
+          "POST /repos/{owner}/{repo}/check-runs",
+          { owner: ref.owner, repo: ref.repo, ...body }
+        );
+        recordGithubMetric("check_run.create", "ok", ref);
+        Sentry.metrics.count("github.check_run", 1, {
+          attributes: {
+            "github.repo": `${ref.owner}/${ref.repo}`,
+            "check.status": input.status,
+            "check.conclusion": input.conclusion ?? "",
+            mode: "recreate",
+          },
+        });
+        return String((res.data as { id: number | string }).id);
+      } catch (e2) {
+        const s2 = statusOf(e2);
+        recordGithubMetric("check_run.create", "error", ref, s2);
+        if (s2 === 403 || s2 === 404) {
+          logger.warn(
+            { err: e2, ref, headSha: input.headSha },
+            "check-run recreate forbidden — installation likely missing checks:write"
+          );
+          return null;
+        }
+        throw e2;
+      }
+    }
+
     recordGithubMetric(
       existingId ? "check_run.update" : "check_run.create",
       "error",

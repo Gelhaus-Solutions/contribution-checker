@@ -166,26 +166,24 @@ export function ApplyForm({
               namePrefix={CLA_CUSTOM_FIELD_PREFIX}
             />
           )}
+          <div className="space-y-1">
+            <Label htmlFor="cla_legalName">Full legal name</Label>
+            <Input
+              id="cla_legalName"
+              name="cla_legalName"
+              required
+              autoComplete="name"
+              placeholder="Your full legal name"
+            />
+          </div>
           {claEmbed.requireSignature && (
-            <>
-              <div className="space-y-1">
-                <Label htmlFor="cla_legalName">Full legal name</Label>
-                <Input
-                  id="cla_legalName"
-                  name="cla_legalName"
-                  required
-                  autoComplete="name"
-                  placeholder="Your full legal name"
-                />
-              </div>
-              <div className="space-y-1">
-                <Label>Signature</Label>
-                <SignatureInput fieldPrefix="cla_" required />
-                <p className="text-xs text-muted-foreground">
-                  Type, draw, or upload your signature.
-                </p>
-              </div>
-            </>
+            <div className="space-y-1">
+              <Label>Signature</Label>
+              <SignatureInput fieldPrefix="cla_" required />
+              <p className="text-xs text-muted-foreground">
+                Type, draw, or upload your signature.
+              </p>
+            </div>
           )}
           <label className="flex items-start gap-2 text-sm">
             <input

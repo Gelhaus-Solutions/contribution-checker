@@ -12,10 +12,30 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SubmitButton } from "@/components/ui/submit-button";
+import { parseFormSchema } from "@/lib/applications/schema";
 import { revokeSignature, grantWaiver, revokeWaiver } from "../actions";
 
 function fmt(d: Date): string {
   return d.toISOString().replace("T", " ").slice(0, 19);
+}
+
+/** Safely parse the customFields JSON column into [id, value] entries. */
+function parseCustomAnswers(json: string | null): [string, unknown][] {
+  if (!json) return [];
+  try {
+    const parsed = JSON.parse(json);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? Object.entries(parsed as Record<string, unknown>)
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function renderAnswer(v: unknown): string {
+  if (typeof v === "boolean") return v ? "Yes" : "No";
+  if (v === null || v === undefined || v === "") return "—";
+  return String(v);
 }
 
 export default async function ClaSignatureLog({
@@ -26,11 +46,21 @@ export default async function ClaSignatureLog({
   const { id } = await params;
   await requireProjectRole(id, "ADMIN");
 
-  const [signatures, waivers, events, chain] = await Promise.all([
+  const [signatures, waivers, events, chain, project] = await Promise.all([
     prisma.claSignature.findMany({
       where: { projectId: id },
       include: {
-        corporateSignatory: { select: { id: true, companyName: true } },
+        corporateSignatory: {
+          select: {
+            id: true,
+            companyName: true,
+            registeredAddress: true,
+            country: true,
+            contactName: true,
+            contactEmail: true,
+            signatoryTitle: true,
+          },
+        },
       },
       orderBy: { signedAt: "desc" },
     }),
@@ -44,7 +74,20 @@ export default async function ClaSignatureLog({
       take: 200,
     }),
     verifyChain(id),
+    prisma.project.findUnique({
+      where: { id },
+      select: { claIclaCustomFields: true, claCclaCustomFields: true },
+    }),
   ]);
+
+  // Map custom-field ids → current labels for display (best-effort; the answer
+  // values are the verbatim snapshot, labels reflect the current schema).
+  const iclaFields = parseFormSchema(project?.claIclaCustomFields ?? "[]");
+  const cclaFields = parseFormSchema(project?.claCclaCustomFields ?? "[]");
+  const fieldLabel = (kind: string, fieldId: string): string => {
+    const fields = kind === "CCLA" ? cclaFields : iclaFields;
+    return fields.find((f) => f.id === fieldId)?.label ?? fieldId;
+  };
 
   return (
     <div className="space-y-6">
@@ -131,6 +174,65 @@ export default async function ClaSignatureLog({
                       className="mt-2 max-h-20 rounded-md border border-border bg-white p-1"
                     />
                   )}
+                  <details className="mt-2 text-xs">
+                    <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
+                      View entered details
+                    </summary>
+                    <dl className="mt-2 space-y-1.5 rounded-md border border-border bg-muted/20 p-3">
+                      {s.corporateSignatory ? (
+                        <>
+                          <Detail
+                            label="Legal entity"
+                            value={s.corporateSignatory.companyName}
+                          />
+                          <Detail
+                            label="Registered address"
+                            value={s.corporateSignatory.registeredAddress}
+                          />
+                          <Detail
+                            label="Country"
+                            value={s.corporateSignatory.country}
+                          />
+                          <Detail
+                            label="Point of contact"
+                            value={[
+                              s.corporateSignatory.contactName,
+                              s.corporateSignatory.contactEmail,
+                            ]
+                              .filter(Boolean)
+                              .join(" · ")}
+                          />
+                          <Detail
+                            label="Authorized representative"
+                            value={s.legalName}
+                          />
+                          <Detail
+                            label="Title"
+                            value={s.corporateSignatory.signatoryTitle}
+                          />
+                        </>
+                      ) : (
+                        <Detail label="Full legal name" value={s.legalName} />
+                      )}
+                      {parseCustomAnswers(s.customFields).map(([fid, val]) => (
+                        <Detail
+                          key={fid}
+                          label={fieldLabel(s.kind, fid)}
+                          value={renderAnswer(val)}
+                        />
+                      ))}
+                      <Detail label="Signed version" value={`v${s.documentVersion}`} />
+                      <Detail label="Email (snapshot)" value={s.emailSnapshot} />
+                      <Detail
+                        label="Signature method"
+                        value={s.signatureKind ?? "checkbox only"}
+                      />
+                      <Detail label="Content hash" value={s.contentHash} mono />
+                      <Detail label="IP address" value={s.ip} mono />
+                      <Detail label="User agent" value={s.userAgent} />
+                      <Detail label="Affirmation" value={s.affirmation} />
+                    </dl>
+                  </details>
                   {s.status === "ACTIVE" && (
                     <form
                       action={revokeSignature}
@@ -281,6 +383,26 @@ export default async function ClaSignatureLog({
           )}
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+function Detail({
+  label,
+  value,
+  mono,
+}: {
+  label: string;
+  value?: string | null;
+  mono?: boolean;
+}) {
+  if (value === null || value === undefined || value === "") return null;
+  return (
+    <div className="flex flex-col gap-0.5 sm:flex-row sm:gap-3">
+      <dt className="shrink-0 font-medium text-muted-foreground sm:w-44">
+        {label}
+      </dt>
+      <dd className={mono ? "break-all font-mono" : "break-words"}>{value}</dd>
     </div>
   );
 }

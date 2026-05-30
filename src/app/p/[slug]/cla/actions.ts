@@ -194,13 +194,13 @@ export async function signIcla(
     return fail("No CLA has been published for this project yet.");
   }
 
-  // A signature (printed legal name + a typed/drawn/uploaded signature) is
-  // required only when the project opts in.
+  // The signer's full legal name is always required. A drawn/typed/uploaded
+  // signature artifact is additionally required only when the project opts in.
+  if (input.legalName.length < 2) {
+    return fail("Please enter your full legal name.");
+  }
   let signature: ClaSignatureCapture | null = null;
   if (project.claIclaRequireSignature) {
-    if (input.legalName.length < 2) {
-      return fail("Please enter your full legal name.");
-    }
     const sig = signatureSchema.safeParse(collectSignature(formData));
     if (!sig.success) {
       return fail("Please provide a signature — type, draw, or upload one.");

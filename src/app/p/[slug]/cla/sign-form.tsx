@@ -93,28 +93,27 @@ export function SignForm({
         />
       )}
 
+      {/* The signer's full legal name is always collected. */}
+      <div className="space-y-1.5">
+        <Label htmlFor="cla-legal-name">Full legal name</Label>
+        <Input
+          id="cla-legal-name"
+          name="legalName"
+          required
+          minLength={2}
+          maxLength={200}
+          autoComplete="name"
+          placeholder="Your full legal name"
+        />
+      </div>
       {requireSignature && (
-        <>
-          <div className="space-y-1.5">
-            <Label htmlFor="cla-legal-name">Full legal name</Label>
-            <Input
-              id="cla-legal-name"
-              name="legalName"
-              required
-              minLength={2}
-              maxLength={200}
-              autoComplete="name"
-              placeholder="Your full legal name"
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label>Signature</Label>
-            <SignatureInput required />
-            <p className="text-xs text-muted-foreground">
-              Type, draw, or upload your signature.
-            </p>
-          </div>
-        </>
+        <div className="space-y-1.5">
+          <Label>Signature</Label>
+          <SignatureInput required />
+          <p className="text-xs text-muted-foreground">
+            Type, draw, or upload your signature.
+          </p>
+        </div>
       )}
 
       <p className="text-xs text-muted-foreground">
