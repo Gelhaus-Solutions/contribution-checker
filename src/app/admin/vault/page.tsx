@@ -27,6 +27,8 @@ type Row = {
   error: string | null;
   cacheHits: number;
   lastResolvedAt: Date | null;
+  servingStale: boolean;
+  lastSuccessAt: Date | null;
 };
 
 async function probeSecret(name: string): Promise<Row> {
@@ -44,6 +46,8 @@ async function probeSecret(name: string): Promise<Row> {
         error: status?.lastError ?? null,
         cacheHits: status?.cacheHits ?? 0,
         lastResolvedAt: status?.lastResolvedAt ?? null,
+        servingStale: false,
+        lastSuccessAt: status?.lastSuccessAt ?? null,
       };
     }
     return {
@@ -54,6 +58,8 @@ async function probeSecret(name: string): Promise<Row> {
       error: null,
       cacheHits: status?.cacheHits ?? 0,
       lastResolvedAt: status?.lastResolvedAt ?? null,
+      servingStale: status?.servingStale ?? false,
+      lastSuccessAt: status?.lastSuccessAt ?? null,
     };
   } catch (e) {
     const status = getSecretStatus(name);
@@ -70,8 +76,20 @@ async function probeSecret(name: string): Promise<Row> {
             : String(e),
       cacheHits: status?.cacheHits ?? 0,
       lastResolvedAt: status?.lastResolvedAt ?? null,
+      servingStale: false,
+      lastSuccessAt: status?.lastSuccessAt ?? null,
     };
   }
+}
+
+function formatAge(from: Date): string {
+  const seconds = Math.max(0, Math.floor((Date.now() - from.getTime()) / 1000));
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
 }
 
 export default async function VaultStatusPage() {
@@ -114,8 +132,27 @@ export default async function VaultStatusPage() {
             <Field label="Namespace">
               <code className="text-xs">{env.VAULT_NAMESPACE ?? "(none)"}</code>
             </Field>
-            <Field label="Cache TTL">
-              <code className="text-xs">{env.VAULT_CACHE_TTL_SECONDS ?? 300}s</code>
+            <Field label="Serve ceiling">
+              <code className="text-xs">
+                {env.VAULT_CACHE_TTL_SECONDS ?? 43200}s
+              </code>
+            </Field>
+            <Field label="Revalidate every">
+              <code className="text-xs">
+                {env.VAULT_REVALIDATE_INTERVAL_SECONDS ?? 15}s
+              </code>
+            </Field>
+            <Field label="Timeout">
+              <code className="text-xs">{env.VAULT_TIMEOUT_MS ?? 5000}ms</code>
+            </Field>
+            <Field label="Max retries">
+              <code className="text-xs">{env.VAULT_MAX_RETRIES ?? 2}</code>
+            </Field>
+            <Field label="Breaker">
+              <code className="text-xs">
+                {env.VAULT_BREAKER_THRESHOLD ?? 5} fails /{" "}
+                {env.VAULT_BREAKER_COOLDOWN_MS ?? 30000}ms
+              </code>
             </Field>
           </CardContent>
         </Card>
@@ -153,7 +190,12 @@ VAULT_APPROLE_ROLE_ID="..."
 VAULT_APPROLE_SECRET_ID="..."
 # VAULT_TOKEN="..."                   # only when VAULT_AUTH_METHOD=token
 # VAULT_NAMESPACE="..."               # Vault Enterprise only
-VAULT_CACHE_TTL_SECONDS="300"
+VAULT_CACHE_TTL_SECONDS="43200"       # serve last-known-good up to this long during an outage
+# VAULT_REVALIDATE_INTERVAL_SECONDS="15"  # min gap between silent background refreshes (0 = always)
+# VAULT_TIMEOUT_MS="5000"             # per-attempt request timeout
+# VAULT_MAX_RETRIES="2"               # retries on transient errors (timeout, 5xx) only
+# VAULT_BREAKER_THRESHOLD="5"         # consecutive failures before the breaker opens
+# VAULT_BREAKER_COOLDOWN_MS="30000"   # how long the breaker stays open
 
 # Per-secret paths (KV v2). Format: "<full-path>[#<field>]"
 # Without #field, the resolver looks for a key named "value".
@@ -189,6 +231,9 @@ function Field({
 
 function Row({ row }: { row: Row }) {
   const sourceBadge = (() => {
+    if (row.source === "vault" && row.servingStale) {
+      return <Badge variant="warning">stale</Badge>;
+    }
     switch (row.source) {
       case "vault":
         return <Badge variant="success">Vault</Badge>;
@@ -207,6 +252,12 @@ function Row({ row }: { row: Row }) {
         {row.pathSpec && (
           <div className="truncate font-mono text-[11px] text-muted-foreground">
             {row.pathSpec}
+          </div>
+        )}
+        {row.servingStale && row.lastSuccessAt && (
+          <div className="mt-1 text-[11px] text-warning">
+            Vault degraded; serving last good value from{" "}
+            {formatAge(row.lastSuccessAt)}
           </div>
         )}
         {row.error && (

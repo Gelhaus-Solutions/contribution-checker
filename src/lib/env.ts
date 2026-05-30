@@ -72,6 +72,11 @@ const schema = z.object({
   VAULT_NAMESPACE: z.string().optional(),
   VAULT_AUTH_METHOD: z.enum(["token", "approle"]).optional(),
   VAULT_CACHE_TTL_SECONDS: z.coerce.number().int().positive().optional(),
+  VAULT_REVALIDATE_INTERVAL_SECONDS: z.coerce.number().int().min(0).optional(),
+  VAULT_TIMEOUT_MS: z.coerce.number().int().positive().optional(),
+  VAULT_MAX_RETRIES: z.coerce.number().int().min(0).optional(),
+  VAULT_BREAKER_THRESHOLD: z.coerce.number().int().positive().optional(),
+  VAULT_BREAKER_COOLDOWN_MS: z.coerce.number().int().positive().optional(),
 });
 
 // During `next build`, Next.js executes server modules to collect page data

@@ -12,9 +12,17 @@ function makeConfig(over: Partial<VaultConfig> = {}): VaultConfig {
     addr: "https://vault.example.com",
     auth: { method: "token", token: "s.test" },
     cacheTtlSeconds: 300,
+    revalidateIntervalSeconds: 0,
+    timeoutMs: 5000,
+    maxRetries: 0,
+    breakerThreshold: 5,
+    breakerCooldownMs: 30000,
     ...over,
   };
 }
+
+// Instant sleep so retry/backoff tests don't wait on real timers.
+const noSleep = async (): Promise<void> => {};
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -174,6 +182,79 @@ describe("VaultClient", () => {
     const headers = (fetchMock.mock.calls[0]![1] as RequestInit)
       .headers as Headers;
     expect(headers.get("x-vault-namespace")).toBe("team-a");
+  });
+
+  it("retries a transient network error then succeeds", async () => {
+    fetchMock
+      .mockRejectedValueOnce(new Error("ECONNRESET"))
+      .mockRejectedValueOnce(new Error("ECONNRESET"))
+      .mockResolvedValueOnce(jsonResponse({ data: { data: { value: "ok" } } }));
+    const client = new VaultClient(
+      makeConfig({ maxRetries: 2 }),
+      5000,
+      fetchMock as unknown as typeof fetch,
+      noSleep
+    );
+    const data = await client.readKvV2("secret/data/foo");
+    expect(data.value).toBe("ok");
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("retries a 5xx then succeeds", async () => {
+    fetchMock
+      .mockResolvedValueOnce(new Response("unavailable", { status: 503 }))
+      .mockResolvedValueOnce(jsonResponse({ data: { data: { value: "ok" } } }));
+    const client = new VaultClient(
+      makeConfig({ maxRetries: 2 }),
+      5000,
+      fetchMock as unknown as typeof fetch,
+      noSleep
+    );
+    const data = await client.readKvV2("secret/data/foo");
+    expect(data.value).toBe("ok");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not retry a 404", async () => {
+    fetchMock.mockResolvedValue(new Response("missing", { status: 404 }));
+    const client = new VaultClient(
+      makeConfig({ maxRetries: 3 }),
+      5000,
+      fetchMock as unknown as typeof fetch,
+      noSleep
+    );
+    await expect(client.readKvV2("secret/data/foo")).rejects.toBeInstanceOf(
+      VaultNotFoundError
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not retry a 401", async () => {
+    fetchMock.mockResolvedValue(new Response("nope", { status: 401 }));
+    const client = new VaultClient(
+      makeConfig({ maxRetries: 3 }),
+      5000,
+      fetchMock as unknown as typeof fetch,
+      noSleep
+    );
+    await expect(client.readKvV2("secret/data/foo")).rejects.toBeInstanceOf(
+      VaultAuthError
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("exhausts retries then throws the last transient error", async () => {
+    fetchMock.mockRejectedValue(new Error("ECONNRESET"));
+    const client = new VaultClient(
+      makeConfig({ maxRetries: 2 }),
+      5000,
+      fetchMock as unknown as typeof fetch,
+      noSleep
+    );
+    await expect(client.readKvV2("secret/data/foo")).rejects.toBeInstanceOf(
+      VaultNetworkError
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
   it("wraps timeouts as VaultNetworkError", async () => {

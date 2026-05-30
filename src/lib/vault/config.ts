@@ -17,7 +17,22 @@ const baseSchema = z.object({
   VAULT_APPROLE_ROLE_ID: z.string().optional(),
   VAULT_APPROLE_SECRET_ID: z.string().optional(),
   VAULT_APPROLE_MOUNT: z.string().default("approle"),
-  VAULT_CACHE_TTL_SECONDS: z.coerce.number().int().positive().default(300),
+  // Hard serve ceiling: how long a cached value may be served WITHOUT a
+  // successful background revalidation. The resolver revalidates silently on
+  // every access (subject to the throttle below), so this only bites during a
+  // sustained Vault outage. Default is 12h.
+  VAULT_CACHE_TTL_SECONDS: z.coerce.number().int().positive().default(43200),
+  // Minimum gap between background revalidations of the same path. 0 means
+  // revalidate on every access (concurrent reads still coalesce to one).
+  VAULT_REVALIDATE_INTERVAL_SECONDS: z.coerce.number().int().min(0).default(15),
+  // Per-attempt request timeout. Plumbed into the VaultClient.
+  VAULT_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
+  // Retries for transient errors only (network/timeout, 5xx). 0 disables.
+  VAULT_MAX_RETRIES: z.coerce.number().int().min(0).default(2),
+  // Circuit breaker: open after this many consecutive transient failures for a
+  // path, then skip Vault for the cooldown window and serve last-known-good.
+  VAULT_BREAKER_THRESHOLD: z.coerce.number().int().positive().default(5),
+  VAULT_BREAKER_COOLDOWN_MS: z.coerce.number().int().positive().default(30000),
 });
 
 export type VaultAuthConfig =
@@ -34,6 +49,11 @@ export type VaultConfig = {
   namespace?: string;
   auth: VaultAuthConfig;
   cacheTtlSeconds: number;
+  revalidateIntervalSeconds: number;
+  timeoutMs: number;
+  maxRetries: number;
+  breakerThreshold: number;
+  breakerCooldownMs: number;
 };
 
 let cached: VaultConfig | null = null;
@@ -88,6 +108,11 @@ export function getVaultConfig(): VaultConfig {
     namespace: raw.VAULT_NAMESPACE,
     auth,
     cacheTtlSeconds: raw.VAULT_CACHE_TTL_SECONDS,
+    revalidateIntervalSeconds: raw.VAULT_REVALIDATE_INTERVAL_SECONDS,
+    timeoutMs: raw.VAULT_TIMEOUT_MS,
+    maxRetries: raw.VAULT_MAX_RETRIES,
+    breakerThreshold: raw.VAULT_BREAKER_THRESHOLD,
+    breakerCooldownMs: raw.VAULT_BREAKER_COOLDOWN_MS,
   };
   return cached;
 }

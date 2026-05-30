@@ -30,6 +30,29 @@ type Token = { value: string; expiresAt: number };
 const DEFAULT_TIMEOUT_MS = 5000;
 // Renew tokens this many ms before they expire to avoid 403-on-boundary races.
 const TOKEN_REFRESH_LEEWAY_MS = 30_000;
+// Backoff base and cap for transient-error retries. With the default 2 retries
+// and a 5s per-attempt timeout, worst-case cold-path blocking is roughly
+// 3 attempts plus two short sleeps, which stays under GitHub's webhook
+// delivery timeout. The warm path never blocks (it revalidates in the
+// background), so this budget only applies to a true cold start.
+const RETRY_BASE_DELAY_MS = 150;
+const RETRY_MAX_DELAY_MS = 1000;
+
+const realSleep = (ms: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Transient errors are worth retrying: network failures, timeouts, and 5xx
+ * responses. Auth failures (401/403), 404, and structural errors are not, as a
+ * retry would just repeat the same deterministic outcome.
+ */
+function isTransient(e: unknown): boolean {
+  if (e instanceof VaultNetworkError) return true;
+  if (e instanceof VaultAuthError) return false;
+  if (e instanceof VaultNotFoundError) return false;
+  if (e instanceof VaultError) return e.status !== undefined && e.status >= 500;
+  return false;
+}
 
 export class VaultClient {
   private token: Token | null = null;
@@ -37,7 +60,8 @@ export class VaultClient {
   constructor(
     private readonly config: VaultConfig,
     private readonly timeoutMs: number = DEFAULT_TIMEOUT_MS,
-    private readonly fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis)
+    private readonly fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis),
+    private readonly sleepImpl: (ms: number) => Promise<void> = realSleep
   ) {}
 
   /**
@@ -91,6 +115,25 @@ export class VaultClient {
    * directly from the Vault UI without us having to inject `data/`.
    */
   async readKvV2(fullPath: string): Promise<Record<string, string>> {
+    const maxRetries = this.config.maxRetries ?? 0;
+    let attempt = 0;
+    for (;;) {
+      try {
+        return await this.readKvV2Once(fullPath);
+      } catch (e) {
+        if (attempt >= maxRetries || !isTransient(e)) throw e;
+        const expo = RETRY_BASE_DELAY_MS * 2 ** attempt;
+        // Full jitter keeps concurrent retries from synchronizing.
+        const delay = Math.random() * Math.min(RETRY_MAX_DELAY_MS, expo);
+        await this.sleepImpl(delay);
+        attempt += 1;
+      }
+    }
+  }
+
+  private async readKvV2Once(
+    fullPath: string
+  ): Promise<Record<string, string>> {
     const res = await this.request(`/v1/${fullPath}`, { method: "GET" }, true);
     const json = (await res.json()) as {
       data?: { data?: Record<string, string> };

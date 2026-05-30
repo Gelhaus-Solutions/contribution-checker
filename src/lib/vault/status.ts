@@ -14,6 +14,12 @@ export type SecretStatus = {
   lastOk: boolean | null;
   lastError: string | null;
   cacheHits: number;
+  // True when the value currently being served is stale because background
+  // revalidation is failing (Vault degraded but we still have a usable value).
+  servingStale: boolean;
+  // When Vault last returned this value successfully. Survives later failures
+  // so the status page can show "last good Nh ago" while degraded.
+  lastSuccessAt: Date | null;
 };
 
 const statuses = new Map<string, SecretStatus>();
@@ -28,6 +34,8 @@ function ensure(name: string): SecretStatus {
       lastOk: null,
       lastError: null,
       cacheHits: 0,
+      servingStale: false,
+      lastSuccessAt: null,
     };
     statuses.set(name, s);
   }
@@ -36,13 +44,25 @@ function ensure(name: string): SecretStatus {
 
 export function recordResolution(
   name: string,
-  result: { ok: boolean; source: ResolutionSource; error?: string }
+  result: {
+    ok: boolean;
+    source: ResolutionSource;
+    error?: string;
+    servingStale?: boolean;
+    lastSuccessAt?: number;
+  }
 ): void {
   const s = ensure(name);
   s.lastResolvedAt = new Date();
   s.lastSource = result.source;
   s.lastOk = result.ok;
   s.lastError = result.error ?? null;
+  s.servingStale = result.servingStale ?? false;
+  // Only advance lastSuccessAt on a genuine success; leave it intact on
+  // failures so the page can show how old the served value is.
+  if (result.ok && result.lastSuccessAt !== undefined) {
+    s.lastSuccessAt = new Date(result.lastSuccessAt);
+  }
 }
 
 export function recordCacheHit(name: string): void {
