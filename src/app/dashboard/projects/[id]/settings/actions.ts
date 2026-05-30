@@ -228,7 +228,7 @@ export async function addProjectWebhook(formData: FormData) {
       name: parsed.name ?? null,
       kind: parsed.kind,
       url: parsed.url,
-      // Secret is meaningless for Discord — drop it.
+      // Secret is meaningless for Discord, so drop it.
       secret: parsed.kind === "discord" ? null : parsed.secret,
       enabled: true,
     },

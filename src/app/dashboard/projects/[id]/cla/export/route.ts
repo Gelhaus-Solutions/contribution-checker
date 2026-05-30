@@ -14,7 +14,7 @@ export const dynamic = "force-dynamic";
  * Exports the project's full CLA legal record as a downloadable attachment:
  * the immutable hash-chained ledger (ClaEventLog, ordered by seq) plus the
  * operational tables (signatures, corporate CLAs, rosters, waivers) and the
- * `verifyChain` integrity result. ADMIN-only (re-checked here — server
+ * `verifyChain` integrity result. ADMIN-only (re-checked here: server
  * components redirect, but a Route Handler returns a JSON 403 instead).
  *
  * - JSON (default): the complete record + integrity status.
@@ -40,7 +40,7 @@ export async function GET(
   const url = new URL(req.url);
   const format = url.searchParams.get("format") === "csv" ? "csv" : "json";
 
-  // Pull the ledger (ordered by seq — the legally-authoritative ordering) plus
+  // Pull the ledger (ordered by seq, the legally-authoritative ordering) plus
   // the operational tables. The ledger is the immutable record; the others are
   // current state, included so the export is self-contained.
   const [events, signatures, corporates, roster, waivers, integrity] =
@@ -162,7 +162,7 @@ function buildSignaturesCsv(
 
   for (const e of events) {
     // The payload is canonical JSON written by appendClaEvent. We read it for
-    // display columns only — the authoritative integrity columns (seq/hashes)
+    // display columns only; the authoritative integrity columns (seq/hashes)
     // come straight off the row, so a malformed payload still exports cleanly.
     let p: Record<string, unknown> = {};
     try {

@@ -127,7 +127,7 @@ export function FormBuilder({
 
         {fields.length === 0 && (
           <p className="text-sm text-muted-foreground">
-            No fields yet — add one above.
+            No fields yet. Add one above.
           </p>
         )}
 

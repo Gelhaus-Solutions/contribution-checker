@@ -8,7 +8,7 @@ import { invalidateClaCache } from "@/lib/cla/status";
 // CLA operational mutations.
 //
 // DB-only writes + ledger appends. NO Octokit, NO Check publishing, NO audit /
-// notification side effects — the calling server actions own those (see the
+// notification side effects: the calling server actions own those (see the
 // action table in the design doc). Every coverage-relevant write runs inside a
 // single `prisma.$transaction` and appends exactly one `ClaEventLog` entry via
 // `appendClaEvent` so the operational row and the hash-chained ledger entry
@@ -398,7 +398,7 @@ export async function recordCclaSignature(a: {
 /**
  * Bulk-add roster members to a CorporateCla. Each entry that has an existing
  * DISPUTED member for this corporate (matched by ghId, else lowercased ghLogin)
- * is refused (collected into `skippedDisputed` — the consent gate). The rest
+ * is refused (collected into `skippedDisputed`, the consent gate). The rest
  * are created ACTIVE and each appends a `roster.added` ledger entry. Each newly
  * covered ghId has its coverage cache invalidated.
  */
@@ -484,7 +484,7 @@ export async function addRosterMembers(a: {
 }
 
 /**
- * Revoke a roster member (status REVOKED). Append-only — the original ACTIVE
+ * Revoke a roster member (status REVOKED). Append-only: the original ACTIVE
  * transition is retained in the ledger. Appends `roster.revoked` and
  * invalidates the member's coverage cache.
  */

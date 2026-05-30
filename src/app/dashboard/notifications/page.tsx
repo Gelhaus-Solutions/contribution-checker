@@ -9,6 +9,9 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { SubmitButton } from "@/components/ui/submit-button";
+import { SearchInput } from "@/components/ui/search-input";
+import { Pagination } from "@/components/ui/pagination";
+import { parsePageParams, type SearchParamRecord } from "@/lib/pagination";
 import { markAllReadAction } from "./actions";
 
 const KIND_LABELS: Record<string, string> = {
@@ -21,9 +24,21 @@ const KIND_LABELS: Record<string, string> = {
   "pr.blocked": "PR blocked",
 };
 
-export default async function NotificationsPage() {
+export default async function NotificationsPage({
+  searchParams,
+}: {
+  searchParams: Promise<SearchParamRecord>;
+}) {
   const session = await requireSession();
-  const items = await listNotifications(session.user.id, 100);
+  const sp = await searchParams;
+  const { page, perPage, skip, take, q } = parsePageParams(sp);
+  const { items, total } = await listNotifications(session.user.id, {
+    skip,
+    take,
+    q,
+  });
+
+  const basePath = "/dashboard/notifications";
 
   return (
     <>
@@ -42,9 +57,16 @@ export default async function NotificationsPage() {
             <CardTitle className="text-base">Inbox</CardTitle>
           </CardHeader>
           <CardContent className="p-0">
+            <div className="border-b border-border px-6 py-3">
+              <SearchInput
+                pathname={basePath}
+                q={q}
+                placeholder="Search by kind"
+              />
+            </div>
             {items.length === 0 ? (
-              <div className="px-6 pb-6 text-sm text-muted-foreground">
-                Nothing here yet.
+              <div className="px-6 py-6 text-sm text-muted-foreground">
+                {q ? "No notifications match your search." : "Nothing here yet."}
               </div>
             ) : (
               <ul className="divide-y divide-border">
@@ -135,6 +157,13 @@ export default async function NotificationsPage() {
                 })}
               </ul>
             )}
+            <Pagination
+              pathname={basePath}
+              searchParams={sp}
+              page={page}
+              perPage={perPage}
+              total={total}
+            />
           </CardContent>
         </Card>
       </main>

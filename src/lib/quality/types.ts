@@ -16,7 +16,7 @@ export type PrFile = {
   additions: number;
   deletions: number;
   changes: number;
-  // The unified diff "@@ ... @@" body — may be undefined for binary or huge files.
+  // The unified diff "@@ ... @@" body; may be undefined for binary or huge files.
   patch?: string | null;
   previous_filename?: string;
 };
@@ -92,7 +92,7 @@ export type HeuristicResult = {
   /**
    * When this heuristic fires, the final score is capped at this value (0–100).
    * The score formula takes the min over all caps from failed signals. Use
-   * sparingly — only for signals that, when true, mean the PR's quality is
+   * sparingly, only for signals that, when true, mean the PR's quality is
    * fundamentally suspect regardless of other passes.
    */
   scoreCap?: number;

@@ -42,7 +42,7 @@ export class VaultClient {
 
   /**
    * Acquire (or reuse) an auth token. Static `token` auth never expires from
-   * our perspective — Vault rejects with 403 if the token is invalid, in
+   * our perspective. Vault rejects with 403 if the token is invalid, in
    * which case we surface VaultAuthError to the caller.
    */
   private async getToken(): Promise<string> {
@@ -87,7 +87,7 @@ export class VaultClient {
 
   /**
    * Read a KV v2 secret. `fullPath` should be the full path including the
-   * `data/` segment (e.g. `secret/data/cc/github`) — operators can copy paths
+   * `data/` segment (e.g. `secret/data/cc/github`) so operators can copy paths
    * directly from the Vault UI without us having to inject `data/`.
    */
   async readKvV2(fullPath: string): Promise<Record<string, string>> {
@@ -107,8 +107,8 @@ export class VaultClient {
   /**
    * Centralized request: handles timeout, namespace header, token header
    * (when authed), and status-to-error mapping. When `authed=true` and the
-   * cached token returns 403, we drop it and retry once after re-login —
-   * this covers AppRole tokens that expire mid-process.
+   * cached token returns 403, we drop it and retry once after re-login.
+   * This covers AppRole tokens that expire mid-process.
    */
   private async request(
     path: string,

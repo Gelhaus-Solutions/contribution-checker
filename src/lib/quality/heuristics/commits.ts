@@ -39,7 +39,7 @@ export const commitHeuristics: Heuristic[] = [
     group: "commit",
     label: "Author mismatch across commits",
     description:
-      "Commits authored by multiple identities — usually cherry-picked work. Threshold is an allowlist of author emails or logins (one per line) that don't count toward the distinct-author tally — e.g. bot accounts like dependabot[bot] or noreply@github.com.",
+      "Commits authored by multiple identities, usually cherry-picked work. Threshold is an allowlist of author emails or logins (one per line) that don't count toward the distinct-author tally (e.g. bot accounts like dependabot[bot] or noreply@github.com).",
     weight: 2,
     defaultEnabled: true,
     defaultThreshold: [],
@@ -121,7 +121,7 @@ export const commitHeuristics: Heuristic[] = [
     id: "commit.single_giant",
     group: "commit",
     label: "Single giant commit",
-    description: "One commit with very many changes — typical AI bulk diff.",
+    description: "One commit with very many changes: typical AI bulk diff.",
     weight: 2,
     defaultEnabled: true,
     defaultThreshold: 2000,

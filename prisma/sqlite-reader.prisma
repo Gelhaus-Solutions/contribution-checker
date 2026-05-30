@@ -190,7 +190,7 @@ model Project {
   claIclaCustomFields String @default("[]")
   claCclaCustomFields String @default("[]")
 
-  // ----- DCO (Developer Certificate of Origin) — independent of CLA -----
+  // ----- DCO (Developer Certificate of Origin): independent of CLA -----
   dcoEnabled Boolean @default(false)
 
   createdAt DateTime @default(now())
@@ -215,9 +215,9 @@ model Project {
 /**
  * Outbound webhook endpoint. Each project can have any number of these.
  * `kind` controls payload formatting and signing:
- *   - "generic" — JSON body identical to the legacy single-webhook contract,
+ *   - "generic": JSON body identical to the legacy single-webhook contract,
  *     signed with HMAC-SHA256 in `X-ContribCheck-Signature` when `secret` is set.
- *   - "discord" — body transformed to a Discord-compatible message (content +
+ *   - "discord": body transformed to a Discord-compatible message (content +
  *     embed). No signing; `secret` is ignored.
  */
 model ProjectWebhook {
@@ -370,7 +370,7 @@ model ApplicationNote {
 }
 
 /**
- * A reviewer's submitted review on an application — analogous to a GitHub
+ * A reviewer's submitted review on an application, analogous to a GitHub
  * pull-request review. Carries an overall state and an optional summary
  * body (markdown). Per-field comments (ApplicationNote rows with fieldId
  * set) are linked to a review via ApplicationNote.reviewId at submission
@@ -380,7 +380,7 @@ model ApplicationNote {
  *   CHANGES_REQUESTED ⇒ APPLICANT (feedback the applicant can see + reply to)
  *   COMMENTED         ⇒ author chooses INTERNAL or APPLICANT per submit
  *
- * Reviews can be soft-dismissed (deletedAt set) by an ADMIN — dismissed
+ * Reviews can be soft-dismissed (deletedAt set) by an ADMIN; dismissed
  * reviews don't count toward the approval gate.
  */
 model ApplicationReview {
@@ -436,7 +436,7 @@ model PrCheck {
 /**
  * PR Quality signals, 1:1 with PrCheck. Stores the *raw* signals (which
  * heuristics ran, what they found) so the final % score can be computed on
- * the fly using the project's current qualityConfig — config changes apply
+ * the fly using the project's current qualityConfig; config changes apply
  * instantly, no recompute job.
  */
 model PrQuality {
@@ -536,7 +536,7 @@ model WebhookDelivery {
 // `x-github-delivery` UUID. Inserted on first receipt; the unique-constraint
 // violation on retry short-circuits the handler so side effects (audit rows,
 // outbound webhooks, label calls) don't multiply across GitHub's retry policy.
-// Pruned periodically (24h retention is plenty — GitHub retries within a
+// Pruned periodically (24h retention is plenty, GitHub retries within a
 // much shorter window).
 model ProcessedWebhookDelivery {
   id        String   @id
@@ -577,7 +577,7 @@ model ClaDocumentVersion {
   kind        String  // "ICLA" | "CCLA"
   version     Int
   bodyMarkdown String  // snapshot of the exact text signed (even for repo-file source)
-  contentHash String  // sha256(bodyMarkdown) — the version hash
+  contentHash String  // sha256(bodyMarkdown): the version hash
 
   sourceType      String  @default("manual") // "manual" | "repo_file"
   sourceRepoId    String?
@@ -701,7 +701,7 @@ model CorporateCla {
 /**
  * A roster entry. Append-only state transitions; never hard-deleted. A member
  * is added (ACTIVE), revoked (REVOKED) by the signatory, or DISPUTED (the
- * listed contributor says they aren't affiliated — coverage suspended). A
+ * listed contributor says they aren't affiliated, coverage suspended). A
  * DISPUTED account cannot be re-added unless the contributor consents.
  */
 model CclaRosterMember {
@@ -758,7 +758,7 @@ model ClaWaiver {
  * dispute, signature revocations, waivers) is recorded here. seq is a 0-based
  * monotonic counter per project (seq 0 = genesis). entryHash chains via
  * prevHash; @@unique([projectId, seq]) makes gaps/reordering impossible.
- * Link fields are plain scalars (no FK) — this is an immutable record, never
+ * Link fields are plain scalars (no FK); this is an immutable record, never
  * cascaded or constrained. See src/lib/cla/integrity.ts for the hashing spec.
  */
 model ClaEventLog {

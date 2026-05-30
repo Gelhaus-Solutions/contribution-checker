@@ -37,7 +37,7 @@ export type DecisionCheckPayload = {
 };
 
 /**
- * Map a decision into Check Run state. Pure, no I/O — used by both the
+ * Map a decision into Check Run state. Pure, no I/O; used by both the
  * App-mode publisher and the CI mode endpoint to return identical payloads.
  */
 export function buildDecisionCheckPayload(args: {
@@ -102,7 +102,7 @@ export function buildDecisionCheckPayload(args: {
           status: "completed",
           conclusion: "action_required",
           title: "DCO sign-off required",
-          summary: `One or more commits are missing a Developer Certificate of Origin sign-off. Add a "Signed-off-by" trailer to each commit (e.g. \`git commit -s\`) — your PR stays open and we'll re-check automatically.`,
+          summary: `One or more commits are missing a Developer Certificate of Origin sign-off. Add a "Signed-off-by" trailer to each commit (e.g. \`git commit -s\`). Your PR stays open and we'll re-check automatically.`,
           detailsUrl: applyUrl,
         };
       }
@@ -113,8 +113,8 @@ export function buildDecisionCheckPayload(args: {
         conclusion: "action_required",
         title: "CLA required",
         summary: stale
-          ? `A new version of the ${projectName} CLA must be signed. Sign it to unblock this PR — your PR stays open and we'll re-check automatically once signed.`
-          : `Sign the ${projectName} CLA to unblock this PR — your PR stays open and we'll re-check automatically once signed.`,
+          ? `A new version of the ${projectName} CLA must be signed. Sign it to unblock this PR. Your PR stays open and we'll re-check automatically once signed.`
+          : `Sign the ${projectName} CLA to unblock this PR. Your PR stays open and we'll re-check automatically once signed.`,
         detailsUrl: claUrl ?? applyUrl,
       };
     }

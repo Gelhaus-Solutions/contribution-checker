@@ -202,7 +202,7 @@ function reviewerPaths(projectId: string, appId: string, slug?: string | null) {
 /**
  * Submit a review (Approve / Request Changes / Comment) and link any draft
  * per-field comments authored by the same reviewer. Visibility on linked
- * comments is normalized from the review state — the reviewer only chooses
+ * comments is normalized from the review state; the reviewer only chooses
  * visibility for the COMMENTED state.
  */
 export async function submitReviewAction(formData: FormData) {
@@ -238,7 +238,7 @@ export async function submitReviewAction(formData: FormData) {
     if (parsed.draftCommentIds.length > 0) {
       // Only link drafts that this reviewer actually owns and that aren't
       // already attached to a review or deleted. Other ids are silently
-      // ignored — defends against tampered form payloads.
+      // ignored; defends against tampered form payloads.
       await tx.applicationNote.updateMany({
         where: {
           id: { in: parsed.draftCommentIds },
@@ -425,7 +425,7 @@ export async function deleteNoteAction(formData: FormData) {
 /**
  * Reply to an existing comment. Project reviewers can reply on any thread.
  * The applicant can reply *only* when the parent comment is APPLICANT-
- * visible — that's the conversation channel for "Request Changes" reviews.
+ * visible: that's the conversation channel for "Request Changes" reviews.
  * The reply inherits the parent's visibility so the thread stays coherent.
  */
 export async function replyToCommentAction(formData: FormData) {
@@ -486,7 +486,7 @@ export async function replyToCommentAction(formData: FormData) {
   });
 
   // Notification routing: applicant→reviewers, reviewer→applicant (only on
-  // applicant-visible threads — reviewer-internal replies don't notify the
+  // applicant-visible threads; reviewer-internal replies don't notify the
   // applicant).
   if (isApplicant && !isReviewer) {
     await notifyProjectReviewers({
@@ -516,7 +516,7 @@ export async function replyToCommentAction(formData: FormData) {
 
 /**
  * Soft-dismiss a review so it no longer counts toward the approval gate.
- * Mirrors GitHub's "dismiss review" — the review row stays for audit but
+ * Mirrors GitHub's "dismiss review": the review row stays for audit but
  * is excluded from the LGTM count.
  */
 export async function dismissReviewAction(formData: FormData) {

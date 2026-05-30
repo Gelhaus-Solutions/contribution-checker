@@ -1,3 +1,4 @@
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { requireProjectRole } from "@/lib/authz";
 import {
@@ -8,32 +9,67 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { SearchInput } from "@/components/ui/search-input";
+import { Pagination } from "@/components/ui/pagination";
+import { parsePageParams, type SearchParamRecord } from "@/lib/pagination";
 
 export default async function AuditLog({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<SearchParamRecord>;
 }) {
   const { id } = await params;
+  const sp = await searchParams;
   await requireProjectRole(id, "ADMIN");
 
-  const events = await prisma.auditEvent.findMany({
-    where: { projectId: id },
-    include: { actor: { select: { ghLogin: true } } },
-    orderBy: { createdAt: "desc" },
-    take: 100,
-  });
+  const { page, perPage, skip, take, q } = parsePageParams(sp);
+
+  const where: Prisma.AuditEventWhereInput = {
+    projectId: id,
+    ...(q
+      ? {
+          OR: [
+            { kind: { contains: q, mode: "insensitive" } },
+            { actor: { ghLogin: { contains: q, mode: "insensitive" } } },
+          ],
+        }
+      : {}),
+  };
+
+  const [events, total] = await prisma.$transaction([
+    prisma.auditEvent.findMany({
+      where,
+      include: { actor: { select: { ghLogin: true } } },
+      orderBy: { createdAt: "desc" },
+      skip,
+      take,
+    }),
+    prisma.auditEvent.count({ where }),
+  ]);
+
+  const basePath = `/dashboard/projects/${id}/audit`;
 
   return (
     <Card>
       <CardHeader>
         <CardTitle className="text-base">Audit log</CardTitle>
-        <CardDescription>Last 100 events.</CardDescription>
+        <CardDescription>
+          {total} event{total === 1 ? "" : "s"} recorded.
+        </CardDescription>
       </CardHeader>
       <CardContent className="p-0">
+        <div className="border-b border-border px-6 py-3">
+          <SearchInput
+            pathname={basePath}
+            q={q}
+            placeholder="Search by kind or actor"
+          />
+        </div>
         {events.length === 0 ? (
-          <div className="px-6 pb-6 text-sm text-muted-foreground">
-            No events yet.
+          <div className="px-6 py-6 text-sm text-muted-foreground">
+            {q ? "No events match your search." : "No events yet."}
           </div>
         ) : (
           <ul className="divide-y divide-border">
@@ -59,6 +95,13 @@ export default async function AuditLog({
             ))}
           </ul>
         )}
+        <Pagination
+          pathname={basePath}
+          searchParams={sp}
+          page={page}
+          perPage={perPage}
+          total={total}
+        />
       </CardContent>
     </Card>
   );

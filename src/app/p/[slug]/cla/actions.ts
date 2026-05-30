@@ -203,7 +203,7 @@ export async function signIcla(
   if (project.claIclaRequireSignature) {
     const sig = signatureSchema.safeParse(collectSignature(formData));
     if (!sig.success) {
-      return fail("Please provide a signature — type, draw, or upload one.");
+      return fail("Please provide a signature: type, draw, or upload one.");
     }
     signature = {
       kind: sig.data.signatureKind,
@@ -313,7 +313,7 @@ export async function signCcla(
   // The corporate signature (type/draw/upload) is required.
   const sigParsed = signatureSchema.safeParse(collectSignature(formData));
   if (!sigParsed.success) {
-    return fail("Please provide a signature — type, draw, or upload one.");
+    return fail("Please provide a signature: type, draw, or upload one.");
   }
   const signature: ClaSignatureCapture = {
     kind: sigParsed.data.signatureKind,
@@ -490,7 +490,7 @@ export async function addRosterMembers(
 
     // Re-check the newly covered contributors' CLA-gated PRs. `PrCheck` stores
     // the author's ghId alongside the (lowercased) login, so we resolve the
-    // ghId from the open gated checks rather than from a User row — this works
+    // ghId from the open gated checks rather than from a User row. This works
     // even for contributors who have never signed in here, and avoids a
     // case-insensitive User lookup (unsupported on SQLite). De-dup by ghId.
     if (added.length > 0) {
@@ -717,7 +717,7 @@ export async function disputeMembership(
     });
 
     // Best-effort: notify the corporate contact email. Failures are swallowed
-    // by sendEmail (returns false) — never block the dispute on email.
+    // by sendEmail (returns false), never block the dispute on email.
     const contactEmail = member.corporateCla?.contactEmail;
     if (contactEmail) {
       const companyName = member.corporateCla?.companyName ?? "your company";

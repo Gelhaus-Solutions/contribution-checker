@@ -17,7 +17,7 @@ export default async function Home() {
         <p className="mt-4 text-lg text-muted-foreground">
           Open-source maintainers: stop manually triaging unsolicited PRs. Wire up
           a GitHub App, and contribution-checker will auto-close PRs from
-          contributors who haven&apos;t applied — and reopen them once you approve.
+          contributors who haven&apos;t applied, then reopen them once you approve.
         </p>
         <div className="mt-8 flex gap-3">
           {session?.user ? (

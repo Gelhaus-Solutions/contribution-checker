@@ -1,3 +1,4 @@
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { requireProjectRole } from "@/lib/authz";
 import { verifyChain } from "@/lib/cla/integrity";
@@ -12,6 +13,13 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SubmitButton } from "@/components/ui/submit-button";
+import { SearchInput } from "@/components/ui/search-input";
+import { Pagination } from "@/components/ui/pagination";
+import {
+  parsePageParams,
+  siblingParams,
+  type SearchParamRecord,
+} from "@/lib/pagination";
 import { parseFormSchema } from "@/lib/applications/schema";
 import { revokeSignature, grantWaiver, revokeWaiver } from "../actions";
 
@@ -34,51 +42,101 @@ function parseCustomAnswers(json: string | null): [string, unknown][] {
 
 function renderAnswer(v: unknown): string {
   if (typeof v === "boolean") return v ? "Yes" : "No";
-  if (v === null || v === undefined || v === "") return "—";
+  if (v === null || v === undefined || v === "") return "n/a";
   return String(v);
 }
 
 export default async function ClaSignatureLog({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<SearchParamRecord>;
 }) {
   const { id } = await params;
+  const sp = await searchParams;
   await requireProjectRole(id, "ADMIN");
 
-  const [signatures, waivers, events, chain, project] = await Promise.all([
-    prisma.claSignature.findMany({
-      where: { projectId: id },
-      include: {
-        corporateSignatory: {
-          select: {
-            id: true,
-            companyName: true,
-            registeredAddress: true,
-            country: true,
-            contactName: true,
-            contactEmail: true,
-            signatoryTitle: true,
+  // Three independent paginators share this route, so each uses its own param
+  // namespace and carries the others' state across navigation.
+  const sig = parsePageParams(sp, { keys: { page: "spage", q: "sq" } });
+  const wai = parsePageParams(sp, { keys: { page: "wpage", q: "wq" } });
+  const evt = parsePageParams(sp, { keys: { page: "epage", q: "eq" } });
+
+  const sigWhere: Prisma.ClaSignatureWhereInput = {
+    projectId: id,
+    ...(sig.q
+      ? {
+          OR: [
+            { ghLogin: { contains: sig.q, mode: "insensitive" } },
+            { legalName: { contains: sig.q, mode: "insensitive" } },
+            { emailSnapshot: { contains: sig.q, mode: "insensitive" } },
+          ],
+        }
+      : {}),
+  };
+  const waiWhere: Prisma.ClaWaiverWhereInput = {
+    projectId: id,
+    ...(wai.q
+      ? {
+          OR: [
+            { ghLogin: { contains: wai.q, mode: "insensitive" } },
+            { reason: { contains: wai.q, mode: "insensitive" } },
+          ],
+        }
+      : {}),
+  };
+  const evtWhere: Prisma.ClaEventLogWhereInput = { projectId: id };
+
+  const [
+    [signatures, sigTotal, waivers, waiTotal, events, evtTotal],
+    chain,
+    project,
+  ] = await Promise.all([
+    prisma.$transaction([
+      prisma.claSignature.findMany({
+        where: sigWhere,
+        include: {
+          corporateSignatory: {
+            select: {
+              id: true,
+              companyName: true,
+              registeredAddress: true,
+              country: true,
+              contactName: true,
+              contactEmail: true,
+              signatoryTitle: true,
+            },
           },
         },
-      },
-      orderBy: { signedAt: "desc" },
-    }),
-    prisma.claWaiver.findMany({
-      where: { projectId: id },
-      orderBy: { grantedAt: "desc" },
-    }),
-    prisma.claEventLog.findMany({
-      where: { projectId: id },
-      orderBy: { seq: "desc" },
-      take: 200,
-    }),
+        orderBy: { signedAt: "desc" },
+        skip: sig.skip,
+        take: sig.take,
+      }),
+      prisma.claSignature.count({ where: sigWhere }),
+      prisma.claWaiver.findMany({
+        where: waiWhere,
+        orderBy: { grantedAt: "desc" },
+        skip: wai.skip,
+        take: wai.take,
+      }),
+      prisma.claWaiver.count({ where: waiWhere }),
+      prisma.claEventLog.findMany({
+        where: evtWhere,
+        orderBy: { seq: "desc" },
+        skip: evt.skip,
+        take: evt.take,
+      }),
+      prisma.claEventLog.count({ where: evtWhere }),
+    ]),
     verifyChain(id),
     prisma.project.findUnique({
       where: { id },
       select: { claIclaCustomFields: true, claCclaCustomFields: true },
     }),
   ]);
+
+  const basePath = `/dashboard/projects/${id}/cla/signatures`;
 
   // Map custom-field ids → current labels for display (best-effort; the answer
   // values are the verbatim snapshot, labels reflect the current schema).
@@ -98,7 +156,7 @@ export default async function ClaSignatureLog({
               <CardTitle className="text-base">Signatures</CardTitle>
               <CardDescription>
                 Immutable click-wrap records. Admin revoke is an append-only
-                state change — the original record is retained.
+                state change: the original record is retained.
               </CardDescription>
             </div>
             <div className="flex items-center gap-2">
@@ -119,9 +177,18 @@ export default async function ClaSignatureLog({
           </div>
         </CardHeader>
         <CardContent className="p-0">
+          <div className="border-b border-border px-6 py-3">
+            <SearchInput
+              pathname={basePath}
+              q={sig.q}
+              keys={{ q: "sq" }}
+              hiddenParams={siblingParams(sp, ["sq", "spage"])}
+              placeholder="Search login, name, or email"
+            />
+          </div>
           {signatures.length === 0 ? (
-            <div className="px-6 pb-6 text-sm text-muted-foreground">
-              No signatures yet.
+            <div className="px-6 py-6 text-sm text-muted-foreground">
+              {sig.q ? "No signatures match your search." : "No signatures yet."}
             </div>
           ) : (
             <ul className="divide-y divide-border">
@@ -255,6 +322,14 @@ export default async function ClaSignatureLog({
               ))}
             </ul>
           )}
+          <Pagination
+            pathname={basePath}
+            searchParams={sp}
+            page={sig.page}
+            perPage={sig.perPage}
+            total={sigTotal}
+            keys={{ page: "spage" }}
+          />
         </CardContent>
       </Card>
 
@@ -262,7 +337,7 @@ export default async function ClaSignatureLog({
         <CardHeader>
           <CardTitle className="text-base">CLA waivers</CardTitle>
           <CardDescription>
-            Exempt a specific GitHub account from signing the CLA — they are
+            Exempt a specific GitHub account from signing the CLA. They are
             treated as covered and won&apos;t be blocked. Revoking re-blocks them.
             Every grant and revoke is recorded in the ledger above.
           </CardDescription>
@@ -308,8 +383,18 @@ export default async function ClaSignatureLog({
             <SubmitButton size="sm">Grant waiver</SubmitButton>
           </form>
 
+          <SearchInput
+            pathname={basePath}
+            q={wai.q}
+            keys={{ q: "wq" }}
+            hiddenParams={siblingParams(sp, ["wq", "wpage"])}
+            placeholder="Search login or reason"
+          />
+
           {waivers.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No waivers yet.</p>
+            <p className="text-sm text-muted-foreground">
+              {wai.q ? "No waivers match your search." : "No waivers yet."}
+            </p>
           ) : (
             <ul className="divide-y divide-border rounded-md border border-border">
               {waivers.map((w) => (
@@ -344,6 +429,15 @@ export default async function ClaSignatureLog({
               ))}
             </ul>
           )}
+          <Pagination
+            pathname={basePath}
+            searchParams={sp}
+            page={wai.page}
+            perPage={wai.perPage}
+            total={waiTotal}
+            keys={{ page: "wpage" }}
+            className="px-0"
+          />
         </CardContent>
       </Card>
 
@@ -351,12 +445,12 @@ export default async function ClaSignatureLog({
         <CardHeader>
           <CardTitle className="text-base">Event ledger</CardTitle>
           <CardDescription>
-            Last 200 entries of the hash-chained legal ledger, newest first.
+            The hash-chained legal ledger, newest first.
           </CardDescription>
         </CardHeader>
         <CardContent className="p-0">
           {events.length === 0 ? (
-            <div className="px-6 pb-6 text-sm text-muted-foreground">
+            <div className="px-6 py-6 text-sm text-muted-foreground">
               No events yet.
             </div>
           ) : (
@@ -381,6 +475,14 @@ export default async function ClaSignatureLog({
               ))}
             </ul>
           )}
+          <Pagination
+            pathname={basePath}
+            searchParams={sp}
+            page={evt.page}
+            perPage={evt.perPage}
+            total={evtTotal}
+            keys={{ page: "epage" }}
+          />
         </CardContent>
       </Card>
     </div>

@@ -45,7 +45,7 @@ export class ClaGateError extends Error {
 
 /**
  * Count distinct authors who have submitted an APPROVED review on this
- * application, excluding `excludeUserId` (the actor — reviewers can't
+ * application, excluding `excludeUserId` (the actor, since reviewers can't
  * self-approve toward the gate). Soft-dismissed reviews don't count.
  */
 export async function countApprovingReviewers(args: {

@@ -139,7 +139,7 @@ function makeMethod(pinoLevel: Level, logLevel: LogLevel | null) {
       msg as never,
     );
 
-    // debug/trace deliberately do NOT go to Sentry — they are local-only.
+    // debug/trace deliberately do NOT go to Sentry; they are local-only.
     if (!logLevel) return;
 
     const parts = splitErrAndAttrs(arg, msg);
@@ -154,7 +154,7 @@ function makeMethod(pinoLevel: Level, logLevel: LogLevel | null) {
  *   - Sentry issues (warn/error/fatal), via captureException/captureMessage
  *   - Sentry metrics (info/warn/error/fatal), via the `app.log` counter
  *
- * debug and trace are local-only by design — they are too noisy for Sentry
+ * debug and trace are local-only by design because they are too noisy for Sentry
  * and would blow through any sampling/retention budget.
  */
 export const logger = {

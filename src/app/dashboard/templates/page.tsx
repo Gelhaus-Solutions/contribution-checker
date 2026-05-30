@@ -13,16 +13,37 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+import { SearchInput } from "@/components/ui/search-input";
+import { Pagination } from "@/components/ui/pagination";
+import { parsePageParams, type SearchParamRecord } from "@/lib/pagination";
 import { parseFormSchema } from "@/lib/applications/schema";
 import { createTemplate, deleteTemplate } from "./actions";
 
-export default async function TemplatesPage() {
+export default async function TemplatesPage({
+  searchParams,
+}: {
+  searchParams: Promise<SearchParamRecord>;
+}) {
   const session = await requireSession();
+  const sp = await searchParams;
+  const { page, perPage, skip, take, q } = parsePageParams(sp);
 
-  const templates = await prisma.formTemplate.findMany({
-    where: { ownerId: session.user.id },
-    orderBy: { createdAt: "desc" },
-  });
+  const where = {
+    ownerId: session.user.id,
+    ...(q ? { name: { contains: q, mode: "insensitive" as const } } : {}),
+  };
+
+  const [templates, total] = await prisma.$transaction([
+    prisma.formTemplate.findMany({
+      where,
+      orderBy: { createdAt: "desc" },
+      skip,
+      take,
+    }),
+    prisma.formTemplate.count({ where }),
+  ]);
+
+  const basePath = "/dashboard/templates";
 
   return (
     <>
@@ -69,9 +90,16 @@ export default async function TemplatesPage() {
             <CardTitle className="text-base">Your templates</CardTitle>
           </CardHeader>
           <CardContent className="p-0">
+            <div className="border-b border-border px-6 py-3">
+              <SearchInput
+                pathname={basePath}
+                q={q}
+                placeholder="Search by name"
+              />
+            </div>
             {templates.length === 0 ? (
-              <div className="px-6 pb-6 text-sm text-muted-foreground">
-                No templates yet.
+              <div className="px-6 py-6 text-sm text-muted-foreground">
+                {q ? "No templates match your search." : "No templates yet."}
               </div>
             ) : (
               <ul className="divide-y divide-border">
@@ -110,6 +138,13 @@ export default async function TemplatesPage() {
                 })}
               </ul>
             )}
+            <Pagination
+              pathname={basePath}
+              searchParams={sp}
+              page={page}
+              perPage={perPage}
+              total={total}
+            />
           </CardContent>
         </Card>
       </main>

@@ -28,7 +28,7 @@ export default async function GitHubAppSetup() {
         <div>
           <h1 className="text-2xl font-semibold">GitHub App setup</h1>
           <p className="text-sm text-muted-foreground">
-            Manual setup — one App handles both sign-in (user-to-server OAuth)
+            Manual setup: one App handles both sign-in (user-to-server OAuth)
             and repo automation (installation tokens).
           </p>
           {slug && (
@@ -86,11 +86,11 @@ export default async function GitHubAppSetup() {
               <li>
                 Set <strong>repository permissions</strong>:
                 <ul className="ml-4 list-disc">
-                  <li>Pull requests — <strong>Read &amp; write</strong></li>
-                  <li>Issues — <strong>Read &amp; write</strong></li>
-                  <li>Checks — <strong>Read &amp; write</strong></li>
-                  <li>Contents — Read (needed for PR Quality scoring &mdash; reads PR file diffs)</li>
-                  <li>Metadata — Read (auto-selected)</li>
+                  <li>Pull requests: <strong>Read &amp; write</strong></li>
+                  <li>Issues: <strong>Read &amp; write</strong></li>
+                  <li>Checks: <strong>Read &amp; write</strong></li>
+                  <li>Contents: Read (needed for PR Quality scoring, reads PR file diffs)</li>
+                  <li>Metadata: Read (auto-selected)</li>
                 </ul>
                 <p className="mt-2 text-xs text-muted-foreground">
                   Existing installations need to accept the new permissions:
@@ -100,11 +100,11 @@ export default async function GitHubAppSetup() {
                 </p>
                 And <strong>account permissions</strong>:
                 <ul className="ml-4 list-disc">
-                  <li>Email addresses — Read</li>
+                  <li>Email addresses: Read</li>
                 </ul>
                 Optional <strong>organization permissions</strong>:
                 <ul className="ml-4 list-disc">
-                  <li>Members — Read (only needed if you&apos;ll use the
+                  <li>Members: Read (only needed if you&apos;ll use the
                     auto-bypass-collaborators feature for org repos)
                   </li>
                 </ul>
@@ -145,14 +145,14 @@ export default async function GitHubAppSetup() {
               <li>
                 Fill in your <code>.env</code>:
                 <pre className="mt-2 overflow-x-auto rounded bg-muted px-3 py-2 text-xs">{`GITHUB_APP_ID="<the App ID>"
-GITHUB_APP_SLUG="<the slug — last segment of the app's URL>"
+GITHUB_APP_SLUG="<the slug: last segment of the app's URL>"
 GITHUB_APP_CLIENT_ID="<Client ID>"
 GITHUB_APP_CLIENT_SECRET="<Client secret>"
 GITHUB_APP_WEBHOOK_SECRET="<the random secret you generated>"
 # PEM with literal \\n between lines, all on one line, in double quotes:
 GITHUB_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\\n...\\n-----END RSA PRIVATE KEY-----\\n"
 
-# Single-App mode: leave AUTH_GITHUB_ID/SECRET blank — the App's
+# Single-App mode: leave AUTH_GITHUB_ID/SECRET blank, since the App's
 # Client ID/Secret are reused for sign-in.`}</pre>
               </li>
               <li>

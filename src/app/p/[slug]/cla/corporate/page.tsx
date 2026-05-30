@@ -48,7 +48,7 @@ export default async function CorporateClaPage({
       <main className="mx-auto max-w-2xl space-y-6 px-4 py-10">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">
-            Corporate CLA — {project.name}
+            Corporate CLA: {project.name}
           </h1>
           <p className="mt-2 text-muted-foreground">
             Sign a Corporate Contributor License Agreement on behalf of your
@@ -145,7 +145,7 @@ async function CorporateSurface({
       <Card>
         <CardHeader>
           <CardTitle className="text-base">
-            Roster — {managed.companyName}
+            Roster: {managed.companyName}
           </CardTitle>
           <CardDescription>
             Contributors listed here are covered by your corporate CLA. Their
@@ -165,7 +165,7 @@ async function CorporateSurface({
     );
   }
 
-  // No corporate yet — show the CCLA sign form.
+  // No corporate yet, so show the CCLA sign form.
   const version = currentCclaVersionId
     ? await prisma.claDocumentVersion.findUnique({
         where: { id: currentCclaVersionId },

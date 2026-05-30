@@ -92,7 +92,7 @@ export function ApplyForm({
     try {
       window.localStorage.setItem(storageKey, JSON.stringify(values));
     } catch {
-      // quota / private mode — non-fatal
+      // quota / private mode: non-fatal
     }
   }, [storageKey, values]);
 

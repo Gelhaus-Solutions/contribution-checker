@@ -4,7 +4,7 @@ import { z } from "zod";
 // CLA config note
 //
 // Unlike the application form schema, CLA configuration does NOT live in a JSON
-// column — it is modeled with boolean/int/string columns on `Project`
+// column: it is modeled with boolean/int/string columns on `Project`
 // (claEnabled, claRequired, claCorporateEnabled, claPlacementEmbed,
 // claPlacementStandalone, labelClaPending, minIclaVersion, minCclaVersion,
 // currentIclaVersionId, currentCclaVersionId, claAutoVersionRequiresResign,
@@ -278,7 +278,7 @@ export const publishVersionSchema = z.object({
 
 export const claSettingsSchema = z.object({
   projectId: z.string().min(1),
-  // Checkbox toggles — present (e.g. "1") => true, absent => false.
+  // Checkbox toggles: present (e.g. "1") => true, absent => false.
   claEnabled: z.string().optional(),
   claRequired: z.string().optional(),
   claCorporateEnabled: z.string().optional(),

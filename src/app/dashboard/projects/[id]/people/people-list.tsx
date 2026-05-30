@@ -36,7 +36,7 @@ export type PersonRow = {
   ghLogin: string;
   manual?: ManualEntry;
   application?: ApplicationEntry;
-  // Effective status — manual takes precedence per decide-pr.ts.
+  // Effective status: manual takes precedence per decide-pr.ts.
   status: "APPROVED" | "DENIED" | "PENDING";
   latestDecidedAt: string;
   latestDecidedByLogin: string | null;
@@ -47,6 +47,8 @@ const STATUS_VARIANT = {
   DENIED: "destructive",
   PENDING: "warning",
 } as const;
+
+const PAGE_SIZE = 25;
 
 type SearchField = "ALL" | "login" | "reason" | "reviewer";
 
@@ -66,6 +68,7 @@ export function PeopleList({
   );
   const [source, setSource] = useState<"ALL" | "manual" | "application">("ALL");
   const [openLogin, setOpenLogin] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -91,6 +94,17 @@ export function PeopleList({
       }
     });
   }, [people, query, searchField, filter, source]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const pageRows = useMemo(
+    () => filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE),
+    [filtered, currentPage]
+  );
+
+  useEffect(() => {
+    setPage(1);
+  }, [query, searchField, filter, source]);
 
   const counts = useMemo(() => {
     return {
@@ -175,7 +189,7 @@ export function PeopleList({
         </div>
       ) : (
         <ul className="divide-y divide-border rounded-md border border-border">
-          {filtered.map((d) => (
+          {pageRows.map((d) => (
             <li
               key={d.ghLogin}
               className="flex flex-col gap-2 px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between"
@@ -248,6 +262,32 @@ export function PeopleList({
             </li>
           ))}
         </ul>
+      )}
+
+      {filtered.length > PAGE_SIZE && (
+        <div className="flex items-center justify-between text-xs text-muted-foreground">
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={currentPage <= 1}
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+          >
+            Previous
+          </Button>
+          <span>
+            Showing {(currentPage - 1) * PAGE_SIZE + 1} to{" "}
+            {Math.min(currentPage * PAGE_SIZE, filtered.length)} of{" "}
+            {filtered.length}
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={currentPage >= totalPages}
+            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+          >
+            Next
+          </Button>
+        </div>
       )}
 
       {openLogin && (

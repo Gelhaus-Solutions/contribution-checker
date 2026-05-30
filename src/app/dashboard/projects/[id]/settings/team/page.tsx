@@ -12,17 +12,30 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SubmitButton } from "@/components/ui/submit-button";
 import { Badge } from "@/components/ui/badge";
+import { SearchInput } from "@/components/ui/search-input";
+import { parsePageParams, type SearchParamRecord } from "@/lib/pagination";
 import { inviteMember, removeMemberAction, changeRoleAction } from "./actions";
 import { RoleSelect } from "./role-select";
 
 export default async function ProjectTeam({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<SearchParamRecord>;
 }) {
   const { id } = await params;
   const { session, role: viewerRole } = await requireProjectRole(id, "ADMIN");
-  const members = await listMembers(id);
+  const { q } = parsePageParams(await searchParams);
+  const allMembers = await listMembers(id);
+  const needle = q.toLowerCase();
+  const members = needle
+    ? allMembers.filter(
+        (m) =>
+          (m.user.ghLogin ?? "").toLowerCase().includes(needle) ||
+          (m.user.name ?? "").toLowerCase().includes(needle)
+      )
+    : allMembers;
 
   return (
     <div className="space-y-6">
@@ -64,6 +77,18 @@ export default async function ProjectTeam({
           <CardTitle className="text-base">Members</CardTitle>
         </CardHeader>
         <CardContent className="p-0">
+          <div className="border-b border-border px-6 py-3">
+            <SearchInput
+              pathname={`/dashboard/projects/${id}/settings/team`}
+              q={q}
+              placeholder="Search login or name"
+            />
+          </div>
+          {members.length === 0 ? (
+            <div className="px-6 py-6 text-sm text-muted-foreground">
+              {q ? "No members match your search." : "No members yet."}
+            </div>
+          ) : (
           <ul className="divide-y divide-border">
             {members.map((m) => (
               <li
@@ -115,6 +140,7 @@ export default async function ProjectTeam({
               </li>
             ))}
           </ul>
+          )}
         </CardContent>
       </Card>
     </div>

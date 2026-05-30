@@ -92,7 +92,7 @@ export default async function ApplicationDetail({
   const gateMet = requiredApprovals === 0 || approvingReviewerCount >= requiredApprovals;
 
   // CLA gate: mirrors approveApplication's check (decide.ts). It only gates
-  // when the project both enables AND requires the CLA — record-only mode
+  // when the project both enables AND requires the CLA. Record-only mode
   // (claEnabled, !claRequired) never blocks approval. An unlinked applicant
   // (no ghId/ghLogin) can't satisfy the CLA, so the gate stays unmet, exactly
   // as approveApplication treats it.
@@ -123,13 +123,13 @@ export default async function ApplicationDetail({
           {requiredApprovals === 1 ? "" : "s"} from other reviewers
         </Badge>
         {!gateMet && (
-          <span className="ml-1">— collect more LGTMs before approving.</span>
+          <span className="ml-1">Collect more LGTMs before approving.</span>
         )}
       </p>
     ) : null;
 
   // Status line shown in both the Approve and Re-approve forms when the CLA
-  // gates approval — wording mirrors the People overview CLA badges.
+  // gates approval. Wording mirrors the People overview CLA badges.
   const claGateNote = claGateActive ? (
     <p className="text-xs text-muted-foreground">
       CLA:{" "}
@@ -160,7 +160,7 @@ export default async function ApplicationDetail({
       )}
       {!claGateMet && (
         <span className="ml-1">
-          — applicant must sign the CLA before approval.
+          Applicant must sign the CLA before approval.
         </span>
       )}
     </p>
@@ -292,7 +292,7 @@ export default async function ApplicationDetail({
   const cooldownHelp =
     cooldownDays != null
       ? `Cooldown set to ${cooldownDays} day${cooldownDays === 1 ? "" : "s"}.`
-      : `No cooldown configured — applicant can resubmit immediately.`;
+      : `No cooldown configured. Applicant can resubmit immediately.`;
 
   return (
     <div className="space-y-6">
@@ -354,7 +354,7 @@ export default async function ApplicationDetail({
                       : "✗ No"
                     : (() => {
                         const v = answers[f.id];
-                        return typeof v === "string" && v.length > 0 ? v : "—";
+                        return typeof v === "string" && v.length > 0 ? v : "n/a";
                       })()}
                 </div>
                 <FieldThread
@@ -433,7 +433,7 @@ export default async function ApplicationDetail({
                     <span>
                       <span className="font-medium">Allow resubmitting</span>
                       <span className="ml-1 text-muted-foreground">
-                        — {cooldownHelp}
+                        {cooldownHelp}
                       </span>
                     </span>
                   </label>

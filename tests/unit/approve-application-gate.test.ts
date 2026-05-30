@@ -125,7 +125,7 @@ describe("approveApplication CLA gate", () => {
     });
 
     expect(result.status).toBe("APPROVED");
-    // The gate block is skipped entirely — coverage is never probed.
+    // The gate block is skipped entirely: coverage is never probed.
     expect(isClaSatisfied).not.toHaveBeenCalled();
   });
 

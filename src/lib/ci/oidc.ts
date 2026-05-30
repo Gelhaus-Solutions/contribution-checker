@@ -28,7 +28,7 @@ function getJwks(): JWTVerifyGetKey {
   return cachedJwks;
 }
 
-/** Test hook — pass a `createLocalJWKSet` resolver to verify against a local key. */
+/** Test hook: pass a `createLocalJWKSet` resolver to verify against a local key. */
 export function __setJwksForTesting(resolver: JWTVerifyGetKey | null): void {
   jwksOverride = resolver;
 }

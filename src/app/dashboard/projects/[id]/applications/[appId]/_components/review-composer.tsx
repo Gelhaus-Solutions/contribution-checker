@@ -62,7 +62,7 @@ export function ReviewComposer({
           <span>
             <span className="font-medium">Comment</span>
             <span className="ml-1 text-xs text-muted-foreground">
-              — leave feedback without a verdict
+              : leave feedback without a verdict
             </span>
           </span>
         </label>
@@ -78,7 +78,7 @@ export function ReviewComposer({
           <span>
             <span className="font-medium">Approve</span>
             <span className="ml-1 text-xs text-muted-foreground">
-              — LGTM, internal signal toward the approval gate
+              : LGTM, internal signal toward the approval gate
             </span>
           </span>
         </label>
@@ -94,7 +94,7 @@ export function ReviewComposer({
           <span>
             <span className="font-medium">Request changes</span>
             <span className="ml-1 text-xs text-muted-foreground">
-              — applicant sees the feedback and may reply to clarify
+              : applicant sees the feedback and may reply to clarify
             </span>
           </span>
         </label>
@@ -127,7 +127,7 @@ export function ReviewComposer({
           <span>
             <span className="font-medium">Make this comment visible to the applicant</span>
             <span className="ml-1 text-muted-foreground">
-              — otherwise it stays internal to project members.
+              . Otherwise it stays internal to project members.
             </span>
           </span>
         </label>

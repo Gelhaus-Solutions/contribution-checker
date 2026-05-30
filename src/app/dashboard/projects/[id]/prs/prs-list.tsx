@@ -301,7 +301,7 @@ export function PrsList({
                     className="text-[10px]"
                   >
                     quality{" "}
-                    {pr.quality.score === null ? "—" : `${pr.quality.score}%`}
+                    {pr.quality.score === null ? "n/a" : `${pr.quality.score}%`}
                   </Badge>
                 )}
                 <Button
@@ -321,7 +321,7 @@ export function PrsList({
                   {pr.quality.failed.slice(0, 6).map((f) => (
                     <li key={f.id}>
                       <span className="font-medium">{f.label}</span>
-                      {f.reason ? ` — ${f.reason}` : null}
+                      {f.reason ? `: ${f.reason}` : null}
                     </li>
                   ))}
                   {pr.quality.failed.length > 6 && (
@@ -440,7 +440,7 @@ function PrOverviewDialog({
         if (res.scored > 0) {
           setFlash("Quality rescanned.");
         } else if (res.skipped > 0) {
-          setFlash("Skipped — quality cannot run for this PR.");
+          setFlash("Skipped: quality cannot run for this PR.");
         } else {
           setFlash("Rescan failed.");
         }
@@ -463,7 +463,7 @@ function PrOverviewDialog({
             `Re-evaluation triggered (label \"${data.evaluateLabel}\" added). The webhook will apply the new decision shortly.`
           );
         } else if (res.skipped > 0) {
-          setFlash("Skipped — repo is not connected via the GitHub App.");
+          setFlash("Skipped: repo is not connected via the GitHub App.");
         } else {
           setFlash("Re-evaluate failed.");
         }
@@ -535,12 +535,12 @@ function PrOverviewDialog({
                 <Field label="Last update" value={data.updatedAt.slice(0, 10)} />
                 <Field
                   label="Head SHA"
-                  value={data.headSha ? data.headSha.slice(0, 7) : "—"}
+                  value={data.headSha ? data.headSha.slice(0, 7) : "n/a"}
                   mono
                 />
                 <Field
                   label="Check Run"
-                  value={data.checkRunId ? data.checkRunId : "—"}
+                  value={data.checkRunId ? data.checkRunId : "n/a"}
                   mono
                 />
                 <Field
@@ -637,7 +637,7 @@ function PrOverviewDialog({
                     <div className="flex flex-wrap items-baseline gap-2">
                       <span className="text-2xl font-semibold">
                         {data.quality.score === null
-                          ? "—"
+                          ? "n/a"
                           : `${data.quality.score}%`}
                       </span>
                       <span className="text-xs text-muted-foreground">
@@ -799,7 +799,7 @@ function HeuristicRow({ h }: { h: PrOverviewHeuristic }) {
         w{h.weight} • {h.group}
       </span>
       {h.reason && (
-        <span className="text-[11px] text-muted-foreground">— {h.reason}</span>
+        <span className="text-[11px] text-muted-foreground">{h.reason}</span>
       )}
     </li>
   );

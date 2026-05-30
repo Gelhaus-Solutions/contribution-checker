@@ -84,7 +84,7 @@ export function FormRenderer({
                     }
                   : { defaultValue: stringValue })}
               >
-                <option value="">— select —</option>
+                <option value="">Select...</option>
                 {field.options.map((o) => (
                   <option key={o.value} value={o.value}>
                     {o.label}

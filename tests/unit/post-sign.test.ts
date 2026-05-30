@@ -172,7 +172,7 @@ describe("onClaCoverageChanged", () => {
 
   it("no-ops when the GitHub App is not configured", async () => {
     // env.githubAppConfigured is true in the mock; simulate "no work" instead
-    // via no repos to keep the env mock simple — and assert the early guards.
+    // via no repos to keep the env mock simple, and assert the early guards.
     projectFindUnique.mockResolvedValueOnce({ ...baseProject, repos: [] });
     const result = await onClaCoverageChanged({ projectId: "proj1", ghId: 42 });
     expect(result).toEqual({ rechecked: 0 });

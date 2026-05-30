@@ -5,7 +5,7 @@ import NextError from "next/error";
 import { useEffect } from "react";
 
 // Heuristic: the in-flight stale-Server-Action crash. Next.js logs this two
-// ways depending on which branch took it — sometimes the message is "Failed
+// ways depending on which branch took it. Sometimes the message is "Failed
 // to find Server Action ...", sometimes it's the raw "Cannot read properties
 // of undefined (reading 'workers')" coming out of action-utils.js. Treat
 // both as the same recoverable condition: the user's tab is older than the
@@ -41,7 +41,7 @@ export default function GlobalError({
     });
 
     // For a stale-action crash, the manifest mismatch is permanent for this
-    // tab — a soft refresh is the only way out. Wait a tick so Sentry's
+    // tab, so a soft refresh is the only way out. Wait a tick so Sentry's
     // beacon has a chance to fire.
     if (stale && typeof window !== "undefined") {
       const id = window.setTimeout(() => {

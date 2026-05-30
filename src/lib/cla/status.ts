@@ -31,7 +31,7 @@ export type ClaStatusResult = {
 
 /**
  * Compute the full coverage status for a contributor on a project. Pure DB
- * reads (all indexed); not cached itself — `isClaSatisfied` caches the boolean.
+ * reads (all indexed); not cached itself. `isClaSatisfied` caches the boolean.
  *
  * Satisfied if ANY of:
  *  - an ACTIVE ClaWaiver matching ghId or lowercased ghLogin;
@@ -58,7 +58,7 @@ export async function getClaStatus(a: {
   const minIclaVersion = project?.minIclaVersion ?? 0;
   const minCclaVersion = project?.minCclaVersion ?? 0;
 
-  // 1) Waiver — admin exemption short-circuits everything else.
+  // 1) Waiver: admin exemption short-circuits everything else.
   const waiver = await prisma.claWaiver.findFirst({
     where: {
       projectId,
@@ -71,7 +71,7 @@ export async function getClaStatus(a: {
     return { satisfied: true, via: "waiver" };
   }
 
-  // 2) Individual CLA — newest active signature for this ghId.
+  // 2) Individual CLA: newest active signature for this ghId.
   const icla = await prisma.claSignature.findFirst({
     where: { projectId, ghId, kind: "ICLA", status: "ACTIVE" },
     orderBy: { documentVersion: "desc" },
@@ -85,7 +85,7 @@ export async function getClaStatus(a: {
     return { satisfied: false, via: "icla", needsResign: true };
   }
 
-  // 3) Corporate CLA — active roster membership under an active corporate
+  // 3) Corporate CLA: active roster membership under an active corporate
   //    whose signatory signed a version at or above the floor.
   const member = await prisma.cclaRosterMember.findFirst({
     where: {

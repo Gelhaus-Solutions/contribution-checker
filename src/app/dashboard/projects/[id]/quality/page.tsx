@@ -148,7 +148,7 @@ export default async function ProjectQualityPage({
                 />
                 <p className="text-xs text-muted-foreground">
                   One per line. Bury these inside an HTML comment in the PR
-                  template — bots that copy the template wholesale will trip
+                  template. Bots that copy the template wholesale will trip
                   the <code>pr.honeypot_hit</code> heuristic.
                 </p>
               </div>

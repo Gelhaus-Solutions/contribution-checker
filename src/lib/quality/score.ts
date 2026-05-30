@@ -8,7 +8,7 @@ import { ALL_HEURISTICS, HEURISTIC_BY_ID, isHeuristicEnabled } from "@/lib/quali
 /**
  * Hard score caps applied when weight-4 ("blocker") heuristics fire. w4 is
  * reserved for signals that are essentially proof of slop (AI watermark
- * phrases, honeypot copy-paste, ignored PR template) — a clean record on
+ * phrases, honeypot copy-paste, ignored PR template). A clean record on
  * the other heuristics shouldn't rescue the PR. The cap tightens with each
  * additional w4 fire; 3+ floors the ceiling at 20. Lower-weight failures
  * deduct further from this ceiling.

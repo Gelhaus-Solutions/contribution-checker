@@ -65,7 +65,7 @@ export default async function PublicProjectPage({
   // Embedded CLA: when the project requires a CLA in the application form and
   // the signed-in user is not already covered, surface the click-wrap block in
   // <ApplyForm>. Coverage is checked once here so an already-covered user (e.g.
-  // signed standalone) never sees the block — no double-signing. Bots and
+  // signed standalone) never sees the block, so no double-signing. Bots and
   // unauthenticated visitors never reach this branch.
   let claEmbed: ClaEmbed | null = null;
   if (
@@ -115,7 +115,7 @@ export default async function PublicProjectPage({
 
   // Applicant-visible feedback: review summaries with visibility=APPLICANT
   // plus their attached per-field comments and threaded applicant replies.
-  // We deliberately keep INTERNAL items hidden — the applicant must never
+  // We deliberately keep INTERNAL items hidden: the applicant must never
   // see "LGTM" reviews or reviewer-only chatter.
   type FeedbackComment = {
     id: string;
@@ -235,7 +235,7 @@ export default async function PublicProjectPage({
               <CardTitle className="text-base">Reviewer feedback</CardTitle>
               <CardDescription>
                 Feedback from the project&apos;s reviewers. You can reply
-                inline to clarify — this stays attached to your application.
+                inline to clarify; this stays attached to your application.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">

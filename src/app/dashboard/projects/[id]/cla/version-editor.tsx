@@ -91,7 +91,7 @@ export function VersionEditor({
           <span>
             <span className="font-medium">Require re-sign</span>
             <span className="block text-xs text-muted-foreground">
-              Invalidates all prior {kind} signatures &mdash; everyone must sign
+              Invalidates all prior {kind} signatures. Everyone must sign
               this new version before their PRs pass again. Leave off to keep
               existing signatures valid.
             </span>

@@ -29,7 +29,7 @@ const schema = z.object({
   AUTH_GITHUB_ID: z.string().optional(),
   AUTH_GITHUB_SECRET: z.string().optional(),
 
-  // GitHub App — optional at boot; required before any repo automation works.
+  // GitHub App: optional at boot; required before any repo automation works.
   GITHUB_APP_ID: z.string().optional(),
   GITHUB_APP_PRIVATE_KEY: z.string().optional(),
   GITHUB_APP_WEBHOOK_SECRET: z.string().optional(),
@@ -48,7 +48,7 @@ const schema = z.object({
 
   LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace"]).default("info"),
 
-  // Sentry — observability. Sample rates are hardcoded to 1.0 in
+  // Sentry: observability. Sample rates are hardcoded to 1.0 in
   // sentry.server.config.ts / instrumentation-client.ts; the SDK no-ops
   // when DSN is missing so all of these stay optional.
   SENTRY_DSN: z.string().url().optional(),
@@ -64,7 +64,7 @@ const schema = z.object({
   // event/replay uploads (those go to the SDK's transport, separately).
   SENTRY_CSP_ENDPOINT: z.string().url().optional(),
 
-  // HashiCorp Vault — non-secret config only. Auth credentials (VAULT_TOKEN,
+  // HashiCorp Vault: non-secret config only. Auth credentials (VAULT_TOKEN,
   // VAULT_APPROLE_*) are deliberately NOT in this typed object so they can
   // never be accidentally serialized; they're read directly from process.env
   // inside src/lib/vault/config.ts.
@@ -76,7 +76,7 @@ const schema = z.object({
 
 // During `next build`, Next.js executes server modules to collect page data
 // even though no request is being served. Skip strict validation in that
-// phase — env will be validated again on first real request, and any missing
+// phase. Env will be validated again on first real request, and any missing
 // values will surface there with the same error.
 const isBuildPhase = process.env.NEXT_PHASE === "phase-production-build";
 

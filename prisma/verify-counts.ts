@@ -97,7 +97,7 @@ async function main(): Promise<void> {
   );
 
   if (!ok) {
-    throw new Error("Row count mismatch — see FAIL lines above.");
+    throw new Error("Row count mismatch. See FAIL lines above.");
   }
   console.log("\nAll row counts match.");
 }
