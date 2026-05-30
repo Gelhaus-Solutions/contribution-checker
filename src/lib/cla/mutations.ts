@@ -284,7 +284,10 @@ export async function recordCclaSignature(a: {
   return prisma.$transaction(async (tx) => {
     const project = await tx.project.findUnique({
       where: { id: a.projectId },
-      select: { currentCclaVersionId: true },
+      select: {
+        currentCclaVersionId: true,
+        claCorporateRequiresApproval: true,
+      },
     });
     if (!project) throw new Error("Project not found");
     if (!project.currentCclaVersionId) {
@@ -292,6 +295,11 @@ export async function recordCclaSignature(a: {
         "No CCLA version has been published for this project yet."
       );
     }
+    // A new corporate agreement is PENDING until an admin approves it, unless
+    // the project opts out of approval (then it is effective immediately).
+    const initialStatus = project.claCorporateRequiresApproval
+      ? "PENDING"
+      : "ACTIVE";
 
     const version = await tx.claDocumentVersion.findUnique({
       where: { id: project.currentCclaVersionId },
@@ -349,7 +357,7 @@ export async function recordCclaSignature(a: {
         signatoryTitle: a.signatoryTitle ?? null,
         signatureText: cclaSignatureText,
         contactEmail: a.contactEmail,
-        status: "ACTIVE",
+        status: initialStatus,
       },
       select: { id: true },
     });
@@ -392,6 +400,136 @@ export async function recordCclaSignature(a: {
     });
 
     return { corporateId: corporate.id, signatureId: sig.id };
+  });
+}
+
+/**
+ * Approve a PENDING Corporate CLA (admin gate). Flips status to ACTIVE so the
+ * roster begins conferring coverage, stamps approvedBy/approvedAt, and appends a
+ * `ccla.approved` ledger entry. Idempotent: throws unless the corporate is
+ * PENDING. Returns the project, signatory user, and the ACTIVE roster members
+ * with a known ghId so the caller can re-check their open PRs (members without a
+ * ghId can't be cache-keyed, matching the roster mutations).
+ */
+export async function approveCorporateCla(a: {
+  corporateId: string;
+  actorUserId: string | null;
+}): Promise<{
+  projectId: string;
+  companyName: string;
+  signatoryUserId: string | null;
+  activeMemberGhIds: number[];
+}> {
+  return prisma.$transaction(async (tx) => {
+    const corporate = await tx.corporateCla.findUnique({
+      where: { id: a.corporateId },
+      select: {
+        id: true,
+        projectId: true,
+        status: true,
+        companyName: true,
+        signature: { select: { userId: true } },
+        members: { where: { status: "ACTIVE" }, select: { ghId: true } },
+      },
+    });
+    if (!corporate) throw new Error("Corporate CLA not found");
+    if (corporate.status !== "PENDING") {
+      throw new Error("Only a pending corporate CLA can be approved.");
+    }
+
+    const approvedAt = new Date();
+    await tx.corporateCla.update({
+      where: { id: a.corporateId },
+      data: { status: "ACTIVE", approvedById: a.actorUserId, approvedAt },
+    });
+
+    await appendClaEvent({
+      tx,
+      projectId: corporate.projectId,
+      kind: "ccla.approved",
+      actorUserId: a.actorUserId,
+      links: { corporateId: corporate.id },
+      payload: {
+        kind: "ccla.approved",
+        corporateId: corporate.id,
+        companyName: corporate.companyName,
+        approvedAt: approvedAt.toISOString(),
+      },
+    });
+
+    return {
+      projectId: corporate.projectId,
+      companyName: corporate.companyName,
+      signatoryUserId: corporate.signature?.userId ?? null,
+      activeMemberGhIds: corporate.members
+        .map((m) => m.ghId)
+        .filter((g): g is number => g != null),
+    };
+  });
+}
+
+/**
+ * Reject a PENDING Corporate CLA (admin gate). Flips status to REJECTED, stamps
+ * rejectedBy/rejectedAt + reason, and appends a `ccla.rejected` ledger entry. A
+ * pending corporate covered nobody, so no coverage cache or PR re-check is
+ * needed. Idempotent: throws unless the corporate is PENDING.
+ */
+export async function rejectCorporateCla(a: {
+  corporateId: string;
+  actorUserId: string | null;
+  reason: string;
+}): Promise<{
+  projectId: string;
+  companyName: string;
+  signatoryUserId: string | null;
+}> {
+  return prisma.$transaction(async (tx) => {
+    const corporate = await tx.corporateCla.findUnique({
+      where: { id: a.corporateId },
+      select: {
+        id: true,
+        projectId: true,
+        status: true,
+        companyName: true,
+        signature: { select: { userId: true } },
+      },
+    });
+    if (!corporate) throw new Error("Corporate CLA not found");
+    if (corporate.status !== "PENDING") {
+      throw new Error("Only a pending corporate CLA can be rejected.");
+    }
+
+    const rejectedAt = new Date();
+    await tx.corporateCla.update({
+      where: { id: a.corporateId },
+      data: {
+        status: "REJECTED",
+        rejectedById: a.actorUserId,
+        rejectedAt,
+        rejectReason: a.reason || null,
+      },
+    });
+
+    await appendClaEvent({
+      tx,
+      projectId: corporate.projectId,
+      kind: "ccla.rejected",
+      actorUserId: a.actorUserId,
+      links: { corporateId: corporate.id },
+      payload: {
+        kind: "ccla.rejected",
+        corporateId: corporate.id,
+        companyName: corporate.companyName,
+        reason: a.reason,
+        rejectedAt: rejectedAt.toISOString(),
+      },
+    });
+
+    return {
+      projectId: corporate.projectId,
+      companyName: corporate.companyName,
+      signatoryUserId: corporate.signature?.userId ?? null,
+    };
   });
 }
 

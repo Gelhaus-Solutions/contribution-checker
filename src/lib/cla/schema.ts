@@ -100,6 +100,22 @@ const cclaSignedPayloadSchema = z.object({
   signedAt: z.string().min(1),
 });
 
+const cclaApprovedPayloadSchema = z.object({
+  kind: z.literal("ccla.approved"),
+  corporateId: z.string().min(1),
+  companyName: z.string().min(1),
+  approvedAt: z.string().min(1),
+});
+
+const cclaRejectedPayloadSchema = z.object({
+  kind: z.literal("ccla.rejected"),
+  corporateId: z.string().min(1),
+  companyName: z.string().min(1),
+  // May be empty when the admin rejects without a stated reason.
+  reason: z.string(),
+  rejectedAt: z.string().min(1),
+});
+
 const docPublishedPayloadSchema = z.object({
   kind: z.literal("doc.published"),
   documentVersionId: z.string().min(1),
@@ -173,6 +189,8 @@ export const chainPayloadSchema = z.discriminatedUnion("kind", [
   genesisPayloadSchema,
   iclaSignedPayloadSchema,
   cclaSignedPayloadSchema,
+  cclaApprovedPayloadSchema,
+  cclaRejectedPayloadSchema,
   docPublishedPayloadSchema,
   rosterAddedPayloadSchema,
   rosterRevokedPayloadSchema,
@@ -282,6 +300,7 @@ export const claSettingsSchema = z.object({
   claEnabled: z.string().optional(),
   claRequired: z.string().optional(),
   claCorporateEnabled: z.string().optional(),
+  claCorporateRequiresApproval: z.string().optional(),
   claPlacementEmbed: z.string().optional(),
   claPlacementStandalone: z.string().optional(),
   claAutoVersionRequiresResign: z.string().optional(),

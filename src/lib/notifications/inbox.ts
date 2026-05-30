@@ -12,6 +12,8 @@ export type NotificationKind =
   | "project.invited"
   | "pr.blocked"
   | "cla.ccla_signed"
+  | "cla.ccla_approved"
+  | "cla.ccla_rejected"
   | "cla.roster_changed"
   | "cla.roster_disputed"
   | "cla.resign_required";

@@ -37,6 +37,8 @@ export type AuditKind =
   | "cla.version_published"
   | "cla.signed"
   | "cla.ccla_signed"
+  | "cla.ccla_approved"
+  | "cla.ccla_rejected"
   | "cla.signature_revoked"
   | "cla.roster_added"
   | "cla.roster_revoked"

@@ -9,11 +9,17 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import { SubmitButton } from "@/components/ui/submit-button";
 import { SearchInput } from "@/components/ui/search-input";
 import { Pagination } from "@/components/ui/pagination";
 import { parsePageParams, type SearchParamRecord } from "@/lib/pagination";
-import { revokeRosterMember, revokeCorporateCla } from "./actions";
+import {
+  revokeRosterMember,
+  revokeCorporateCla,
+  approveCorporateCla,
+  rejectCorporateCla,
+} from "./actions";
 
 function rosterBadgeVariant(
   status: string
@@ -26,6 +32,22 @@ function rosterBadgeVariant(
     case "REVOKED":
       return "destructive";
     default:
+      return "secondary";
+  }
+}
+
+function corporateBadgeVariant(
+  status: string
+): "success" | "warning" | "destructive" | "secondary" {
+  switch (status) {
+    case "ACTIVE":
+      return "success";
+    case "PENDING":
+      return "warning";
+    case "REJECTED":
+      return "destructive";
+    default:
+      // REVOKED and any future states.
       return "secondary";
   }
 }
@@ -59,28 +81,33 @@ export default async function CorporateClaPage({
       : {}),
   };
 
-  // disputedCount is project-wide (not just the current page), so compute it
-  // with a dedicated aggregate rather than reducing over the page slice.
-  const [corporates, total, disputedCount] = await prisma.$transaction([
-    prisma.corporateCla.findMany({
-      where,
-      include: {
-        signature: {
-          select: { ghLogin: true, ghId: true, legalName: true },
+  // disputedCount and pendingCount are project-wide (not just the current page),
+  // so compute them with dedicated aggregates rather than reducing over the page
+  // slice.
+  const [corporates, total, disputedCount, pendingCount] =
+    await prisma.$transaction([
+      prisma.corporateCla.findMany({
+        where,
+        include: {
+          signature: {
+            select: { ghLogin: true, ghId: true, legalName: true },
+          },
+          members: {
+            orderBy: [{ status: "asc" }, { addedAt: "desc" }],
+          },
         },
-        members: {
-          orderBy: [{ status: "asc" }, { addedAt: "desc" }],
-        },
-      },
-      orderBy: { createdAt: "desc" },
-      skip,
-      take,
-    }),
-    prisma.corporateCla.count({ where }),
-    prisma.cclaRosterMember.count({
-      where: { projectId: id, status: "DISPUTED" },
-    }),
-  ]);
+        orderBy: { createdAt: "desc" },
+        skip,
+        take,
+      }),
+      prisma.corporateCla.count({ where }),
+      prisma.cclaRosterMember.count({
+        where: { projectId: id, status: "DISPUTED" },
+      }),
+      prisma.corporateCla.count({
+        where: { projectId: id, status: "PENDING" },
+      }),
+    ]);
 
   const basePath = `/dashboard/projects/${id}/cla/corporate`;
 
@@ -103,6 +130,21 @@ export default async function CorporateClaPage({
             placeholder="Search company or contact email"
           />
         </CardContent>
+        {pendingCount > 0 && (
+          <CardContent className="pt-0">
+            <div className="rounded-md border border-warning/40 bg-warning/10 px-4 py-3 text-sm">
+              <span className="font-medium">
+                {pendingCount} corporate CLA
+                {pendingCount === 1 ? "" : "s"} awaiting approval
+              </span>
+              <span className="block text-xs text-muted-foreground">
+                A signed corporate CLA does not cover its roster until you
+                approve it. Review the pending entries below and approve or
+                reject each one.
+              </span>
+            </div>
+          </CardContent>
+        )}
         {disputedCount > 0 && (
           <CardContent className="pt-0">
             <div className="rounded-md border border-warning/40 bg-warning/10 px-4 py-3 text-sm">
@@ -131,6 +173,8 @@ export default async function CorporateClaPage({
       ) : (
         corporates.map((c) => {
           const revoked = c.status === "REVOKED";
+          const pending = c.status === "PENDING";
+          const rejected = c.status === "REJECTED";
           return (
             <Card key={c.id}>
               <CardHeader>
@@ -138,7 +182,7 @@ export default async function CorporateClaPage({
                   <div>
                     <CardTitle className="flex items-center gap-2 text-base">
                       {c.companyName}
-                      <Badge variant={revoked ? "destructive" : "success"}>
+                      <Badge variant={corporateBadgeVariant(c.status)}>
                         {c.status}
                       </Badge>
                     </CardTitle>
@@ -175,10 +219,45 @@ export default async function CorporateClaPage({
                         {revoked && c.revokedAt
                           ? ` · revoked ${fmt(c.revokedAt)}`
                           : ""}
+                        {rejected && c.rejectedAt
+                          ? ` · rejected ${fmt(c.rejectedAt)}`
+                          : ""}
                       </span>
+                      {rejected && c.rejectReason && (
+                        <span className="block text-xs">
+                          Rejection reason:{" "}
+                          <span className="text-foreground">
+                            {c.rejectReason}
+                          </span>
+                        </span>
+                      )}
                     </CardDescription>
                   </div>
-                  {!revoked && (
+                  {pending ? (
+                    <div className="flex flex-col items-end gap-2">
+                      <form action={approveCorporateCla}>
+                        <input type="hidden" name="projectId" value={id} />
+                        <input type="hidden" name="corporateId" value={c.id} />
+                        <SubmitButton size="sm">Approve</SubmitButton>
+                      </form>
+                      <form
+                        action={rejectCorporateCla}
+                        className="flex items-center gap-2"
+                      >
+                        <input type="hidden" name="projectId" value={id} />
+                        <input type="hidden" name="corporateId" value={c.id} />
+                        <Input
+                          type="text"
+                          name="reason"
+                          placeholder="Reason (optional)"
+                          className="h-8 w-44 text-xs"
+                        />
+                        <SubmitButton variant="outline" size="sm">
+                          Reject
+                        </SubmitButton>
+                      </form>
+                    </div>
+                  ) : c.status === "ACTIVE" ? (
                     <form action={revokeCorporateCla}>
                       <input type="hidden" name="projectId" value={id} />
                       <input type="hidden" name="corporateId" value={c.id} />
@@ -186,7 +265,7 @@ export default async function CorporateClaPage({
                         Revoke corporate CLA
                       </SubmitButton>
                     </form>
-                  )}
+                  ) : null}
                 </div>
               </CardHeader>
               <CardContent className="p-0">

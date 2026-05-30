@@ -80,6 +80,8 @@ export async function updateClaSettings(formData: FormData) {
     claEnabled: formData.get("claEnabled") ?? undefined,
     claRequired: formData.get("claRequired") ?? undefined,
     claCorporateEnabled: formData.get("claCorporateEnabled") ?? undefined,
+    claCorporateRequiresApproval:
+      formData.get("claCorporateRequiresApproval") ?? undefined,
     claPlacementEmbed: formData.get("claPlacementEmbed") ?? undefined,
     claPlacementStandalone: formData.get("claPlacementStandalone") ?? undefined,
     claAutoVersionRequiresResign:
@@ -104,6 +106,7 @@ export async function updateClaSettings(formData: FormData) {
       claEnabled: true,
       claRequired: true,
       claCorporateEnabled: true,
+      claCorporateRequiresApproval: true,
       claPlacementEmbed: true,
       claPlacementStandalone: true,
       claAutoVersionRequiresResign: true,
@@ -118,6 +121,7 @@ export async function updateClaSettings(formData: FormData) {
     claEnabled: !!parsed.claEnabled,
     claRequired: !!parsed.claRequired,
     claCorporateEnabled: !!parsed.claCorporateEnabled,
+    claCorporateRequiresApproval: !!parsed.claCorporateRequiresApproval,
     claPlacementEmbed: !!parsed.claPlacementEmbed,
     claPlacementStandalone: !!parsed.claPlacementStandalone,
     claAutoVersionRequiresResign: !!parsed.claAutoVersionRequiresResign,
@@ -143,6 +147,10 @@ export async function updateClaSettings(formData: FormData) {
           claCorporateEnabled: [
             before.claCorporateEnabled,
             after.claCorporateEnabled,
+          ],
+          claCorporateRequiresApproval: [
+            before.claCorporateRequiresApproval,
+            after.claCorporateRequiresApproval,
           ],
           claPlacementEmbed: [
             before.claPlacementEmbed,

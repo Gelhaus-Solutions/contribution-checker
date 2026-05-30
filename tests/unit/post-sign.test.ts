@@ -7,6 +7,7 @@ const removeLabelIfPresent = vi.fn();
 const setLabels = vi.fn();
 const decideForRepo = vi.fn();
 const publishDecisionCheck = vi.fn();
+const publishClaCheck = vi.fn();
 const invalidateClaCache = vi.fn();
 
 vi.mock("@/lib/db", () => ({
@@ -45,6 +46,7 @@ vi.mock("@/lib/applications/decide-pr", () => ({
 
 vi.mock("@/lib/github/check-run", () => ({
   publishDecisionCheck: (...args: unknown[]) => publishDecisionCheck(...args),
+  publishClaCheck: (...args: unknown[]) => publishClaCheck(...args),
 }));
 
 vi.mock("@/lib/cla/status", () => ({
@@ -83,11 +85,13 @@ beforeEach(() => {
   setLabels.mockReset();
   decideForRepo.mockReset();
   publishDecisionCheck.mockReset();
+  publishClaCheck.mockReset();
   invalidateClaCache.mockReset();
   removeLabelIfPresent.mockResolvedValue(undefined);
   setLabels.mockResolvedValue(undefined);
   prCheckUpdate.mockResolvedValue(undefined);
   publishDecisionCheck.mockResolvedValue(undefined);
+  publishClaCheck.mockResolvedValue(undefined);
 });
 
 describe("onClaCoverageChanged", () => {
@@ -113,6 +117,16 @@ describe("onClaCoverageChanged", () => {
 
     expect(result).toEqual({ rechecked: 1 });
     expect(publishDecisionCheck).toHaveBeenCalledTimes(1);
+    // The dedicated CLA check is re-published too, so a CLA check required in
+    // branch protection clears alongside the decision check.
+    expect(publishClaCheck).toHaveBeenCalledTimes(1);
+    expect(publishClaCheck).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prCheckId: "c1",
+        state: "satisfied",
+        claUrl: "https://example.com/p/acme/cla",
+      })
+    );
     expect(removeLabelIfPresent).toHaveBeenCalledWith(
       expect.anything(),
       7,
@@ -146,7 +160,28 @@ describe("onClaCoverageChanged", () => {
 
     expect(result).toEqual({ rechecked: 0 });
     expect(publishDecisionCheck).not.toHaveBeenCalled();
+    expect(publishClaCheck).not.toHaveBeenCalled();
     expect(prCheckUpdate).not.toHaveBeenCalled();
+  });
+
+  it("publishes an exempt CLA check when the author is now bot-bypassed", async () => {
+    projectFindUnique.mockResolvedValueOnce({
+      ...baseProject,
+      repos: [{ id: "repo1", fullName: "owner/r1", installationId: 11 }],
+    });
+    prCheckFindMany.mockResolvedValueOnce([check("c1", "repo1", 7)]);
+    decideForRepo.mockResolvedValueOnce({
+      status: "BYPASSED",
+      reason: "bot",
+      repoId: "repo1",
+      projectId: "proj1",
+    });
+
+    await onClaCoverageChanged({ projectId: "proj1", ghId: 42 });
+
+    expect(publishClaCheck).toHaveBeenCalledWith(
+      expect.objectContaining({ prCheckId: "c1", state: "exempt" })
+    );
   });
 
   it("queries only this author's CLA-gated open PRs", async () => {
