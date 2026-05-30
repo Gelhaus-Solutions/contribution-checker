@@ -52,9 +52,17 @@ function signatureLedger(sig?: ClaSignatureCapture | null) {
 /**
  * Publish a new immutable CLA document version. version = max(existing for
  * kind) + 1; contentHash = sha256(bodyMarkdown). Sets
- * `Project.current{Icla,Ccla}VersionId` to the new version, and when
- * `requireResign` also bumps `min{Icla,Ccla}Version` so prior signatures go
- * stale. Appends a `doc.published` ledger entry.
+ * `Project.current{Icla,Ccla}VersionId` to the new version.
+ *
+ * Re-sign is per-version: when `requireResign` is true ALL prior versions of the
+ * kind are marked `resignRequired` (force everyone to re-sign); `resignVersionIds`
+ * marks exactly the listed prior versions (the "v1 valid, v2+v3 stale" case).
+ * Both fold into the single transaction. The legacy `min{Icla,Ccla}Version`
+ * floor is kept updated as a derived hint when requireResign is set.
+ *
+ * Optionally resolves a `ClaPendingChange` (review-mode approval) to APPROVED in
+ * the same transaction. Appends one `doc.published` ledger entry and returns the
+ * ghIds of ACTIVE signers whose signature became stale (callers re-gate them).
  */
 export async function publishClaVersion(a: {
   projectId: string;
@@ -66,8 +74,15 @@ export async function publishClaVersion(a: {
   sourceRef?: string | null;
   sourceCommitSha?: string | null;
   requireResign: boolean;
+  resignVersionIds?: string[];
+  resolvePendingChangeId?: string | null;
   actorUserId: string | null;
-}): Promise<{ id: string; version: number; contentHash: string }> {
+}): Promise<{
+  id: string;
+  version: number;
+  contentHash: string;
+  affectedGhIds: number[];
+}> {
   const sourceType = a.sourceType ?? "manual";
   const contentHash = sha256Hex(a.bodyMarkdown);
 
@@ -103,6 +118,45 @@ export async function publishClaVersion(a: {
       select: { id: true, publishedAt: true },
     });
 
+    // Determine which prior versions to mark resignRequired. requireResign means
+    // all prior versions of the kind; resignVersionIds adds a specific selection
+    // (validated by the caller to belong to projectId+kind). The brand-new
+    // version is never marked.
+    let staleWhere: Prisma.ClaDocumentVersionWhereInput | null = null;
+    if (a.requireResign) {
+      staleWhere = {
+        projectId: a.projectId,
+        kind: a.kind,
+        id: { not: doc.id },
+        resignRequired: false,
+      };
+    } else if (a.resignVersionIds && a.resignVersionIds.length > 0) {
+      staleWhere = {
+        projectId: a.projectId,
+        kind: a.kind,
+        id: { in: a.resignVersionIds.filter((id) => id !== doc.id) },
+        resignRequired: false,
+      };
+    }
+
+    let affectedGhIds: number[] = [];
+    let resignVersionIds: string[] | undefined;
+    if (staleWhere) {
+      const stale = await tx.claDocumentVersion.findMany({
+        where: staleWhere,
+        select: { id: true },
+      });
+      const ids = stale.map((v) => v.id);
+      if (ids.length > 0) {
+        await tx.claDocumentVersion.updateMany({
+          where: { id: { in: ids } },
+          data: { resignRequired: true },
+        });
+        affectedGhIds = await activeSignerGhIds(tx, a.projectId, a.kind, ids);
+        resignVersionIds = ids;
+      }
+    }
+
     const projectUpdate: Prisma.ProjectUpdateInput =
       a.kind === "ICLA"
         ? {
@@ -117,6 +171,18 @@ export async function publishClaVersion(a: {
       where: { id: a.projectId },
       data: projectUpdate,
     });
+
+    if (a.resolvePendingChangeId) {
+      await tx.claPendingChange.update({
+        where: { id: a.resolvePendingChangeId },
+        data: {
+          status: "APPROVED",
+          reviewedById: a.actorUserId,
+          reviewedAt: new Date(),
+          publishedVersionId: doc.id,
+        },
+      });
+    }
 
     await appendClaEvent({
       tx,
@@ -136,14 +202,159 @@ export async function publishClaVersion(a: {
         sourceRef: a.sourceRef ?? null,
         sourceCommitSha: a.sourceCommitSha ?? null,
         requireResign: a.requireResign,
+        ...(resignVersionIds ? { resignVersionIds } : {}),
         publishedAt: doc.publishedAt.toISOString(),
       },
     });
 
-    return { id: doc.id, version, contentHash };
+    return { id: doc.id, version, contentHash, affectedGhIds };
   });
 
   return result;
+}
+
+/**
+ * Collect the distinct ghIds of ACTIVE signers whose signature is on one of the
+ * given (now resignRequired) versions, so callers can re-gate their open PRs.
+ * For ICLA the signer is the contributor; for CCLA the signer is the corporate
+ * signatory, so we expand to the ACTIVE roster members under that corporate
+ * (they are the accounts whose coverage actually depends on the signatory).
+ */
+async function activeSignerGhIds(
+  tx: Prisma.TransactionClient,
+  projectId: string,
+  kind: "ICLA" | "CCLA",
+  versionIds: string[]
+): Promise<number[]> {
+  if (kind === "ICLA") {
+    const sigs = await tx.claSignature.findMany({
+      where: {
+        projectId,
+        kind: "ICLA",
+        status: "ACTIVE",
+        versionId: { in: versionIds },
+      },
+      select: { ghId: true },
+    });
+    return Array.from(new Set(sigs.map((s) => s.ghId)));
+  }
+  // CCLA: find active corporates whose signatory signed a stale version, then
+  // their active roster members (by ghId).
+  const corps = await tx.corporateCla.findMany({
+    where: {
+      projectId,
+      status: "ACTIVE",
+      signature: { is: { versionId: { in: versionIds }, status: "ACTIVE" } },
+    },
+    select: { id: true },
+  });
+  if (corps.length === 0) return [];
+  const members = await tx.cclaRosterMember.findMany({
+    where: {
+      projectId,
+      status: "ACTIVE",
+      corporateId: { in: corps.map((c) => c.id) },
+      ghId: { not: null },
+    },
+    select: { ghId: true },
+  });
+  return Array.from(
+    new Set(members.map((m) => m.ghId).filter((n): n is number => n != null))
+  );
+}
+
+/**
+ * Retroactively set the per-version `resignRequired` flag on already-published
+ * versions (the "v1 valid, v2+v3 stale" control and the per-version toggle in
+ * Version history). Validates the versions belong to the project and refuses to
+ * mark the current version. Updates flags, appends ONE `doc.resign_set` ledger
+ * entry, and returns the ghIds whose coverage may have changed (callers re-gate
+ * those whose signature went stale and re-check those un-staled).
+ */
+export async function setVersionResign(a: {
+  projectId: string;
+  changes: { versionId: string; resignRequired: boolean }[];
+  actorUserId: string | null;
+}): Promise<{ kind: "ICLA" | "CCLA" | null; affectedGhIds: number[] }> {
+  return prisma.$transaction(async (tx) => {
+    const project = await tx.project.findUnique({
+      where: { id: a.projectId },
+      select: { currentIclaVersionId: true, currentCclaVersionId: true },
+    });
+    if (!project) throw new Error("Project not found");
+
+    const byId = new Map(a.changes.map((c) => [c.versionId, c.resignRequired]));
+    const versions = await tx.claDocumentVersion.findMany({
+      where: { projectId: a.projectId, id: { in: [...byId.keys()] } },
+      select: { id: true, kind: true, version: true, resignRequired: true },
+    });
+    if (versions.length !== byId.size) {
+      throw new Error("One or more versions do not belong to this project");
+    }
+    // All changes must target a single kind (the UI groups per kind).
+    const kinds = new Set(versions.map((v) => v.kind));
+    if (kinds.size > 1) {
+      throw new Error("Cannot change re-sign across kinds in one call");
+    }
+    const kind = (versions[0]?.kind ?? null) as "ICLA" | "CCLA" | null;
+    const currentId =
+      kind === "ICLA"
+        ? project.currentIclaVersionId
+        : kind === "CCLA"
+          ? project.currentCclaVersionId
+          : null;
+
+    // Apply only real changes; refuse to mark the current version stale.
+    const applied: {
+      versionId: string;
+      version: number;
+      resignRequired: boolean;
+    }[] = [];
+    for (const v of versions) {
+      const next = byId.get(v.id)!;
+      if (next && v.id === currentId) {
+        throw new Error("The current version cannot require re-sign");
+      }
+      if (next === v.resignRequired) continue; // no-op
+      applied.push({ versionId: v.id, version: v.version, resignRequired: next });
+    }
+
+    if (applied.length === 0) {
+      return { kind, affectedGhIds: [] };
+    }
+
+    for (const c of applied) {
+      await tx.claDocumentVersion.update({
+        where: { id: c.versionId },
+        data: { resignRequired: c.resignRequired },
+      });
+    }
+
+    // ghIds whose signature is on a version that just changed (in either
+    // direction): re-gate the newly-stale, re-check the newly-valid. Computing
+    // over every changed version (not just stale) lets a flag flipped back to
+    // valid restore coverage.
+    const changedVersionIds = applied.map((c) => c.versionId);
+    const affectedGhIds =
+      kind == null
+        ? []
+        : await activeSignerGhIds(tx, a.projectId, kind, changedVersionIds);
+
+    await appendClaEvent({
+      tx,
+      projectId: a.projectId,
+      kind: "doc.resign_set",
+      actorUserId: a.actorUserId,
+      payload: {
+        kind: "doc.resign_set",
+        documentKind: kind,
+        versions: applied,
+        setAt: new Date().toISOString(),
+      },
+    });
+
+    return { kind, affectedGhIds };
+  });
 }
 
 /**

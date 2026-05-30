@@ -16,6 +16,7 @@ export type ChainKind =
   | "ccla.approved"
   | "ccla.rejected"
   | "doc.published"
+  | "doc.resign_set"
   | "roster.added"
   | "roster.revoked"
   | "roster.disputed"

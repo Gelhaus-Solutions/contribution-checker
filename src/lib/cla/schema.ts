@@ -128,7 +128,30 @@ const docPublishedPayloadSchema = z.object({
   sourceRef: z.string().nullable().optional(),
   sourceCommitSha: z.string().nullable().optional(),
   requireResign: z.boolean(),
+  // Prior version ids marked resignRequired as part of this publish. Optional so
+  // historical doc.published entries (written before per-version re-sign) still
+  // validate and re-hash identically under verifyChain.
+  resignVersionIds: z.array(z.string().min(1)).optional(),
   publishedAt: z.string().min(1),
+});
+
+// Retroactive per-version re-sign change on already-published versions. Records
+// exactly which versions were flipped and to what, so the legal ledger shows
+// "at time setAt, admin marked versions [..] as requiring (or no longer
+// requiring) re-sign."
+const docResignSetPayloadSchema = z.object({
+  kind: z.literal("doc.resign_set"),
+  documentKind: documentKindSchema,
+  versions: z
+    .array(
+      z.object({
+        versionId: z.string().min(1),
+        version: z.number().int().nonnegative(),
+        resignRequired: z.boolean(),
+      })
+    )
+    .min(1),
+  setAt: z.string().min(1),
 });
 
 const rosterAddedPayloadSchema = z.object({
@@ -192,6 +215,7 @@ export const chainPayloadSchema = z.discriminatedUnion("kind", [
   cclaApprovedPayloadSchema,
   cclaRejectedPayloadSchema,
   docPublishedPayloadSchema,
+  docResignSetPayloadSchema,
   rosterAddedPayloadSchema,
   rosterRevokedPayloadSchema,
   rosterDisputedPayloadSchema,
@@ -290,8 +314,40 @@ export const publishVersionSchema = z.object({
   sourceRepoId: z.string().min(1).optional(),
   sourcePath: z.string().min(1).max(500).optional(),
   sourceRef: z.string().min(1).max(255).optional(),
-  // Checkbox: present => require re-sign.
+  // Checkbox: present => require re-sign for ALL prior versions of this kind.
   requireResign: z.coerce.boolean(),
+  // Optional granular selection: prior version ids to mark resignRequired. The
+  // action validates these belong to (projectId, kind).
+  resignVersionIds: z.array(z.string().min(1)).optional(),
+});
+
+// Retroactively flip resignRequired on already-published versions (the
+// "v1 valid, v2+v3 stale" control and the per-version toggle in Version
+// history). The action validates ownership and refuses the current version.
+export const setVersionResignSchema = z.object({
+  projectId: z.string().min(1),
+  changes: z
+    .array(
+      z.object({
+        versionId: z.string().min(1),
+        resignRequired: z.coerce.boolean(),
+      })
+    )
+    .min(1)
+    .max(500),
+});
+
+export const approvePendingChangeSchema = z.object({
+  projectId: z.string().min(1),
+  pendingChangeId: z.string().min(1),
+  requireResign: z.coerce.boolean(),
+  resignVersionIds: z.array(z.string().min(1)).optional(),
+});
+
+export const rejectPendingChangeSchema = z.object({
+  projectId: z.string().min(1),
+  pendingChangeId: z.string().min(1),
+  reason: z.string().trim().max(500).optional(),
 });
 
 export const claSettingsSchema = z.object({
@@ -304,6 +360,7 @@ export const claSettingsSchema = z.object({
   claPlacementEmbed: z.string().optional(),
   claPlacementStandalone: z.string().optional(),
   claAutoVersionRequiresResign: z.string().optional(),
+  claRepoFileReviewMode: z.string().optional(),
   claIclaRequireSignature: z.string().optional(),
   dcoEnabled: z.string().optional(),
   labelClaPending: z.string().trim().min(1).max(50).optional(),
@@ -398,5 +455,8 @@ export type RosterAddInput = z.infer<typeof rosterAddSchema>;
 export type RosterRevokeInput = z.infer<typeof rosterRevokeSchema>;
 export type DisputeInput = z.infer<typeof disputeSchema>;
 export type PublishVersionInput = z.infer<typeof publishVersionSchema>;
+export type SetVersionResignInput = z.infer<typeof setVersionResignSchema>;
+export type ApprovePendingChangeInput = z.infer<typeof approvePendingChangeSchema>;
+export type RejectPendingChangeInput = z.infer<typeof rejectPendingChangeSchema>;
 export type ClaSettingsInput = z.infer<typeof claSettingsSchema>;
 export type WaiverInput = z.infer<typeof waiverSchema>;
