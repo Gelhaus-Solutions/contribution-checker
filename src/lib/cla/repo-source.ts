@@ -59,6 +59,31 @@ export function sha256Hex(input: string): string {
   return createHash("sha256").update(input).digest("hex");
 }
 
+/** Live repo-file source view for a kind's current version (drift indicator). */
+export type RepoSourceView =
+  | { sourced: false }
+  | {
+      sourced: true;
+      available: false;
+      fullName: string;
+      sourcePath: string;
+      sourceRef: string | null;
+      storedCommitSha: string | null;
+    }
+  | {
+      sourced: true;
+      available: true;
+      fullName: string;
+      sourcePath: string;
+      sourceRef: string | null;
+      storedCommitSha: string | null;
+      content: string;
+      liveSha: string | null;
+      storedHash: string;
+      liveHash: string;
+      matchesStored: boolean;
+    };
+
 /** Per-kind outcome of a sync (push or manual) over a repo-file CLA source. */
 export type SyncOutcome =
   | { kind: "ICLA" | "CCLA"; status: "unchanged" }

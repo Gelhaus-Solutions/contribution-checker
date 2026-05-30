@@ -7,6 +7,10 @@ import { Badge } from "@/components/ui/badge";
 import { SubmitButton } from "@/components/ui/submit-button";
 import { Markdown } from "@/components/markdown";
 import { publishClaVersion } from "./actions";
+import {
+  PriorVersionResignList,
+  type PriorVersion,
+} from "./prior-version-resign-list";
 
 type CurrentVersion = {
   version: number;
@@ -18,10 +22,12 @@ export function VersionEditor({
   projectId,
   kind,
   current,
+  priorVersions = [],
 }: {
   projectId: string;
   kind: "ICLA" | "CCLA";
   current: CurrentVersion | null;
+  priorVersions?: PriorVersion[];
 }) {
   const [body, setBody] = useState("");
   const label = kind === "ICLA" ? "Individual CLA" : "Corporate CLA";
@@ -81,6 +87,8 @@ export function VersionEditor({
           </div>
         </div>
 
+        <PriorVersionResignList versions={priorVersions} idPrefix={`ed-${kind}`} />
+
         <label className="flex items-start gap-3 text-sm">
           <input
             type="checkbox"
@@ -89,11 +97,11 @@ export function VersionEditor({
             className="mt-0.5 h-4 w-4 rounded border-border"
           />
           <span>
-            <span className="font-medium">Require re-sign</span>
+            <span className="font-medium">Require re-sign for all earlier versions</span>
             <span className="block text-xs text-muted-foreground">
               Invalidates all prior {kind} signatures. Everyone must sign
               this new version before their PRs pass again. Leave off to keep
-              existing signatures valid.
+              existing signatures valid (or pick specific versions above).
             </span>
           </span>
         </label>

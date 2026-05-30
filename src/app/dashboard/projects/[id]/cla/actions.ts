@@ -21,6 +21,7 @@ import {
   sha256Hex,
   syncClaRepoSourceNow as syncClaRepoSourceNowCore,
   type SyncOutcome,
+  type RepoSourceView,
 } from "@/lib/cla/repo-source";
 import { onClaCoverageChanged, onClaCoverageRevoked } from "@/lib/cla/post-sign";
 
@@ -658,29 +659,6 @@ export async function runClaRepoSync(
 // ---------------------------------------------------------------------------
 // Read helpers for the admin UI (ADMIN-gated server reads).
 // ---------------------------------------------------------------------------
-export type RepoSourceView =
-  | { sourced: false }
-  | {
-      sourced: true;
-      available: false;
-      fullName: string;
-      sourcePath: string;
-      sourceRef: string | null;
-      storedCommitSha: string | null;
-    }
-  | {
-      sourced: true;
-      available: true;
-      fullName: string;
-      sourcePath: string;
-      sourceRef: string | null;
-      storedCommitSha: string | null;
-      content: string;
-      liveSha: string | null;
-      storedHash: string;
-      liveHash: string;
-      matchesStored: boolean;
-    };
 
 /**
  * For the current version of a kind, report the live repo file content and
