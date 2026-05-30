@@ -24,8 +24,8 @@ application form. When an unapproved user opens a PR on a linked repo:
 
 The bot runs in two modes per repo:
 
-- **App mode** — installed as a GitHub App, receives webhooks. Recommended.
-- **CI mode** — uses GitHub Actions OIDC tokens. The workflow file is generated
+- **App mode**: installed as a GitHub App, receives webhooks. Recommended.
+- **CI mode**: uses GitHub Actions OIDC tokens. The workflow file is generated
   per-project and dropped into the repo's `.github/workflows/`.
 
 ## Tech stack
@@ -42,42 +42,42 @@ The bot runs in two modes per repo:
 ## Critical files
 
 Decision pipeline:
-- `src/lib/applications/decide-pr.ts` — precedence: disable switch → manual →
+- `src/lib/applications/decide-pr.ts`: precedence is disable switch → manual →
   bypass → collaborator → application
-- `src/lib/github/webhook.ts` — App webhook entrypoint; orchestrates close/
+- `src/lib/github/webhook.ts`: App webhook entrypoint; orchestrates close/
   label/comment + Check Run + Quality
-- `src/app/api/github/webhook/route.ts` — signature verification + dispatch
-- `src/app/api/ci/check-pr/route.ts` — CI mode entrypoint (OIDC-gated); returns
+- `src/app/api/github/webhook/route.ts`: signature verification + dispatch
+- `src/app/api/ci/check-pr/route.ts`: CI mode entrypoint (OIDC-gated); returns
   a payload the workflow uses to mutate the PR
-- `src/lib/github/post-decision.ts` — reopen prior closed PRs on application
+- `src/lib/github/post-decision.ts`: reopen prior closed PRs on application
   approval; close prior approved PRs on revoke
 
 GitHub side effects (all Octokit calls):
-- `src/lib/github/pr-actions.ts` — close/reopen, labels, comments, Check Runs
-- `src/lib/github/check-run.ts` — `buildDecisionCheckPayload` (pure mapping)
+- `src/lib/github/pr-actions.ts`: close/reopen, labels, comments, Check Runs
+- `src/lib/github/check-run.ts`: `buildDecisionCheckPayload` (pure mapping)
   and `publishDecisionCheck` (App-mode publisher with feature-detect)
-- `src/lib/github/collaborators.ts` — LRU-cached collaborator probe
+- `src/lib/github/collaborators.ts`: LRU-cached collaborator probe
 
 Quality (heuristic-only, no LLMs):
-- `src/lib/quality/types.ts` — `Heuristic`, `PrContext`, `SignalsRaw`
-- `src/lib/quality/registry.ts` — heuristic catalog + project config helpers
-- `src/lib/quality/score.ts` — pure score formula; reads stored signals
-- `src/lib/quality/fetch.ts` — App-mode PR/files/commits/account fetching
-- `src/lib/quality/run.ts` — `runQualityForPrCheck` (App) and
+- `src/lib/quality/types.ts`: `Heuristic`, `PrContext`, `SignalsRaw`
+- `src/lib/quality/registry.ts`: heuristic catalog + project config helpers
+- `src/lib/quality/score.ts`: pure score formula; reads stored signals
+- `src/lib/quality/fetch.ts`: App-mode PR/files/commits/account fetching
+- `src/lib/quality/run.ts`: `runQualityForPrCheck` (App) and
   `runQualityFromContext` (CI)
 - `src/lib/quality/heuristics/{size,prText,commits,code,account,diffCohesion}.ts`
 
 Application lifecycle:
-- `src/lib/applications/lifecycle.ts` — submission validation
-- `src/lib/applications/decide.ts` — approve/deny/revoke + audit + notifications
-- `src/lib/applications/schema.ts` — form-field schema + Zod validators
+- `src/lib/applications/lifecycle.ts`: submission validation
+- `src/lib/applications/decide.ts`: approve/deny/revoke + audit + notifications
+- `src/lib/applications/schema.ts`: form-field schema + Zod validators
 
 Audit, notifications, jobs:
-- `src/lib/audit.ts` — `recordAudit` + `AuditKind` union (extend here when
+- `src/lib/audit.ts`: `recordAudit` + `AuditKind` union (extend here when
   adding new audit kinds)
 - `src/lib/notifications/{inbox,email,webhooks}.ts`
 - Database job queue lives in `JobQueue` (see schema). Workers/runners are
-  outside this index — current state of the runner is repo-local; check for a
+  outside this index. The current state of the runner is repo-local; check for a
   worker module before assuming reliability.
 
 ## Conventions
@@ -93,7 +93,7 @@ Audit, notifications, jobs:
   `collaborators.ts`.
 - **Side effects on PRs** (close/reopen/label/comment/check) should be
   idempotent. The existing pattern is to do them inline with try/catch and
-  log warnings on failure — failures must not crash the webhook handler.
+  log warnings on failure. Failures must not crash the webhook handler.
 - **Audit every admin-visible state change** via `recordAudit`. Add the
   matching string literal to `AuditKind` in `src/lib/audit.ts` first.
 - **No LLM dependency in quality scoring.** All heuristics are deterministic
@@ -103,6 +103,15 @@ Audit, notifications, jobs:
   `decideForRepo` returns `APPROVED { bypassReason: "checker_disabled" }`.
   The webhook handler must NOT close the PR or apply pending/denied labels.
   Whether to create a `PrCheck` row is gated on `Project.trackWhenDisabled`.
+- **Never use em-dashes** (the long dash, Unicode U+2014). Reformat the sentence
+  so none is needed (a colon, comma, parentheses, or two sentences). This applies
+  to code, comments, UI copy, and docs. The en-dash (U+2013) in numeric ranges
+  like `0–100` is fine.
+- **Commit regularly, one commit per feature.** Each commit should be a single
+  logical change with a clear message. Don't batch unrelated changes together.
+- **Never add AI attribution to commits.** Do not include a `Co-Authored-By:
+  Claude` trailer, any other AI/Claude co-author, or a "Generated with" line in
+  commit messages or PR descriptions.
 
 ## Auth & roles
 
@@ -120,7 +129,7 @@ Audit, notifications, jobs:
    more `Heuristic` objects.
 2. Add it to `ALL_HEURISTICS` in `src/lib/quality/registry.ts`.
 3. The settings UI auto-renders the new heuristic in its group. The score
-   formula and storage are unchanged — the heuristic id appears in
+   formula and storage are unchanged. The heuristic id appears in
    `PrQuality.signalsRaw` after the next run.
 4. No DB migration needed.
 
@@ -152,7 +161,7 @@ and `contents:read` is required for PR Quality scoring (file diff fetching).
   effects from background tasks. The webhook path uses inline awaits today.
 - Don't `JSON.parse` JSON columns without a Zod schema or a parsing helper.
 - Don't add an LLM dependency to quality scoring (see Conventions).
-- Don't let webhook errors propagate up — GitHub will retry forever and the
+- Don't let webhook errors propagate up. GitHub will retry forever and the
   delivery will look "failed". Log and return 200 unless signature
   verification fails.
 - Don't introduce per-installation tokens in the database. Always derive via
