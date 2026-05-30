@@ -466,7 +466,9 @@ export async function addRosterMembers(
     },
   });
   if (!corporate) return fail("Corporate CLA not found.");
-  if (corporate.status !== "ACTIVE") {
+  // The signatory may stage the roster while the CCLA is still PENDING admin
+  // approval (coverage applies once it is approved). REJECTED/REVOKED are closed.
+  if (corporate.status !== "ACTIVE" && corporate.status !== "PENDING") {
     return fail("This corporate CLA is no longer active.");
   }
   const isSignatory =

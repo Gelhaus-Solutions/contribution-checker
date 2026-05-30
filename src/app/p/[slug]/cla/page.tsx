@@ -158,10 +158,22 @@ async function ClaSurface({
               : "Your Contributor License Agreement is on file and up to date."}
           </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-3">
           <Link href={`/p/${project.slug}`} className="text-sm underline">
             Back to the project
           </Link>
+          {project.claCorporateEnabled && (
+            <p className="text-xs text-muted-foreground">
+              Signing on behalf of a company?{" "}
+              <Link
+                href={`/p/${project.slug}/cla/corporate`}
+                className="underline"
+              >
+                Sign a Corporate CLA
+              </Link>{" "}
+              as well.
+            </p>
+          )}
         </CardContent>
       </Card>
     );
