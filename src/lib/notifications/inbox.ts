@@ -17,7 +17,8 @@ export type NotificationKind =
   | "cla.roster_changed"
   | "cla.roster_disputed"
   | "cla.resign_required"
-  | "cla.pending_change";
+  | "cla.pending_change"
+  | "cla.signature_required";
 
 export async function notifyUser(args: {
   userId: string;
@@ -59,7 +60,7 @@ export async function notifyProjectReviewers(args: {
 
 export async function listNotifications(
   userId: string,
-  opts?: { skip?: number; take?: number; q?: string }
+  opts?: { skip?: number; take?: number; q?: string },
 ): Promise<{ items: Notification[]; total: number }> {
   const q = opts?.q?.trim();
   const where: Prisma.NotificationWhereInput = {

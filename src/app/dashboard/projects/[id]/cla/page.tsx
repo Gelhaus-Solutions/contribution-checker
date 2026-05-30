@@ -78,10 +78,10 @@ export default async function ClaSettings({
 
   const repoNameById = new Map(repos.map((r) => [r.id, r.fullName]));
   const currentIcla = versions.find(
-    (v) => v.id === project.currentIclaVersionId
+    (v) => v.id === project.currentIclaVersionId,
   );
   const currentCcla = versions.find(
-    (v) => v.id === project.currentCclaVersionId
+    (v) => v.id === project.currentCclaVersionId,
   );
 
   // Prior versions per kind (for the "require re-sign for earlier versions"
@@ -109,7 +109,9 @@ export default async function ClaSettings({
       v.id === project.currentIclaVersionId ||
       v.id === project.currentCclaVersionId,
     publishedAt: v.publishedAt.toISOString(),
-    repoFullName: v.sourceRepoId ? repoNameById.get(v.sourceRepoId) ?? null : null,
+    repoFullName: v.sourceRepoId
+      ? (repoNameById.get(v.sourceRepoId) ?? null)
+      : null,
   }));
 
   const pendingItems: PendingItem[] = pending.map((p) => ({
@@ -135,8 +137,8 @@ export default async function ClaSettings({
           <CardDescription>
             Require contributors to sign a Contributor License Agreement before
             their PRs are accepted. Failing PRs stay open with a{" "}
-            <code>cla-pending</code> label and a failing Check. They are
-            never closed.
+            <code>cla-pending</code> label and a failing Check. They are never
+            closed.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -145,7 +147,11 @@ export default async function ClaSettings({
             {/* Preserve the repo-file source policy (edited in the Source card)
                 so saving general settings doesn't reset it. */}
             {project.claAutoVersionRequiresResign && (
-              <input type="hidden" name="claAutoVersionRequiresResign" value="1" />
+              <input
+                type="hidden"
+                name="claAutoVersionRequiresResign"
+                value="1"
+              />
             )}
             {project.claRepoFileReviewMode && (
               <input type="hidden" name="claRepoFileReviewMode" value="1" />
@@ -214,9 +220,9 @@ export default async function ClaSettings({
                   Require admin approval to finalize a Corporate CLA
                 </span>
                 <span className="block text-xs text-muted-foreground">
-                  A signed Corporate CLA stays pending and covers no one until an
-                  admin approves it. Turn off to make new Corporate CLAs effective
-                  immediately.
+                  A signed Corporate CLA stays pending and covers no one until
+                  an admin approves it. Turn off to make new Corporate CLAs
+                  effective immediately.
                 </span>
               </span>
             </label>
@@ -269,8 +275,8 @@ export default async function ClaSettings({
                   Require a signature artifact for individual CLAs
                 </span>
                 <span className="block text-xs text-muted-foreground">
-                  The signer&apos;s full legal name is always collected. With this
-                  on, they must also provide a typed, drawn, or uploaded
+                  The signer&apos;s full legal name is always collected. With
+                  this on, they must also provide a typed, drawn, or uploaded
                   signature; off = full legal name + &ldquo;I agree&rdquo;
                   checkbox. (Corporate CLAs always require the full signature
                   block.)
@@ -290,7 +296,8 @@ export default async function ClaSettings({
                 <span className="font-medium">Require DCO sign-off</span>
                 <span className="block text-xs text-muted-foreground">
                   Independent of the CLA: every commit must carry a valid{" "}
-                  <code>Signed-off-by:</code> trailer (<code>git commit -s</code>
+                  <code>Signed-off-by:</code> trailer (
+                  <code>git commit -s</code>
                   ).
                 </span>
               </span>
@@ -310,8 +317,8 @@ export default async function ClaSettings({
             </div>
 
             <p className="rounded-md border border-border bg-muted/40 p-3 text-xs text-muted-foreground">
-              Everyone except bypass-listed bots must sign, collaborators
-              and manually-approved users included.
+              Everyone except bypass-listed bots must sign, collaborators and
+              manually-approved users included.
             </p>
 
             <SubmitButton>Save CLA settings</SubmitButton>
@@ -523,7 +530,8 @@ export default async function ClaSettings({
           <CardTitle className="text-base">ICLA custom fields</CardTitle>
           <CardDescription>
             Extra fields collected from individual signers (e.g. mailing
-            address, employer). Answers are stored immutably with each signature.
+            address, employer). Answers are stored immutably with each
+            signature.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -573,7 +581,9 @@ export default async function ClaSettings({
       {/* ----- Related pages ----- */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Signatures &amp; corporate</CardTitle>
+          <CardTitle className="text-base">
+            Signatures &amp; corporate
+          </CardTitle>
           <CardDescription>
             Inspect the signature ledger, verify chain integrity, manage
             corporate agreements and rosters.

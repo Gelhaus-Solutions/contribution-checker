@@ -16,8 +16,11 @@ import {
   ensureLabel,
   removeLabelIfPresent,
   setLabels,
+  commentOnPr,
+  prHasCommentContaining,
   repoRef,
 } from "@/lib/github/pr-actions";
+import { buildDecisionMessage } from "@/lib/applications/decision-message";
 import { invalidateClaCache } from "@/lib/cla/status";
 import { notifyUser } from "@/lib/notifications/inbox";
 
@@ -149,11 +152,13 @@ export async function onClaCoverageChanged(args: {
 
       if (project.labelsEnabled) {
         await Promise.all([
-          removeLabelIfPresent(ref, check.prNumber, project.labelClaPending).catch(
-            () => undefined
-          ),
+          removeLabelIfPresent(
+            ref,
+            check.prNumber,
+            project.labelClaPending,
+          ).catch(() => undefined),
           setLabels(ref, check.prNumber, [project.labelApproved]).catch(
-            () => undefined
+            () => undefined,
           ),
         ]);
       }
@@ -166,7 +171,7 @@ export async function onClaCoverageChanged(args: {
     } catch (e) {
       logger.warn(
         { err: e, repoId: check.repoId, prNumber: check.prNumber },
-        "cla recheck failed"
+        "cla recheck failed",
       );
     }
   }
@@ -194,7 +199,9 @@ export async function onClaCoverageRevoked(args: {
   projectId: string;
   ghIds: number[];
 }): Promise<{ regated: number }> {
-  const ghIds = Array.from(new Set(args.ghIds.filter((n) => Number.isFinite(n))));
+  const ghIds = Array.from(
+    new Set(args.ghIds.filter((n) => Number.isFinite(n))),
+  );
   for (const ghId of ghIds) invalidateClaCache(args.projectId, ghId);
 
   if (!env.githubAppConfigured || ghIds.length === 0) return { regated: 0 };
@@ -255,7 +262,7 @@ export async function onClaCoverageRevoked(args: {
       if (
         decision.status !== "CHECK_REQUIRED" ||
         !CLA_GATE_REASONS.includes(
-          decision.reason as (typeof CLA_GATE_REASONS)[number]
+          decision.reason as (typeof CLA_GATE_REASONS)[number],
         )
       ) {
         continue;
@@ -298,14 +305,16 @@ export async function onClaCoverageRevoked(args: {
           ref,
           project.labelClaPending,
           "fbca04",
-          "Awaiting CLA signature / DCO sign-off"
+          "Awaiting CLA signature / DCO sign-off",
         ).catch(() => undefined);
         await Promise.all([
-          removeLabelIfPresent(ref, check.prNumber, project.labelApproved).catch(
-            () => undefined
-          ),
+          removeLabelIfPresent(
+            ref,
+            check.prNumber,
+            project.labelApproved,
+          ).catch(() => undefined),
           setLabels(ref, check.prNumber, [project.labelClaPending]).catch(
-            () => undefined
+            () => undefined,
           ),
         ]);
       }
@@ -318,9 +327,170 @@ export async function onClaCoverageRevoked(args: {
     } catch (e) {
       logger.warn(
         { err: e, repoId: check.repoId, prNumber: check.prNumber },
-        "cla re-gate failed"
+        "cla re-gate failed",
       );
     }
   }
   return { regated };
+}
+
+/**
+ * Apply the CLA gate to a single APPROVED-but-uncovered author's open PRs and
+ * post the "sign the CLA" reminder comment on them. Used by the applicant sweep
+ * (`sweepUnsignedApplicants`) for the retroactive case: the CLA requirement was
+ * turned on (or the first ICLA published) while the contributor was already
+ * approved, so their open PRs are tracked APPROVED and were never CLA-gated.
+ *
+ * Distinct from `onClaCoverageRevoked`: that handles coverage *loss* in batch
+ * and notifies via the inbox; this is per-author, posts the PR *comment* (the
+ * applicant's "comment on my PR" channel), and dedupes that comment so repeated
+ * sweeps and prior manual re-evaluations never double-post.
+ *
+ * Safety: ACTS only when the fresh decision is CHECK_REQUIRED (a CLA gate), so
+ * it can never close a PR; anything else (still allowing, DCO-only, or now
+ * DENIED/PENDING) is left for the regular pipeline. Best-effort and idempotent;
+ * mirrors the guards and per-PR try/catch of the functions above.
+ */
+export async function reapplyClaGateForApprovedAuthor(args: {
+  projectId: string;
+  ghId: number;
+}): Promise<{ gated: number }> {
+  invalidateClaCache(args.projectId, args.ghId);
+
+  if (!env.githubAppConfigured) return { gated: 0 };
+
+  const project = await prisma.project.findUnique({
+    where: { id: args.projectId },
+    select: CLA_PROJECT_SELECT,
+  });
+  if (!project) return { gated: 0 };
+
+  const repoIds = project.repos.map((r) => r.id);
+  if (repoIds.length === 0) return { gated: 0 };
+
+  // The author's tracked PRs that could currently be open and should now be
+  // CLA-gated. Skip rows the app itself closed (pending/denied closes); a CLA
+  // gate only ever layers on an allowing base.
+  const checks = await prisma.prCheck.findMany({
+    where: {
+      repoId: { in: repoIds },
+      authorGhId: args.ghId,
+      closedByApp: false,
+      status: { in: ["APPROVED", "BYPASSED", "CHECK_REQUIRED"] },
+    },
+    include: { repo: { include: decisionRepoInclude } },
+  });
+  if (checks.length === 0) return { gated: 0 };
+
+  const applyUrl = buildApplyUrl(project.slug);
+  const claUrl = `${applyUrl}/cla`;
+
+  let gated = 0;
+  for (const check of checks) {
+    if (check.repo.installationId == null) continue;
+    const ref = repoRef(check.repo.fullName, check.repo.installationId);
+    try {
+      const decision: PrDecision = await decideForRepo({
+        repo: check.repo,
+        prAuthorGhLogin: check.authorGhLogin,
+        prAuthorGhId: check.authorGhId,
+      });
+
+      // Act only on a fresh CLA gate. Anything else (still allowing, DCO-only,
+      // or now DENIED/PENDING) is left for the regular pipeline; never close.
+      if (
+        decision.status !== "CHECK_REQUIRED" ||
+        !CLA_GATE_REASONS.includes(
+          decision.reason as (typeof CLA_GATE_REASONS)[number],
+        )
+      ) {
+        continue;
+      }
+
+      const claState: ClaCheckState =
+        decision.reason === "cla_stale" ? "stale" : "required";
+
+      // Don't double-post the reminder. First the cheap DB check (the row is
+      // already gated for this reason, mirroring the webhook's alreadyGated),
+      // then an authoritative GitHub check in case a reminder was already posted
+      // out-of-band (a manual re-evaluation or a prior run) without our row
+      // reflecting it. Matched by the CLA signing URL, which every reminder
+      // (webhook or sweep) includes.
+      const alreadyGated =
+        check.status === "CHECK_REQUIRED" &&
+        check.gateReason === decision.reason;
+      if (!alreadyGated) {
+        const alreadyPosted = await prHasCommentContaining(
+          ref,
+          check.prNumber,
+          claUrl,
+        );
+        if (!alreadyPosted) {
+          const body = buildDecisionMessage({
+            decision,
+            projectName: project.name,
+            applyUrl,
+            ghLogin: check.authorGhLogin,
+            claUrl,
+          });
+          if (body) {
+            await commentOnPr(ref, check.prNumber, body).catch(() => undefined);
+          }
+        }
+      }
+
+      await publishDecisionCheck({
+        installationId: check.repo.installationId,
+        repoFullName: check.repo.fullName,
+        prCheckId: check.id,
+        headSha: check.headSha,
+        project: {
+          id: project.id,
+          slug: project.slug,
+          name: project.name,
+          checksEnabled: project.checksEnabled,
+        },
+        decision,
+        applyUrl,
+        claUrl,
+      });
+      await publishClaCheck({
+        installationId: check.repo.installationId,
+        repoFullName: check.repo.fullName,
+        prCheckId: check.id,
+        headSha: check.headSha,
+        project: {
+          id: project.id,
+          name: project.name,
+          checksEnabled: project.checksEnabled,
+        },
+        state: claState,
+        claUrl,
+      });
+
+      if (project.labelsEnabled) {
+        await ensureLabel(
+          ref,
+          project.labelClaPending,
+          "fbca04",
+          "Awaiting CLA signature / DCO sign-off",
+        ).catch(() => undefined);
+        await setLabels(ref, check.prNumber, [project.labelClaPending]).catch(
+          () => undefined,
+        );
+      }
+
+      await prisma.prCheck.update({
+        where: { id: check.id },
+        data: { status: "CHECK_REQUIRED", gateReason: decision.reason },
+      });
+      gated++;
+    } catch (e) {
+      logger.warn(
+        { err: e, repoId: check.repoId, prNumber: check.prNumber },
+        "cla applicant re-gate failed",
+      );
+    }
+  }
+  return { gated };
 }

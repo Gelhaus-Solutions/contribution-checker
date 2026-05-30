@@ -24,6 +24,7 @@ import {
   type ClaSignatureCapture,
 } from "@/lib/cla/mutations";
 import { onClaCoverageChanged } from "@/lib/cla/post-sign";
+import { notifyApplicantClaRequired } from "@/lib/cla/notify";
 import { getClientIp, getClientUserAgent } from "@/lib/http/client";
 import type { ApplyState } from "./apply-form";
 
@@ -34,7 +35,7 @@ const CLA_EMBED_AFFIRMATION =
 
 function collectAnswers(
   formData: FormData,
-  fields: FormSchema
+  fields: FormSchema,
 ): Record<string, string | boolean> {
   const out: Record<string, string | boolean> = {};
   for (const f of fields) {
@@ -50,7 +51,7 @@ function collectAnswers(
 
 export async function applyAction(
   _prev: ApplyState,
-  formData: FormData
+  formData: FormData,
 ): Promise<ApplyState> {
   const session = await auth();
   if (!session?.user) {
@@ -124,8 +125,7 @@ export async function applyAction(
     if (!claParsed.success) {
       return {
         status: "error",
-        reason:
-          "You must accept the Contributor License Agreement to submit.",
+        reason: "You must accept the Contributor License Agreement to submit.",
         values: submitted,
       };
     }
@@ -247,7 +247,7 @@ export async function applyAction(
                 tx: innerTx,
               });
             },
-          })
+          }),
         )
       : await submitApplication({
           userId: session.user.id,
@@ -272,6 +272,15 @@ export async function applyAction(
   }
 
   await notifyAdminsOfNewApplication({ applicationId: result.applicationId });
+
+  // Remind the applicant to sign the CLA when the project requires one and they
+  // did not (or could not) sign inline. No-ops when they signed in the embedded
+  // flow above (now covered) or when no CLA is required. Best-effort: a reminder
+  // failure must not fail the submission.
+  await notifyApplicantClaRequired({
+    userId: session.user.id,
+    projectId: project.id,
+  }).catch(() => undefined);
 
   revalidatePath(`/p/${project.slug}`);
   return { status: "ok", applicationId: result.applicationId };
