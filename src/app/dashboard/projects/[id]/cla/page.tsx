@@ -129,6 +129,26 @@ export default async function ClaSettings({
               </span>
             </label>
 
+            <label className="flex items-start gap-3 pl-14 text-sm">
+              <input
+                type="checkbox"
+                name="claCorporateRequiresApproval"
+                value="1"
+                defaultChecked={project.claCorporateRequiresApproval}
+                className="mt-0.5 h-4 w-4 rounded border-border"
+              />
+              <span>
+                <span className="font-medium">
+                  Require admin approval to finalize a Corporate CLA
+                </span>
+                <span className="block text-xs text-muted-foreground">
+                  A signed Corporate CLA stays pending and covers no one until an
+                  admin approves it. Turn off to make new Corporate CLAs effective
+                  immediately.
+                </span>
+              </span>
+            </label>
+
             <div className="space-y-2 pl-7">
               <span className="text-sm font-medium">Placement</span>
               <label className="flex items-start gap-3 text-sm">
@@ -250,6 +270,13 @@ export default async function ClaSettings({
             )}
             {project.claCorporateEnabled && (
               <input type="hidden" name="claCorporateEnabled" value="1" />
+            )}
+            {project.claCorporateRequiresApproval && (
+              <input
+                type="hidden"
+                name="claCorporateRequiresApproval"
+                value="1"
+              />
             )}
             {project.claPlacementEmbed && (
               <input type="hidden" name="claPlacementEmbed" value="1" />
