@@ -85,29 +85,35 @@ export async function getClaStatus(a: {
     return { satisfied: false, via: "icla", needsResign: true };
   }
 
-  // 3) Corporate CLA: active roster membership under an active corporate
-  //    whose signatory signed a version at or above the floor.
-  const member = await prisma.cclaRosterMember.findFirst({
+  // 3) Corporate CLA: active roster membership under an active corporate whose
+  //    signatory signed a version at or above the floor. A contributor may be on
+  //    several rosters (multiple CCLAs, some PENDING/REJECTED/REVOKED), so the
+  //    relation filter keeps only memberships under an ACTIVE corporate and we
+  //    pick the first that also clears the version floor. Without this filter a
+  //    findFirst could land on a non-active corporate and wrongly report
+  //    not-covered even when another active corporate covers the same person.
+  const members = await prisma.cclaRosterMember.findMany({
     where: {
       projectId,
       status: "ACTIVE",
       OR: [{ ghId }, { ghLogin }],
+      corporateCla: { is: { status: "ACTIVE" } },
     },
     include: { corporateCla: { include: { signature: true } } },
   });
-  if (
-    member &&
-    member.corporateCla &&
-    member.corporateCla.status === "ACTIVE" &&
-    member.corporateCla.signature &&
-    member.corporateCla.signature.documentVersion >= minCclaVersion
-  ) {
+  const covering = members.find(
+    (m) =>
+      m.corporateCla?.status === "ACTIVE" &&
+      m.corporateCla.signature != null &&
+      m.corporateCla.signature.documentVersion >= minCclaVersion
+  );
+  if (covering && covering.corporateCla) {
     return {
       satisfied: true,
       via: "ccla",
       corporate: {
-        id: member.corporateCla.id,
-        companyName: member.corporateCla.companyName,
+        id: covering.corporateCla.id,
+        companyName: covering.corporateCla.companyName,
       },
     };
   }

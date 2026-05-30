@@ -147,6 +147,10 @@ model Project {
   claRequired            Boolean @default(true)
   // Allow the Corporate CLA path (company signs + maintains an employee roster).
   claCorporateEnabled    Boolean @default(true)
+  // Whether a newly signed Corporate CLA must be approved by an admin before it
+  // confers coverage. When true, new CCLAs start PENDING; an admin approves
+  // (-> ACTIVE) or rejects (-> REJECTED). When false they go straight to ACTIVE.
+  claCorporateRequiresApproval Boolean @default(true)
   // Placement: a required acceptance step embedded in the application form,
   // and/or a standalone signing page at /p/<slug>/cla.
   claPlacementEmbed      Boolean @default(true)
@@ -672,7 +676,17 @@ model CorporateCla {
   signatoryTitle    String? // Authorized representative's Title
   signatureText     String? // Authorized representative's typed signature
 
-  status      String @default("ACTIVE") // "ACTIVE" | "REVOKED"
+  // Approval lifecycle. A CCLA starts PENDING when the project requires admin
+  // approval (Project.claCorporateRequiresApproval), then ACTIVE (approved) or
+  // REJECTED. REVOKED is the post-active maintainer override. Only ACTIVE
+  // confers coverage on the roster. @default("ACTIVE") grandfathers pre-existing
+  // rows; recordCclaSignature sets PENDING explicitly when approval is required.
+  status      String @default("ACTIVE") // "PENDING" | "ACTIVE" | "REJECTED" | "REVOKED"
+  approvedById String?
+  approvedAt   DateTime?
+  rejectedById String?
+  rejectedAt   DateTime?
+  rejectReason String?
   revokedById String?
   revokedAt   DateTime?
   createdAt   DateTime @default(now())
@@ -752,7 +766,7 @@ model ClaEventLog {
   id        String @id @default(cuid())
   projectId String
   seq       Int
-  kind      String // genesis | icla.signed | ccla.signed | doc.published | roster.added | roster.revoked | roster.disputed | signature.revoked | waiver.granted | waiver.revoked
+  kind      String // genesis | icla.signed | ccla.signed | ccla.approved | ccla.rejected | doc.published | roster.added | roster.revoked | roster.disputed | signature.revoked | waiver.granted | waiver.revoked
 
   payload     String // canonical (key-sorted) JSON snapshot
   actorUserId String?

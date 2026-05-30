@@ -13,6 +13,8 @@ export type ChainKind =
   | "genesis"
   | "icla.signed"
   | "ccla.signed"
+  | "ccla.approved"
+  | "ccla.rejected"
   | "doc.published"
   | "roster.added"
   | "roster.revoked"
