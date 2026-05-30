@@ -31,7 +31,7 @@ The bot runs in two modes per repo:
 ## Tech stack
 
 - Next.js 15 App Router + React 19
-- Prisma + SQLite (`data/contribution-checker.db`)
+- Prisma + PostgreSQL
 - Auth.js v5 (GitHub OAuth) for users
 - `@octokit/app` + `@octokit/webhooks` for the App
 - `jose` for verifying GitHub Actions OIDC JWTs
