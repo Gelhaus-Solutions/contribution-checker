@@ -2,21 +2,44 @@
 
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
-import { logger } from "@/lib/logger";
 import { requireProjectRole } from "@/lib/authz";
 import { recordAudit } from "@/lib/audit";
-import { getInstallationOctokit } from "@/lib/github/app";
+import { rateLimit } from "@/lib/ratelimit";
 import {
   claSettingsSchema,
   publishVersionSchema,
+  setVersionResignSchema,
+  approvePendingChangeSchema,
+  rejectPendingChangeSchema,
   waiverSchema,
   saveCustomFieldsSchema,
 } from "@/lib/cla/schema";
 import { formSchema as formSchemaValidator } from "@/lib/applications/schema";
 import * as claMutations from "@/lib/cla/mutations";
+import {
+  fetchRepoFile,
+  sha256Hex,
+  syncClaRepoSourceNow as syncClaRepoSourceNowCore,
+  type SyncOutcome,
+} from "@/lib/cla/repo-source";
+import { onClaCoverageChanged, onClaCoverageRevoked } from "@/lib/cla/post-sign";
 
 function revalidateCla(projectId: string) {
   revalidatePath(`/dashboard/projects/${projectId}/cla`);
+}
+
+/**
+ * Drive both coverage directions for a set of affected contributors after a
+ * re-sign change: re-gate any whose now-stale signature was holding a passing
+ * PR (loss), and re-check any whose signature is now valid again (gain). Both
+ * are idempotent and act on disjoint PrCheck states, so calling both is safe.
+ */
+async function driveCoverage(projectId: string, ghIds: number[]) {
+  if (ghIds.length === 0) return;
+  await onClaCoverageRevoked({ projectId, ghIds }).catch(() => undefined);
+  for (const ghId of ghIds) {
+    await onClaCoverageChanged({ projectId, ghId }).catch(() => undefined);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -86,6 +109,8 @@ export async function updateClaSettings(formData: FormData) {
     claPlacementStandalone: formData.get("claPlacementStandalone") ?? undefined,
     claAutoVersionRequiresResign:
       formData.get("claAutoVersionRequiresResign") ?? undefined,
+    claRepoFileReviewMode:
+      formData.get("claRepoFileReviewMode") ?? undefined,
     claIclaRequireSignature:
       formData.get("claIclaRequireSignature") ?? undefined,
     dcoEnabled: formData.get("dcoEnabled") ?? undefined,
@@ -110,6 +135,7 @@ export async function updateClaSettings(formData: FormData) {
       claPlacementEmbed: true,
       claPlacementStandalone: true,
       claAutoVersionRequiresResign: true,
+      claRepoFileReviewMode: true,
       claIclaRequireSignature: true,
       dcoEnabled: true,
       labelClaPending: true,
@@ -125,6 +151,7 @@ export async function updateClaSettings(formData: FormData) {
     claPlacementEmbed: !!parsed.claPlacementEmbed,
     claPlacementStandalone: !!parsed.claPlacementStandalone,
     claAutoVersionRequiresResign: !!parsed.claAutoVersionRequiresResign,
+    claRepoFileReviewMode: !!parsed.claRepoFileReviewMode,
     claIclaRequireSignature: !!parsed.claIclaRequireSignature,
     dcoEnabled: !!parsed.dcoEnabled,
     labelClaPending: parsed.labelClaPending ?? before.labelClaPending,
@@ -164,6 +191,10 @@ export async function updateClaSettings(formData: FormData) {
             before.claAutoVersionRequiresResign,
             after.claAutoVersionRequiresResign,
           ],
+          claRepoFileReviewMode: [
+            before.claRepoFileReviewMode,
+            after.claRepoFileReviewMode,
+          ],
           claIclaRequireSignature: [
             before.claIclaRequireSignature,
             after.claIclaRequireSignature,
@@ -190,6 +221,10 @@ export async function publishClaVersion(formData: FormData) {
     const v = formData.get(key);
     return typeof v === "string" && v.trim().length > 0 ? v : undefined;
   };
+  const resignVersionIds = formData
+    .getAll("resignVersionIds")
+    .map((v) => String(v))
+    .filter((v) => v.length > 0);
   const parsed = publishVersionSchema.parse({
     projectId: formData.get("projectId"),
     kind: formData.get("kind"),
@@ -199,9 +234,25 @@ export async function publishClaVersion(formData: FormData) {
     sourcePath: opt("sourcePath"),
     sourceRef: opt("sourceRef"),
     requireResign: formData.get("requireResign") ?? false,
+    resignVersionIds: resignVersionIds.length > 0 ? resignVersionIds : undefined,
   });
 
   const { session } = await requireProjectRole(parsed.projectId, "ADMIN");
+
+  // Validate any selected prior versions belong to this project + kind, so the
+  // per-version selection can't reference another project's versions.
+  if (parsed.resignVersionIds && parsed.resignVersionIds.length > 0) {
+    const owned = await prisma.claDocumentVersion.count({
+      where: {
+        id: { in: parsed.resignVersionIds },
+        projectId: parsed.projectId,
+        kind: parsed.kind,
+      },
+    });
+    if (owned !== parsed.resignVersionIds.length) {
+      throw new Error("A selected version does not belong to this CLA.");
+    }
+  }
 
   let bodyMarkdown: string;
   let sourceRepoId: string | null = null;
@@ -230,48 +281,22 @@ export async function publishClaVersion(formData: FormData) {
         "The GitHub App is not installed on this repository yet, so the file cannot be fetched."
       );
     }
-    const [owner, name] = repo.fullName.split("/");
-    if (!owner || !name) throw new Error("Repository name is malformed.");
-
-    const octokit = await getInstallationOctokit(repo.installationId);
-    let decoded: string;
-    try {
-      const res = await octokit.request(
-        "GET /repos/{owner}/{repo}/contents/{path}",
-        {
-          owner,
-          repo: name,
-          path: parsed.sourcePath,
-          ...(parsed.sourceRef ? { ref: parsed.sourceRef } : {}),
-        }
-      );
-      const data = res.data as {
-        type?: string;
-        content?: string;
-        encoding?: string;
-        sha?: string;
-      };
-      if (Array.isArray(data) || data.type !== "file" || !data.content) {
-        throw new Error("Path does not point to a file.");
-      }
-      decoded = Buffer.from(
-        data.content,
-        (data.encoding as BufferEncoding) ?? "base64"
-      ).toString("utf8");
-      sourceCommitSha = data.sha ?? null;
-    } catch (err) {
-      logger.warn(
-        { err, repo: repo.fullName, path: parsed.sourcePath },
-        "cla: failed to fetch repo file for publish"
-      );
+    const fetched = await fetchRepoFile({
+      installationId: repo.installationId,
+      fullName: repo.fullName,
+      path: parsed.sourcePath,
+      ref: parsed.sourceRef,
+    });
+    if (!fetched) {
       throw new Error(
         `Could not read ${parsed.sourcePath} from ${repo.fullName}. Check the path and ref.`
       );
     }
-    if (!decoded.trim()) {
+    if (!fetched.content.trim()) {
       throw new Error("The fetched file is empty.");
     }
-    bodyMarkdown = decoded;
+    bodyMarkdown = fetched.content;
+    sourceCommitSha = fetched.sha;
     sourceRepoId = repo.id;
     sourcePath = parsed.sourcePath;
     sourceRef = parsed.sourceRef ?? null;
@@ -292,6 +317,7 @@ export async function publishClaVersion(formData: FormData) {
     sourceRef,
     sourceCommitSha,
     requireResign: parsed.requireResign,
+    resignVersionIds: parsed.resignVersionIds,
     actorUserId: session.user.id,
   });
 
@@ -305,8 +331,13 @@ export async function publishClaVersion(formData: FormData) {
       contentHash: published.contentHash,
       sourceType: parsed.sourceType,
       requireResign: parsed.requireResign,
+      resignVersionIds: parsed.resignVersionIds ?? [],
     },
   });
+
+  // A publish only ever makes PRIOR signers stale (the new version has no
+  // signers yet), so re-gate the affected contributors' open passing PRs.
+  await driveCoverage(parsed.projectId, published.affectedGhIds);
 
   revalidateCla(parsed.projectId);
 }
@@ -414,4 +445,362 @@ export async function revokeWaiver(formData: FormData) {
 
   revalidatePath(`/dashboard/projects/${projectId}/cla/signatures`);
   revalidateCla(projectId);
+}
+
+// ---------------------------------------------------------------------------
+// Retroactively toggle a single already-published version's resignRequired flag
+// (the per-version control in Version history). Drives coverage in both
+// directions for affected contributors.
+// ---------------------------------------------------------------------------
+export async function setVersionResign(formData: FormData) {
+  const truthy = (v: FormDataEntryValue | null) =>
+    ["1", "true", "on", "yes"].includes(String(v ?? "").toLowerCase());
+  const parsed = setVersionResignSchema.parse({
+    projectId: formData.get("projectId"),
+    changes: [
+      {
+        versionId: formData.get("versionId"),
+        resignRequired: truthy(formData.get("resignRequired")),
+      },
+    ],
+  });
+
+  const { session } = await requireProjectRole(parsed.projectId, "ADMIN");
+
+  const result = await claMutations.setVersionResign({
+    projectId: parsed.projectId,
+    changes: parsed.changes,
+    actorUserId: session.user.id,
+  });
+
+  await recordAudit({
+    projectId: parsed.projectId,
+    actorId: session.user.id,
+    kind: "cla.version_resign_changed",
+    payload: { changes: parsed.changes },
+  });
+
+  await driveCoverage(parsed.projectId, result.affectedGhIds);
+
+  revalidateCla(parsed.projectId);
+}
+
+// ---------------------------------------------------------------------------
+// Review & approve: approve or reject a detected repo-file change.
+// ---------------------------------------------------------------------------
+export async function approvePendingChange(formData: FormData) {
+  const resignVersionIds = formData
+    .getAll("resignVersionIds")
+    .map((v) => String(v))
+    .filter((v) => v.length > 0);
+  const parsed = approvePendingChangeSchema.parse({
+    projectId: formData.get("projectId"),
+    pendingChangeId: formData.get("pendingChangeId"),
+    requireResign: formData.get("requireResign") ?? false,
+    resignVersionIds: resignVersionIds.length > 0 ? resignVersionIds : undefined,
+  });
+
+  const { session } = await requireProjectRole(parsed.projectId, "ADMIN");
+
+  const pending = await prisma.claPendingChange.findUnique({
+    where: { id: parsed.pendingChangeId },
+    select: {
+      id: true,
+      projectId: true,
+      kind: true,
+      status: true,
+      sourceRepoId: true,
+      sourcePath: true,
+      sourceRef: true,
+      detectedCommitSha: true,
+      detectedContent: true,
+      contentHash: true,
+    },
+  });
+  if (!pending || pending.projectId !== parsed.projectId) {
+    throw new Error("Pending change not found for this project.");
+  }
+  if (pending.status !== "PENDING") {
+    throw new Error("This change has already been resolved.");
+  }
+
+  // Stale-HEAD guard: refuse if the file changed on the branch since detection.
+  const repo = await prisma.repo.findUnique({
+    where: { id: pending.sourceRepoId },
+    select: { id: true, fullName: true, installationId: true },
+  });
+  if (!repo || repo.installationId == null) {
+    throw new Error("The source repo has no GitHub App installation.");
+  }
+  const head = await fetchRepoFile({
+    installationId: repo.installationId,
+    fullName: repo.fullName,
+    path: pending.sourcePath,
+    ref: pending.sourceRef,
+  });
+  if (!head || sha256Hex(head.content) !== pending.contentHash) {
+    throw new Error(
+      "The file changed on the branch since this was queued. Re-sync and review the latest version."
+    );
+  }
+
+  const kind = pending.kind as "ICLA" | "CCLA";
+  if (parsed.resignVersionIds && parsed.resignVersionIds.length > 0) {
+    const owned = await prisma.claDocumentVersion.count({
+      where: {
+        id: { in: parsed.resignVersionIds },
+        projectId: parsed.projectId,
+        kind,
+      },
+    });
+    if (owned !== parsed.resignVersionIds.length) {
+      throw new Error("A selected version does not belong to this CLA.");
+    }
+  }
+
+  const published = await claMutations.publishClaVersion({
+    projectId: parsed.projectId,
+    kind,
+    bodyMarkdown: pending.detectedContent,
+    sourceType: "repo_file",
+    sourceRepoId: pending.sourceRepoId,
+    sourcePath: pending.sourcePath,
+    sourceRef: pending.sourceRef,
+    sourceCommitSha: pending.detectedCommitSha,
+    requireResign: parsed.requireResign,
+    resignVersionIds: parsed.resignVersionIds,
+    resolvePendingChangeId: pending.id,
+    actorUserId: session.user.id,
+  });
+
+  await recordAudit({
+    projectId: parsed.projectId,
+    actorId: session.user.id,
+    kind: "cla.pending_change_approved",
+    payload: {
+      pendingChangeId: pending.id,
+      kind,
+      version: published.version,
+      requireResign: parsed.requireResign,
+      resignVersionIds: parsed.resignVersionIds ?? [],
+    },
+  });
+
+  await driveCoverage(parsed.projectId, published.affectedGhIds);
+
+  revalidateCla(parsed.projectId);
+}
+
+export async function rejectPendingChange(formData: FormData) {
+  const parsed = rejectPendingChangeSchema.parse({
+    projectId: formData.get("projectId"),
+    pendingChangeId: formData.get("pendingChangeId"),
+    reason: formData.get("reason") ?? undefined,
+  });
+
+  const { session } = await requireProjectRole(parsed.projectId, "ADMIN");
+
+  const pending = await prisma.claPendingChange.findUnique({
+    where: { id: parsed.pendingChangeId },
+    select: { id: true, projectId: true, status: true },
+  });
+  if (!pending || pending.projectId !== parsed.projectId) {
+    throw new Error("Pending change not found for this project.");
+  }
+  if (pending.status !== "PENDING") {
+    throw new Error("This change has already been resolved.");
+  }
+
+  await prisma.claPendingChange.update({
+    where: { id: pending.id },
+    data: {
+      status: "REJECTED",
+      reviewedById: session.user.id,
+      reviewedAt: new Date(),
+      rejectReason: parsed.reason ?? null,
+    },
+  });
+
+  await recordAudit({
+    projectId: parsed.projectId,
+    actorId: session.user.id,
+    kind: "cla.pending_change_rejected",
+    payload: { pendingChangeId: pending.id, reason: parsed.reason ?? "" },
+  });
+
+  revalidateCla(parsed.projectId);
+}
+
+// ---------------------------------------------------------------------------
+// Manual "Sync now": admin-initiated re-fetch of the repo-file source(s),
+// rate-limited and returning a structured per-kind result.
+// ---------------------------------------------------------------------------
+export async function runClaRepoSync(
+  projectId: string,
+  kind?: "ICLA" | "CCLA"
+): Promise<{ results: SyncOutcome[] }> {
+  await requireProjectRole(projectId, "ADMIN");
+
+  const limited = await rateLimit({
+    key: `cla-sync:${projectId}`,
+    limit: 6,
+    windowMs: 60_000,
+  });
+  if (!limited.ok) {
+    throw new Error("Too many syncs. Please wait a minute and try again.");
+  }
+
+  const out = await syncClaRepoSourceNowCore({ projectId, kind });
+  revalidateCla(projectId);
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Read helpers for the admin UI (ADMIN-gated server reads).
+// ---------------------------------------------------------------------------
+export type RepoSourceView =
+  | { sourced: false }
+  | {
+      sourced: true;
+      available: false;
+      fullName: string;
+      sourcePath: string;
+      sourceRef: string | null;
+      storedCommitSha: string | null;
+    }
+  | {
+      sourced: true;
+      available: true;
+      fullName: string;
+      sourcePath: string;
+      sourceRef: string | null;
+      storedCommitSha: string | null;
+      content: string;
+      liveSha: string | null;
+      storedHash: string;
+      liveHash: string;
+      matchesStored: boolean;
+    };
+
+/**
+ * For the current version of a kind, report the live repo file content and
+ * whether it matches the stored (published) version, for the drift indicator.
+ */
+export async function fetchClaRepoSource(
+  projectId: string,
+  kind: "ICLA" | "CCLA"
+): Promise<RepoSourceView> {
+  await requireProjectRole(projectId, "ADMIN");
+
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: { currentIclaVersionId: true, currentCclaVersionId: true },
+  });
+  const versionId =
+    kind === "ICLA"
+      ? project?.currentIclaVersionId
+      : project?.currentCclaVersionId;
+  if (!versionId) return { sourced: false };
+
+  const version = await prisma.claDocumentVersion.findUnique({
+    where: { id: versionId },
+    select: {
+      sourceType: true,
+      sourceRepoId: true,
+      sourcePath: true,
+      sourceRef: true,
+      sourceCommitSha: true,
+      contentHash: true,
+    },
+  });
+  if (
+    !version ||
+    version.sourceType !== "repo_file" ||
+    !version.sourceRepoId ||
+    !version.sourcePath
+  ) {
+    return { sourced: false };
+  }
+
+  const repo = await prisma.repo.findUnique({
+    where: { id: version.sourceRepoId },
+    select: { fullName: true, installationId: true },
+  });
+  const base = {
+    sourced: true as const,
+    fullName: repo?.fullName ?? "",
+    sourcePath: version.sourcePath,
+    sourceRef: version.sourceRef,
+    storedCommitSha: version.sourceCommitSha,
+  };
+  if (!repo || repo.installationId == null) {
+    return { ...base, available: false };
+  }
+
+  const fetched = await fetchRepoFile({
+    installationId: repo.installationId,
+    fullName: repo.fullName,
+    path: version.sourcePath,
+    ref: version.sourceRef,
+  });
+  if (!fetched) {
+    return { ...base, available: false };
+  }
+  const liveHash = sha256Hex(fetched.content);
+  return {
+    ...base,
+    available: true,
+    content: fetched.content,
+    liveSha: fetched.sha,
+    storedHash: version.contentHash,
+    liveHash,
+    matchesStored: liveHash === version.contentHash,
+  };
+}
+
+/** Preview a repo file's content before publishing (editor "Preview" button). */
+export async function previewRepoFile(args: {
+  projectId: string;
+  sourceRepoId: string;
+  path: string;
+  ref?: string | null;
+}): Promise<{ ok: true; content: string; sha: string | null } | { ok: false; error: string }> {
+  await requireProjectRole(args.projectId, "ADMIN");
+
+  const repo = await prisma.repo.findUnique({
+    where: { id: args.sourceRepoId },
+    select: { projectId: true, fullName: true, installationId: true },
+  });
+  if (!repo || repo.projectId !== args.projectId) {
+    return { ok: false, error: "Repository not found for this project." };
+  }
+  if (repo.installationId == null) {
+    return { ok: false, error: "The GitHub App is not installed on this repo." };
+  }
+  const fetched = await fetchRepoFile({
+    installationId: repo.installationId,
+    fullName: repo.fullName,
+    path: args.path,
+    ref: args.ref,
+  });
+  if (!fetched) {
+    return { ok: false, error: `Could not read ${args.path} from ${repo.fullName}.` };
+  }
+  return { ok: true, content: fetched.content, sha: fetched.sha };
+}
+
+/** Read a historical version's stored body for the Version history preview. */
+export async function getClaVersionBody(
+  projectId: string,
+  versionId: string
+): Promise<{ bodyMarkdown: string }> {
+  await requireProjectRole(projectId, "ADMIN");
+  const version = await prisma.claDocumentVersion.findUnique({
+    where: { id: versionId },
+    select: { projectId: true, bodyMarkdown: true },
+  });
+  if (!version || version.projectId !== projectId) {
+    throw new Error("Version not found for this project.");
+  }
+  return { bodyMarkdown: version.bodyMarkdown };
 }
