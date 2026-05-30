@@ -26,7 +26,7 @@ vi.mock("@/lib/cla/status", () => ({ getClaStatus: vi.fn() }));
 
 vi.mock("@/lib/cla/post-sign", () => ({
   reapplyClaGateForApprovedAuthor: vi.fn(),
-  refreshPendingClaReminders: vi.fn(async () => ({ edited: 0 })),
+  notifyPendingApplicantsOnPrs: vi.fn(async () => ({ commented: 0 })),
 }));
 
 vi.mock("@/lib/audit", () => ({ recordAudit: vi.fn() }));
@@ -42,12 +42,16 @@ beforeEach(() => {
 import { prisma } from "@/lib/db";
 import {
   notifyApplicantClaRequired,
+  notifyPendingApplicant,
   sweepUnsignedApplicants,
 } from "@/lib/cla/notify";
 import { notifyUser } from "@/lib/notifications/inbox";
 import { emailUserById } from "@/lib/notifications/email";
 import { getClaStatus } from "@/lib/cla/status";
-import { reapplyClaGateForApprovedAuthor } from "@/lib/cla/post-sign";
+import {
+  reapplyClaGateForApprovedAuthor,
+  notifyPendingApplicantsOnPrs,
+} from "@/lib/cla/post-sign";
 import { recordAudit } from "@/lib/audit";
 
 const fn = (m: unknown) => m as ReturnType<typeof vi.fn>;
@@ -165,6 +169,44 @@ describe("notifyApplicantClaRequired", () => {
   });
 });
 
+describe("notifyPendingApplicant", () => {
+  beforeEach(() => {
+    fn(prisma.project.findUnique).mockResolvedValue({
+      id: "p1",
+      slug: "proj",
+      name: "Proj",
+    });
+    fn(prisma.user.findUnique).mockResolvedValue({ id: "u1" });
+    fn(prisma.notification.findFirst).mockResolvedValue(null);
+  });
+
+  it("sends an awaiting-review notice in-app + email", async () => {
+    const sent = await notifyPendingApplicant({
+      userId: "u1",
+      projectId: "p1",
+    });
+    expect(sent).toBe(true);
+    expect(notifyUser).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "u1",
+        kind: "application.awaiting_review",
+      }),
+    );
+    expect(emailUserById).toHaveBeenCalledTimes(1);
+  });
+
+  it("is idempotent: skips when an unread awaiting-review notice exists", async () => {
+    fn(prisma.notification.findFirst).mockResolvedValue({ id: "n9" });
+    const sent = await notifyPendingApplicant({
+      userId: "u1",
+      projectId: "p1",
+    });
+    expect(sent).toBe(false);
+    expect(notifyUser).not.toHaveBeenCalled();
+    expect(emailUserById).not.toHaveBeenCalled();
+  });
+});
+
 describe("sweepUnsignedApplicants", () => {
   it("dedupes by user (APPROVED beats SUBMITTED) and PR-re-gates only approved authors with a ghId", async () => {
     mockProject();
@@ -206,6 +248,12 @@ describe("sweepUnsignedApplicants", () => {
     expect(reapplyClaGateForApprovedAuthor).toHaveBeenCalledWith({
       projectId: "p1",
       ghId: 1,
+    });
+    // u2 is the only SUBMITTED applicant (u1 deduped to APPROVED), so the
+    // awaiting-review PR comment pass runs for its ghId only.
+    expect(notifyPendingApplicantsOnPrs).toHaveBeenCalledWith({
+      projectId: "p1",
+      ghIds: [2],
     });
     // Audit brackets the run.
     expect(recordAudit).toHaveBeenCalledWith(

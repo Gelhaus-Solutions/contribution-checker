@@ -334,11 +334,12 @@ export default async function ClaSettings({
             Notify unsigned applicants
           </CardTitle>
           <CardDescription>
-            Remind applicants who have not signed the CLA (in-app and by email),
-            and re-apply the CLA check to the open PRs of approved contributors.
-            Covers submitted and approved applications, up to 200 per run.
-            Reminders already sent (in the inbox or on a PR) are not repeated, so
-            this is safe to run more than once.
+            Remind applicants who have not signed the CLA (in-app, by email, and
+            on their PRs), re-apply the CLA check to approved contributors&apos;
+            open PRs, and nudge submitted-but-undecided applicants that their
+            application is awaiting review. Covers submitted and approved
+            applications, up to 200 per run. Notices already sent (in the inbox
+            or on a PR) are not repeated, so this is safe to run more than once.
           </CardDescription>
         </CardHeader>
         <CardContent>

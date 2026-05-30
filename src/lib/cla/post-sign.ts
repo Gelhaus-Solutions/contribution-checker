@@ -18,14 +18,9 @@ import {
   setLabels,
   commentOnPr,
   prHasCommentContaining,
-  listIssueComments,
-  updateIssueComment,
   repoRef,
 } from "@/lib/github/pr-actions";
-import {
-  buildDecisionMessage,
-  claPendingReminderNote,
-} from "@/lib/applications/decision-message";
+import { buildDecisionMessage } from "@/lib/applications/decision-message";
 import { getClaStatus, invalidateClaCache } from "@/lib/cla/status";
 import { notifyUser } from "@/lib/notifications/inbox";
 
@@ -504,31 +499,41 @@ export async function reapplyClaGateForApprovedAuthor(args: {
 }
 
 /**
- * Retroactively add the "sign the CLA" note to the pending-close comments of a
- * project's currently-pending PRs whose authors have not signed. For a pending
- * applicant the PR is held by the application gate (not the CLA), so we never
- * gate or comment fresh here; we EDIT the existing pending comment in place so
- * the CLA requirement is visible on GitHub. Idempotent: a comment that already
- * links the /cla page is left alone. Bounded to 200 PRs per run; best-effort.
+ * Post the "your application is awaiting review" comment on the pending PRs of
+ * submitted (not-yet-decided) applicants, so GitHub notifies them there. A fresh
+ * comment (not an edit) is used precisely so GitHub sends a notification, and it
+ * carries the "sign the CLA" heads-up when the project gates on a CLA the author
+ * has not signed. Idempotent: a PR that already has an awaiting-review comment is
+ * skipped, so repeat sweeps never re-ping. Bounded to 200 PRs per run.
+ *
+ * `ghIds` are the submitted applicants' GitHub ids (passed from the sweep), so
+ * this never touches a non-applicant's PR. Best-effort; mirrors the other
+ * post-sign helpers (env guard, per-PR try/catch that only logs).
  */
-export async function refreshPendingClaReminders(args: {
+export async function notifyPendingApplicantsOnPrs(args: {
   projectId: string;
-}): Promise<{ edited: number }> {
-  if (!env.githubAppConfigured) return { edited: 0 };
+  ghIds: number[];
+}): Promise<{ commented: number }> {
+  const ghIds = Array.from(
+    new Set(args.ghIds.filter((n) => Number.isFinite(n))),
+  );
+  if (!env.githubAppConfigured || ghIds.length === 0) return { commented: 0 };
 
   const project = await prisma.project.findUnique({
     where: { id: args.projectId },
     select: CLA_PROJECT_SELECT,
   });
-  if (!project) return { edited: 0 };
-  if (!project.claEnabled || !project.claRequired) return { edited: 0 };
-  if (!project.currentIclaVersionId) return { edited: 0 };
+  if (!project) return { commented: 0 };
 
   const repoIds = project.repos.map((r) => r.id);
-  if (repoIds.length === 0) return { edited: 0 };
+  if (repoIds.length === 0) return { commented: 0 };
 
   const checks = await prisma.prCheck.findMany({
-    where: { repoId: { in: repoIds }, status: "PENDING" },
+    where: {
+      repoId: { in: repoIds },
+      authorGhId: { in: ghIds },
+      status: "PENDING",
+    },
     select: {
       id: true,
       prNumber: true,
@@ -538,48 +543,54 @@ export async function refreshPendingClaReminders(args: {
     },
     take: 200,
   });
-  if (checks.length === 0) return { edited: 0 };
+  if (checks.length === 0) return { commented: 0 };
 
   const applyUrl = buildApplyUrl(project.slug);
   const claUrl = `${applyUrl}/cla`;
+  const claGate =
+    project.claEnabled &&
+    project.claRequired &&
+    project.currentIclaVersionId != null;
 
-  let edited = 0;
+  let commented = 0;
   for (const check of checks) {
     if (check.repo.installationId == null) continue;
     const ref = repoRef(check.repo.fullName, check.repo.installationId);
     try {
-      // Skip authors who have since become covered (signed / roster / waiver).
-      const coverage = await getClaStatus({
-        projectId: project.id,
-        ghId: check.authorGhId,
+      // Dedup: don't re-ping a PR that already carries an awaiting-review note.
+      if (
+        await prHasCommentContaining(ref, check.prNumber, "is awaiting review")
+      ) {
+        continue;
+      }
+      // Add the CLA heads-up only when the project gates on a CLA the author
+      // has not satisfied.
+      let needsCla = false;
+      if (claGate) {
+        const coverage = await getClaStatus({
+          projectId: project.id,
+          ghId: check.authorGhId,
+          ghLogin: check.authorGhLogin,
+        });
+        needsCla = !coverage.satisfied;
+      }
+      const body = buildDecisionMessage({
+        decision: { status: "PENDING", reason: "submitted" },
+        projectName: project.name,
+        applyUrl,
         ghLogin: check.authorGhLogin,
+        claUrl,
+        needsCla,
       });
-      if (coverage.satisfied) continue;
-
-      // Find the bot's pending-close comment ("...reopen this PR...") and append
-      // the CLA heads-up. Skip if it already links the CLA page (already
-      // refreshed) so repeat runs don't duplicate the note.
-      const comments = await listIssueComments(ref, check.prNumber);
-      const target = comments.find(
-        (c) =>
-          c.body.includes("reopen this PR") &&
-          c.body.includes(applyUrl) &&
-          !c.body.includes(claUrl),
-      );
-      if (!target) continue;
-
-      await updateIssueComment(
-        ref,
-        target.id,
-        target.body + claPendingReminderNote(claUrl),
-      ).catch(() => undefined);
-      edited++;
+      if (!body) continue;
+      await commentOnPr(ref, check.prNumber, body).catch(() => undefined);
+      commented++;
     } catch (e) {
       logger.warn(
         { err: e, prNumber: check.prNumber },
-        "cla pending-reminder refresh failed",
+        "pending-applicant PR notice failed",
       );
     }
   }
-  return { edited };
+  return { commented };
 }

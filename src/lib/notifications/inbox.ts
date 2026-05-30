@@ -9,6 +9,7 @@ export type NotificationKind =
   | "application.note_added"
   | "application.review_submitted"
   | "application.comment_replied"
+  | "application.awaiting_review"
   | "project.invited"
   | "pr.blocked"
   | "cla.ccla_signed"

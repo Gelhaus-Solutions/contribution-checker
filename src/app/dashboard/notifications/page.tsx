@@ -15,6 +15,7 @@ const KIND_LABELS: Record<string, string> = {
   "application.denied": "Application denied",
   "application.revoked": "Approval revoked",
   "application.note_added": "Note added",
+  "application.awaiting_review": "Application awaiting review",
   "project.invited": "Invited to a project",
   "pr.blocked": "PR blocked",
   "cla.ccla_signed": "Corporate CLA signed",

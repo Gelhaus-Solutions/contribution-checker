@@ -6,7 +6,7 @@ import { applyUrl, emailUserById } from "@/lib/notifications/email";
 import { getClaStatus } from "@/lib/cla/status";
 import {
   reapplyClaGateForApprovedAuthor,
-  refreshPendingClaReminders,
+  notifyPendingApplicantsOnPrs,
 } from "@/lib/cla/post-sign";
 
 const PROJECT_SELECT = {
@@ -107,6 +107,69 @@ export async function notifyApplicantClaRequired(args: {
 }
 
 /**
+ * Tell a submitted-but-undecided applicant that their application is in the
+ * review queue, in-app and by email. Deduped on an unread awaiting-review notice
+ * for the project so repeat sweeps never pile up. Best-effort; returns true when
+ * a notice was sent. The caller (the sweep) guarantees the user has a SUBMITTED
+ * application; this is the in-app/email half, the PR comment is posted by
+ * {@link notifyPendingApplicantsOnPrs}.
+ */
+export async function notifyPendingApplicant(args: {
+  userId: string;
+  projectId: string;
+}): Promise<boolean> {
+  try {
+    const [project, user] = await Promise.all([
+      prisma.project.findUnique({
+        where: { id: args.projectId },
+        select: { id: true, slug: true, name: true },
+      }),
+      prisma.user.findUnique({
+        where: { id: args.userId },
+        select: { id: true },
+      }),
+    ]);
+    if (!project || !user) return false;
+
+    const existing = await prisma.notification.findFirst({
+      where: {
+        userId: user.id,
+        readAt: null,
+        kind: "application.awaiting_review",
+        payload: { contains: `"projectId":"${project.id}"` },
+      },
+      select: { id: true },
+    });
+    if (existing) return false;
+
+    await notifyUser({
+      userId: user.id,
+      kind: "application.awaiting_review",
+      payload: {
+        projectId: project.id,
+        projectSlug: project.slug,
+        projectName: project.name,
+      },
+    });
+    await emailUserById({
+      userId: user.id,
+      subject: `Your application for ${project.name} is awaiting review`,
+      text:
+        `Thanks for applying to ${project.name}. Your application is in the ` +
+        `review queue and a maintainer will decide on it soon. You can check ` +
+        `the status here: ${applyUrl(project.slug)}\n`,
+    });
+    return true;
+  } catch (e) {
+    logger.warn(
+      { err: e, userId: args.userId, projectId: args.projectId },
+      "pending-applicant notice failed",
+    );
+    return false;
+  }
+}
+
+/**
  * Notify every applicant of a project who still needs to sign the CLA. Used
  * retroactively when the CLA requirement turns on (or the first ICLA is
  * published) and from the admin "Notify unsigned applicants" button.
@@ -156,6 +219,7 @@ export async function sweepUnsignedApplicants(args: {
 
   let notified = 0;
   let skipped = 0;
+  const submittedGhIds: number[] = [];
   for (const [userId, info] of byUser) {
     const sent = await notifyApplicantClaRequired({
       userId,
@@ -163,6 +227,16 @@ export async function sweepUnsignedApplicants(args: {
     });
     if (sent) notified += 1;
     else skipped += 1;
+
+    if (info.status === "SUBMITTED") {
+      // Submitted-but-undecided: nudge them that their application is in the
+      // review queue (in-app + email). Their open PR is also commented below.
+      await notifyPendingApplicant({
+        userId,
+        projectId: args.projectId,
+      }).catch(() => undefined);
+      if (info.ghId != null) submittedGhIds.push(info.ghId);
+    }
 
     // Approved-but-uncovered authors: (re)apply the CLA gate to their open PRs.
     // Idempotent and never closes a PR (acts only on a CHECK_REQUIRED
@@ -176,12 +250,13 @@ export async function sweepUnsignedApplicants(args: {
     }
   }
 
-  // Retroactively add the "sign the CLA" note to existing pending-PR comments
-  // (visible on GitHub for not-yet-approved applicants). Project-wide, bounded,
-  // and idempotent; best-effort so it never fails the sweep.
-  await refreshPendingClaReminders({ projectId: args.projectId }).catch(
-    () => undefined,
-  );
+  // Post the "awaiting review" comment on submitted applicants' open PRs (a
+  // fresh comment, so GitHub notifies them), with the CLA heads-up when they are
+  // uncovered. Project-wide, bounded, idempotent; best-effort.
+  await notifyPendingApplicantsOnPrs({
+    projectId: args.projectId,
+    ghIds: submittedGhIds,
+  }).catch(() => undefined);
 
   await recordAudit({
     projectId: args.projectId,

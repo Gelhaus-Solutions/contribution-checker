@@ -11,6 +11,7 @@ const decideForRepo = vi.fn();
 const publishDecisionCheck = vi.fn();
 const publishClaCheck = vi.fn();
 const invalidateClaCache = vi.fn();
+const getClaStatus = vi.fn();
 const notifyUser = vi.fn();
 const commentOnPr = vi.fn();
 const prHasCommentContaining = vi.fn();
@@ -67,12 +68,14 @@ vi.mock("@/lib/github/check-run", () => ({
 
 vi.mock("@/lib/cla/status", () => ({
   invalidateClaCache: (...args: unknown[]) => invalidateClaCache(...args),
+  getClaStatus: (...args: unknown[]) => getClaStatus(...args),
 }));
 
 import {
   onClaCoverageChanged,
   onClaCoverageRevoked,
   reapplyClaGateForApprovedAuthor,
+  notifyPendingApplicantsOnPrs,
 } from "@/lib/cla/post-sign";
 
 const baseProject = {
@@ -118,6 +121,7 @@ beforeEach(() => {
   publishDecisionCheck.mockReset();
   publishClaCheck.mockReset();
   invalidateClaCache.mockReset();
+  getClaStatus.mockReset();
   notifyUser.mockReset();
   commentOnPr.mockReset();
   prHasCommentContaining.mockReset();
@@ -131,6 +135,7 @@ beforeEach(() => {
   notifyUser.mockResolvedValue(undefined);
   commentOnPr.mockResolvedValue(undefined);
   prHasCommentContaining.mockResolvedValue(false);
+  getClaStatus.mockResolvedValue({ satisfied: false });
 });
 
 describe("onClaCoverageChanged", () => {
@@ -513,5 +518,79 @@ describe("reapplyClaGateForApprovedAuthor", () => {
     expect(commentOnPr).not.toHaveBeenCalled();
     expect(publishDecisionCheck).not.toHaveBeenCalled();
     expect(prCheckUpdate).not.toHaveBeenCalled();
+  });
+});
+
+describe("notifyPendingApplicantsOnPrs", () => {
+  const pendingProject = (over: Record<string, unknown> = {}) => ({
+    ...baseProject,
+    claEnabled: true,
+    claRequired: true,
+    currentIclaVersionId: "v1",
+    repos: [{ id: "repo1", fullName: "owner/r1", installationId: 11 }],
+    ...over,
+  });
+
+  it("posts an awaiting-review comment (with CLA note) on a submitted applicant's pending PR", async () => {
+    projectFindUnique.mockResolvedValueOnce(pendingProject());
+    prCheckFindMany.mockResolvedValueOnce([
+      check("c1", "repo1", 7, 11, "PENDING", null),
+    ]);
+    getClaStatus.mockResolvedValueOnce({ satisfied: false });
+    prHasCommentContaining.mockResolvedValueOnce(false);
+
+    const res = await notifyPendingApplicantsOnPrs({
+      projectId: "proj1",
+      ghIds: [42],
+    });
+
+    expect(res).toEqual({ commented: 1 });
+    expect(commentOnPr).toHaveBeenCalledTimes(1);
+    const body = commentOnPr.mock.calls[0][2] as string;
+    expect(body).toContain("awaiting review");
+    expect(body).toContain("Contributor License Agreement");
+  });
+
+  it("skips a PR that already has an awaiting-review comment (no re-ping)", async () => {
+    projectFindUnique.mockResolvedValueOnce(pendingProject());
+    prCheckFindMany.mockResolvedValueOnce([
+      check("c1", "repo1", 7, 11, "PENDING", null),
+    ]);
+    prHasCommentContaining.mockResolvedValueOnce(true);
+
+    const res = await notifyPendingApplicantsOnPrs({
+      projectId: "proj1",
+      ghIds: [42],
+    });
+
+    expect(res).toEqual({ commented: 0 });
+    expect(commentOnPr).not.toHaveBeenCalled();
+  });
+
+  it("omits the CLA note when the project does not gate on a CLA", async () => {
+    projectFindUnique.mockResolvedValueOnce(
+      pendingProject({ claRequired: false }),
+    );
+    prCheckFindMany.mockResolvedValueOnce([
+      check("c1", "repo1", 7, 11, "PENDING", null),
+    ]);
+    prHasCommentContaining.mockResolvedValueOnce(false);
+
+    await notifyPendingApplicantsOnPrs({ projectId: "proj1", ghIds: [42] });
+
+    // No coverage lookup when there's no CLA gate, and no CLA note in the body.
+    expect(getClaStatus).not.toHaveBeenCalled();
+    const body = commentOnPr.mock.calls[0][2] as string;
+    expect(body).toContain("awaiting review");
+    expect(body).not.toContain("Contributor License Agreement");
+  });
+
+  it("no-ops with an empty ghIds list (no project load)", async () => {
+    const res = await notifyPendingApplicantsOnPrs({
+      projectId: "proj1",
+      ghIds: [],
+    });
+    expect(res).toEqual({ commented: 0 });
+    expect(projectFindUnique).not.toHaveBeenCalled();
   });
 });
