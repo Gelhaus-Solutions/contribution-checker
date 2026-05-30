@@ -16,6 +16,7 @@ next-env.d.ts
 # build
 build/
 dist/
+*.tsbuildinfo
 
 # data
 data/
