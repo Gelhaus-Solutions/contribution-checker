@@ -1,3 +1,4 @@
+import type { Notification, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 
 export type NotificationKind =
@@ -53,12 +54,25 @@ export async function notifyProjectReviewers(args: {
   });
 }
 
-export async function listNotifications(userId: string, limit = 50) {
-  return prisma.notification.findMany({
-    where: { userId },
-    orderBy: { createdAt: "desc" },
-    take: limit,
-  });
+export async function listNotifications(
+  userId: string,
+  opts?: { skip?: number; take?: number; q?: string }
+): Promise<{ items: Notification[]; total: number }> {
+  const q = opts?.q?.trim();
+  const where: Prisma.NotificationWhereInput = {
+    userId,
+    ...(q ? { kind: { contains: q, mode: "insensitive" } } : {}),
+  };
+  const [items, total] = await prisma.$transaction([
+    prisma.notification.findMany({
+      where,
+      orderBy: { createdAt: "desc" },
+      skip: opts?.skip ?? 0,
+      take: opts?.take ?? 25,
+    }),
+    prisma.notification.count({ where }),
+  ]);
+  return { items, total };
 }
 
 export async function unreadCount(userId: string) {

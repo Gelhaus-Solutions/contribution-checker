@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/cn";
 import {
   buildPageHref,
   totalPages,
@@ -16,6 +17,7 @@ export function Pagination({
   perPage,
   total,
   keys,
+  className,
 }: {
   pathname: string;
   searchParams: SearchParamRecord;
@@ -23,6 +25,7 @@ export function Pagination({
   perPage: number;
   total: number;
   keys?: Partial<PageKeys>;
+  className?: string;
 }) {
   if (total <= perPage) return null;
 
@@ -32,7 +35,12 @@ export function Pagination({
   const end = Math.min(current * perPage, total);
 
   return (
-    <div className="flex items-center justify-between gap-2 px-6 py-3 text-xs text-muted-foreground">
+    <div
+      className={cn(
+        "flex items-center justify-between gap-2 px-6 py-3 text-xs text-muted-foreground",
+        className
+      )}
+    >
       {current > 1 ? (
         <Button asChild variant="outline" size="sm">
           <Link href={buildPageHref(pathname, searchParams, current - 1, keys)}>

@@ -50,6 +50,22 @@ export function totalPages(total: number, perPage: number): number {
   return Math.max(1, Math.ceil(total / perPage));
 }
 
+// Flatten the current params to a string map, dropping the given keys. Used to
+// preserve sibling state (other paginators on the same route) as hidden inputs
+// in a search form. The form drops its own page key, resetting it to page 1.
+export function siblingParams(
+  sp: SearchParamRecord,
+  exclude: string[]
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(sp)) {
+    if (exclude.includes(key)) continue;
+    const v = first(value);
+    if (v !== undefined) out[key] = v;
+  }
+  return out;
+}
+
 // Build an href that preserves every current param, patching only the page key
 // (dropped entirely when targeting page 1, for clean URLs).
 export function buildPageHref(

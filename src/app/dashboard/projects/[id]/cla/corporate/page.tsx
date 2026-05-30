@@ -1,3 +1,4 @@
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { requireProjectRole } from "@/lib/authz";
 import {
@@ -9,6 +10,9 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { SubmitButton } from "@/components/ui/submit-button";
+import { SearchInput } from "@/components/ui/search-input";
+import { Pagination } from "@/components/ui/pagination";
+import { parsePageParams, type SearchParamRecord } from "@/lib/pagination";
 import { revokeRosterMember, revokeCorporateCla } from "./actions";
 
 function rosterBadgeVariant(
@@ -32,29 +36,53 @@ function fmt(d: Date): string {
 
 export default async function CorporateClaPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<SearchParamRecord>;
 }) {
   const { id } = await params;
+  const sp = await searchParams;
   await requireProjectRole(id, "ADMIN");
 
-  const corporates = await prisma.corporateCla.findMany({
-    where: { projectId: id },
-    include: {
-      signature: {
-        select: { ghLogin: true, ghId: true, legalName: true },
-      },
-      members: {
-        orderBy: [{ status: "asc" }, { addedAt: "desc" }],
-      },
-    },
-    orderBy: { createdAt: "desc" },
-  });
+  const { page, perPage, skip, take, q } = parsePageParams(sp);
 
-  const disputedCount = corporates.reduce(
-    (n, c) => n + c.members.filter((m) => m.status === "DISPUTED").length,
-    0
-  );
+  const where: Prisma.CorporateClaWhereInput = {
+    projectId: id,
+    ...(q
+      ? {
+          OR: [
+            { companyName: { contains: q, mode: "insensitive" } },
+            { contactEmail: { contains: q, mode: "insensitive" } },
+          ],
+        }
+      : {}),
+  };
+
+  // disputedCount is project-wide (not just the current page), so compute it
+  // with a dedicated aggregate rather than reducing over the page slice.
+  const [corporates, total, disputedCount] = await prisma.$transaction([
+    prisma.corporateCla.findMany({
+      where,
+      include: {
+        signature: {
+          select: { ghLogin: true, ghId: true, legalName: true },
+        },
+        members: {
+          orderBy: [{ status: "asc" }, { addedAt: "desc" }],
+        },
+      },
+      orderBy: { createdAt: "desc" },
+      skip,
+      take,
+    }),
+    prisma.corporateCla.count({ where }),
+    prisma.cclaRosterMember.count({
+      where: { projectId: id, status: "DISPUTED" },
+    }),
+  ]);
+
+  const basePath = `/dashboard/projects/${id}/cla/corporate`;
 
   return (
     <div className="space-y-6">
@@ -68,6 +96,13 @@ export default async function CorporateClaPage({
             roster entry or an entire corporate agreement here.
           </CardDescription>
         </CardHeader>
+        <CardContent className="pt-0">
+          <SearchInput
+            pathname={basePath}
+            q={q}
+            placeholder="Search company or contact email"
+          />
+        </CardContent>
         {disputedCount > 0 && (
           <CardContent className="pt-0">
             <div className="rounded-md border border-warning/40 bg-warning/10 px-4 py-3 text-sm">
@@ -88,8 +123,9 @@ export default async function CorporateClaPage({
       {corporates.length === 0 ? (
         <Card>
           <CardContent className="px-6 py-10 text-center text-sm text-muted-foreground">
-            No corporate CLAs have been signed yet. When a company signs a CCLA
-            it will appear here with its self-service roster.
+            {q
+              ? "No corporate CLAs match your search."
+              : "No corporate CLAs have been signed yet. When a company signs a CCLA it will appear here with its self-service roster."}
           </CardContent>
         </Card>
       ) : (
@@ -230,6 +266,15 @@ export default async function CorporateClaPage({
           );
         })
       )}
+
+      <Pagination
+        pathname={basePath}
+        searchParams={sp}
+        page={page}
+        perPage={perPage}
+        total={total}
+        className="px-0"
+      />
     </div>
   );
 }
