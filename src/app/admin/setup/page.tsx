@@ -124,12 +124,20 @@ export default async function GitHubAppSetup() {
                 <code className="rounded bg-muted px-1 py-0.5 text-xs">
                   Installation target
                 </code>{" "}
-                (also called Installation), and{" "}
+                (also called Installation),{" "}
                 <code className="rounded bg-muted px-1 py-0.5 text-xs">
                   Installation repositories
                 </code>
+                , and{" "}
+                <code className="rounded bg-muted px-1 py-0.5 text-xs">
+                  Merge group
+                </code>
                 . If you skip <code>Push</code>, use the <strong>Sync now</strong>{" "}
-                button on the CLA page to publish repo-file changes manually.
+                button on the CLA page to publish repo-file changes manually.{" "}
+                <strong>Merge group</strong> is required if you put the checker&apos;s
+                status checks behind a GitHub <strong>merge queue</strong>: the queue
+                builds a temporary commit and re-requests checks on it, so without
+                this event the queue waits forever and never merges.
               </li>
               <li>
                 Under &ldquo;Where can this GitHub App be installed?&rdquo;,
