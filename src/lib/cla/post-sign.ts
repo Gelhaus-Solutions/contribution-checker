@@ -13,11 +13,13 @@ import {
   type ClaCheckState,
 } from "@/lib/github/check-run";
 import {
+  ensureLabel,
   removeLabelIfPresent,
   setLabels,
   repoRef,
 } from "@/lib/github/pr-actions";
 import { invalidateClaCache } from "@/lib/cla/status";
+import { notifyUser } from "@/lib/notifications/inbox";
 
 const CLA_PROJECT_SELECT = {
   id: true,
@@ -169,4 +171,156 @@ export async function onClaCoverageChanged(args: {
     }
   }
   return { rechecked };
+}
+
+/**
+ * Re-evaluate contributors' open, currently-PASSING PRs after their CLA coverage
+ * was REVOKED (a previously-valid signed version was retroactively marked
+ * resignRequired, e.g. an invalid published version retired). This is the
+ * loss-direction counterpart to `onClaCoverageChanged`: it scans APPROVED
+ * PrCheck rows and, for any whose fresh decision now reports a CLA gate, fails
+ * the Check and applies the cla-pending label. The PR stays OPEN (CLA gates
+ * never close PRs); the contributor must re-sign the current version to clear
+ * it. Affected contributors with a linked account are notified to re-sign.
+ *
+ * Mirrors `onClaCoverageChanged`: env guard, load the project's active+installed
+ * repos, iterate matching PrCheck rows with inline awaits and a per-PR try/catch
+ * that only logs warnings. Idempotent: a PR already gated for the same reason is
+ * simply re-published; a contributor still covered by another path (a second
+ * ICLA, a CCLA roster) is left untouched because the fresh decision still
+ * allows.
+ */
+export async function onClaCoverageRevoked(args: {
+  projectId: string;
+  ghIds: number[];
+}): Promise<{ regated: number }> {
+  const ghIds = Array.from(new Set(args.ghIds.filter((n) => Number.isFinite(n))));
+  for (const ghId of ghIds) invalidateClaCache(args.projectId, ghId);
+
+  if (!env.githubAppConfigured || ghIds.length === 0) return { regated: 0 };
+
+  const project = await prisma.project.findUnique({
+    where: { id: args.projectId },
+    select: CLA_PROJECT_SELECT,
+  });
+  if (!project) return { regated: 0 };
+
+  const repoIds = project.repos.map((r) => r.id);
+
+  // Notify affected contributors (those with a linked account) to re-sign,
+  // independent of whether they currently have an open PR.
+  const users = await prisma.user.findMany({
+    where: { ghId: { in: ghIds } },
+    select: { id: true },
+  });
+  for (const u of users) {
+    await notifyUser({
+      userId: u.id,
+      kind: "cla.resign_required",
+      payload: { projectId: project.id, projectName: project.name },
+    }).catch(() => undefined);
+  }
+
+  if (repoIds.length === 0) return { regated: 0 };
+
+  // Open PRs these authors are currently passing. A revoked signature makes the
+  // fresh decision a CLA gate; flip those to CHECK_REQUIRED.
+  const checks = await prisma.prCheck.findMany({
+    where: {
+      repoId: { in: repoIds },
+      authorGhId: { in: ghIds },
+      status: "APPROVED",
+    },
+    include: { repo: { include: decisionRepoInclude } },
+  });
+  if (checks.length === 0) return { regated: 0 };
+
+  const applyUrl = buildApplyUrl(project.slug);
+  const claUrl = `${applyUrl}/cla`;
+
+  let regated = 0;
+  for (const check of checks) {
+    if (check.repo.installationId == null) continue;
+    const ref = repoRef(check.repo.fullName, check.repo.installationId);
+    try {
+      const decision: PrDecision = await decideForRepo({
+        repo: check.repo,
+        prAuthorGhLogin: check.authorGhLogin,
+        prAuthorGhId: check.authorGhId,
+      });
+
+      // Only re-gate PRs whose fresh decision is now a CLA gate. Anything still
+      // allowing (covered by another path) or in some other state is left for
+      // the regular decision pipeline.
+      if (
+        decision.status !== "CHECK_REQUIRED" ||
+        !CLA_GATE_REASONS.includes(
+          decision.reason as (typeof CLA_GATE_REASONS)[number]
+        )
+      ) {
+        continue;
+      }
+
+      await publishDecisionCheck({
+        installationId: check.repo.installationId,
+        repoFullName: check.repo.fullName,
+        prCheckId: check.id,
+        headSha: check.headSha,
+        project: {
+          id: project.id,
+          slug: project.slug,
+          name: project.name,
+          checksEnabled: project.checksEnabled,
+        },
+        decision,
+        applyUrl,
+        claUrl,
+      });
+
+      const claState: ClaCheckState =
+        decision.reason === "cla_stale" ? "stale" : "required";
+      await publishClaCheck({
+        installationId: check.repo.installationId,
+        repoFullName: check.repo.fullName,
+        prCheckId: check.id,
+        headSha: check.headSha,
+        project: {
+          id: project.id,
+          name: project.name,
+          checksEnabled: project.checksEnabled,
+        },
+        state: claState,
+        claUrl,
+      });
+
+      if (project.labelsEnabled) {
+        await ensureLabel(
+          ref,
+          project.labelClaPending,
+          "fbca04",
+          "Awaiting CLA signature / DCO sign-off"
+        ).catch(() => undefined);
+        await Promise.all([
+          removeLabelIfPresent(ref, check.prNumber, project.labelApproved).catch(
+            () => undefined
+          ),
+          setLabels(ref, check.prNumber, [project.labelClaPending]).catch(
+            () => undefined
+          ),
+        ]);
+      }
+
+      await prisma.prCheck.update({
+        where: { id: check.id },
+        data: { status: "CHECK_REQUIRED", gateReason: decision.reason },
+      });
+      regated++;
+    } catch (e) {
+      logger.warn(
+        { err: e, repoId: check.repoId, prNumber: check.prNumber },
+        "cla re-gate failed"
+      );
+    }
+  }
+  return { regated };
 }

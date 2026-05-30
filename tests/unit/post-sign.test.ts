@@ -3,12 +3,15 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 const projectFindUnique = vi.fn();
 const prCheckFindMany = vi.fn();
 const prCheckUpdate = vi.fn();
+const userFindMany = vi.fn();
 const removeLabelIfPresent = vi.fn();
 const setLabels = vi.fn();
+const ensureLabel = vi.fn();
 const decideForRepo = vi.fn();
 const publishDecisionCheck = vi.fn();
 const publishClaCheck = vi.fn();
 const invalidateClaCache = vi.fn();
+const notifyUser = vi.fn();
 
 vi.mock("@/lib/db", () => ({
   prisma: {
@@ -19,6 +22,9 @@ vi.mock("@/lib/db", () => ({
       findMany: (...args: unknown[]) => prCheckFindMany(...args),
       update: (...args: unknown[]) => prCheckUpdate(...args),
     },
+    user: {
+      findMany: (...args: unknown[]) => userFindMany(...args),
+    },
   },
 }));
 
@@ -27,12 +33,17 @@ vi.mock("@/lib/env", () => ({
 }));
 
 vi.mock("@/lib/github/pr-actions", () => ({
+  ensureLabel: (...args: unknown[]) => ensureLabel(...args),
   removeLabelIfPresent: (...args: unknown[]) => removeLabelIfPresent(...args),
   setLabels: (...args: unknown[]) => setLabels(...args),
   repoRef: (fullName: string, installationId: number) => {
     const [owner, repo] = fullName.split("/");
     return { owner, repo, installationId };
   },
+}));
+
+vi.mock("@/lib/notifications/inbox", () => ({
+  notifyUser: (...args: unknown[]) => notifyUser(...args),
 }));
 
 vi.mock("@/lib/notifications/email", () => ({
@@ -53,7 +64,7 @@ vi.mock("@/lib/cla/status", () => ({
   invalidateClaCache: (...args: unknown[]) => invalidateClaCache(...args),
 }));
 
-import { onClaCoverageChanged } from "@/lib/cla/post-sign";
+import { onClaCoverageChanged, onClaCoverageRevoked } from "@/lib/cla/post-sign";
 
 const baseProject = {
   id: "proj1",
@@ -81,17 +92,23 @@ beforeEach(() => {
   projectFindUnique.mockReset();
   prCheckFindMany.mockReset();
   prCheckUpdate.mockReset();
+  userFindMany.mockReset();
   removeLabelIfPresent.mockReset();
   setLabels.mockReset();
+  ensureLabel.mockReset();
   decideForRepo.mockReset();
   publishDecisionCheck.mockReset();
   publishClaCheck.mockReset();
   invalidateClaCache.mockReset();
+  notifyUser.mockReset();
   removeLabelIfPresent.mockResolvedValue(undefined);
   setLabels.mockResolvedValue(undefined);
+  ensureLabel.mockResolvedValue(undefined);
   prCheckUpdate.mockResolvedValue(undefined);
   publishDecisionCheck.mockResolvedValue(undefined);
   publishClaCheck.mockResolvedValue(undefined);
+  userFindMany.mockResolvedValue([]);
+  notifyUser.mockResolvedValue(undefined);
 });
 
 describe("onClaCoverageChanged", () => {
@@ -238,5 +255,120 @@ describe("onClaCoverageChanged", () => {
       where: { id: "c2" },
       data: { status: "APPROVED", gateReason: null },
     });
+  });
+});
+
+describe("onClaCoverageRevoked", () => {
+  it("invalidates the cache for each affected ghId and notifies linked users", async () => {
+    projectFindUnique.mockResolvedValueOnce({ ...baseProject, repos: [] });
+    userFindMany.mockResolvedValueOnce([{ id: "u1" }, { id: "u2" }]);
+
+    await onClaCoverageRevoked({ projectId: "proj1", ghIds: [42, 43, 42] });
+
+    // Deduped.
+    expect(invalidateClaCache).toHaveBeenCalledWith("proj1", 42);
+    expect(invalidateClaCache).toHaveBeenCalledWith("proj1", 43);
+    expect(invalidateClaCache).toHaveBeenCalledTimes(2);
+    expect(notifyUser).toHaveBeenCalledTimes(2);
+    expect(notifyUser).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: "u1", kind: "cla.resign_required" })
+    );
+  });
+
+  it("flips a now-stale passing PR to a failing CLA check + cla-pending label", async () => {
+    projectFindUnique.mockResolvedValueOnce({
+      ...baseProject,
+      repos: [{ id: "repo1", fullName: "owner/r1", installationId: 11 }],
+    });
+    prCheckFindMany.mockResolvedValueOnce([check("c1", "repo1", 7)]);
+    decideForRepo.mockResolvedValueOnce({
+      status: "CHECK_REQUIRED",
+      reason: "cla_stale",
+      repoId: "repo1",
+      projectId: "proj1",
+    });
+
+    const result = await onClaCoverageRevoked({ projectId: "proj1", ghIds: [42] });
+
+    expect(result).toEqual({ regated: 1 });
+    expect(publishDecisionCheck).toHaveBeenCalledTimes(1);
+    expect(publishClaCheck).toHaveBeenCalledWith(
+      expect.objectContaining({ prCheckId: "c1", state: "stale" })
+    );
+    expect(ensureLabel).toHaveBeenCalled();
+    expect(removeLabelIfPresent).toHaveBeenCalledWith(
+      expect.anything(),
+      7,
+      "contribution:approved"
+    );
+    expect(setLabels).toHaveBeenCalledWith(
+      expect.anything(),
+      7,
+      ["contribution:cla-pending"]
+    );
+    expect(prCheckUpdate).toHaveBeenCalledWith({
+      where: { id: "c1" },
+      data: { status: "CHECK_REQUIRED", gateReason: "cla_stale" },
+    });
+  });
+
+  it("publishes a required CLA check when coverage is fully gone (cla_required)", async () => {
+    projectFindUnique.mockResolvedValueOnce({
+      ...baseProject,
+      repos: [{ id: "repo1", fullName: "owner/r1", installationId: 11 }],
+    });
+    prCheckFindMany.mockResolvedValueOnce([check("c1", "repo1", 7)]);
+    decideForRepo.mockResolvedValueOnce({
+      status: "CHECK_REQUIRED",
+      reason: "cla_required",
+      repoId: "repo1",
+      projectId: "proj1",
+    });
+
+    await onClaCoverageRevoked({ projectId: "proj1", ghIds: [42] });
+
+    expect(publishClaCheck).toHaveBeenCalledWith(
+      expect.objectContaining({ prCheckId: "c1", state: "required" })
+    );
+  });
+
+  it("leaves PRs still covered by another path untouched", async () => {
+    projectFindUnique.mockResolvedValueOnce({
+      ...baseProject,
+      repos: [{ id: "repo1", fullName: "owner/r1", installationId: 11 }],
+    });
+    prCheckFindMany.mockResolvedValueOnce([check("c1", "repo1", 7)]);
+    // Still covered (e.g. a second ICLA or a CCLA roster): fresh decision allows.
+    decideForRepo.mockResolvedValueOnce({
+      status: "APPROVED",
+      repoId: "repo1",
+      projectId: "proj1",
+    });
+
+    const result = await onClaCoverageRevoked({ projectId: "proj1", ghIds: [42] });
+
+    expect(result).toEqual({ regated: 0 });
+    expect(publishDecisionCheck).not.toHaveBeenCalled();
+    expect(prCheckUpdate).not.toHaveBeenCalled();
+  });
+
+  it("queries only APPROVED PRs for the affected authors", async () => {
+    projectFindUnique.mockResolvedValueOnce({
+      ...baseProject,
+      repos: [{ id: "repo1", fullName: "owner/r1", installationId: 11 }],
+    });
+    prCheckFindMany.mockResolvedValueOnce([]);
+
+    await onClaCoverageRevoked({ projectId: "proj1", ghIds: [42, 99] });
+
+    expect(prCheckFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          repoId: { in: ["repo1"] },
+          authorGhId: { in: [42, 99] },
+          status: "APPROVED",
+        }),
+      })
+    );
   });
 });
