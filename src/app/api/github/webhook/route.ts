@@ -10,6 +10,7 @@ import { withSentryScope } from "@/lib/observability/with-sentry-scope";
 import {
   handleInstallationEvent,
   handleInstallationReposEvent,
+  handleMergeGroupEvent,
   handlePullRequestEvent,
   handlePushEvent,
 } from "@/lib/github/webhook";
@@ -149,6 +150,9 @@ export async function POST(req: Request) {
         switch (eventName) {
           case "pull_request":
             await handlePullRequestEvent(payload as never);
+            break;
+          case "merge_group":
+            await handleMergeGroupEvent(payload as never);
             break;
           case "installation":
             await handleInstallationEvent(payload as never);

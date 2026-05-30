@@ -2,7 +2,12 @@ import { prisma } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { env } from "@/lib/env";
 import * as Sentry from "@sentry/nextjs";
-import { decideForPR, type PrDecision } from "@/lib/applications/decide-pr";
+import {
+  decideForPR,
+  decideForRepo,
+  decisionRepoInclude,
+  type PrDecision,
+} from "@/lib/applications/decide-pr";
 import { buildDecisionMessage } from "@/lib/applications/decision-message";
 import { enqueueProjectWebhook } from "@/lib/notifications/webhooks";
 import {
@@ -119,6 +124,104 @@ async function checkDco(args: {
     );
     return { ok: true };
   }
+}
+
+/**
+ * Layer the DCO gate onto a decision. DCO is independent of CLA and needs the
+ * PR's commits (which the decision pipeline doesn't load), so it is applied
+ * here. It only fires when the base outcome already lets the PR proceed (a
+ * non-checker-disabled APPROVED, or a collaborator BYPASS) or is already a CLA
+ * CHECK_REQUIRED. When DCO fails on an otherwise-allowing decision we override
+ * to CHECK_REQUIRED{dco_missing}; when CLA is already failing, CLA keeps the
+ * gate reason. Fully defensive: checkDco never throws. Shared by the
+ * pull_request and merge_group handlers.
+ */
+async function applyDcoGate(args: {
+  decision: PrDecision & { repoId?: string; projectId?: string };
+  dcoEnabled: boolean;
+  installationId: number;
+  repoFullName: string;
+  prNumber: number;
+}): Promise<PrDecision & { repoId?: string; projectId?: string }> {
+  const { decision } = args;
+  if (!args.dcoEnabled) return decision;
+  const claGateActive =
+    decision.status === "CHECK_REQUIRED" &&
+    (decision.reason === "cla_required" || decision.reason === "cla_stale");
+  const baseAllows =
+    (decision.status === "APPROVED" &&
+      decision.bypassReason !== "checker_disabled") ||
+    (decision.status === "BYPASSED" && decision.reason === "collaborator");
+  if (!(baseAllows || claGateActive)) return decision;
+  const [owner, name] = args.repoFullName.split("/");
+  if (!owner || !name) return decision;
+  const dco = await checkDco({
+    installationId: args.installationId,
+    owner,
+    repo: name,
+    prNumber: args.prNumber,
+  });
+  if (!dco.ok && baseAllows) {
+    // CLA was satisfied (or not required) but DCO is missing → gate on DCO.
+    return {
+      status: "CHECK_REQUIRED",
+      reason: "dco_missing",
+      repoId: decision.repoId,
+      projectId: decision.projectId,
+    };
+  }
+  // If claGateActive and DCO also fails, CLA wins the reason; the
+  // CHECK_REQUIRED comment copy covers DCO guidance separately.
+  return decision;
+}
+
+/**
+ * Compute the dedicated CLA-check state for a PR author, independent of the
+ * overall decision outcome, so the `contribution-checker / cla` check is
+ * accurate even on paths where the decision short-circuited before the CLA
+ * layer. Returns null when the project has no CLA enabled. Shared by the
+ * pull_request and merge_group handlers.
+ */
+async function resolveClaState(args: {
+  project: { id: string; claEnabled: boolean; claRequired: boolean };
+  decision: PrDecision;
+  authorGhId: number;
+  authorGhLogin: string;
+}): Promise<ClaCheckState | null> {
+  const { project, decision } = args;
+  if (!project.claEnabled) return null;
+  const disabledByChecker =
+    decision.status === "APPROVED" &&
+    "bypassReason" in decision &&
+    decision.bypassReason === "checker_disabled";
+  if (disabledByChecker) return "not_required"; // whole checker off → CLA off too
+  if (decision.status === "BYPASSED" && decision.reason === "bot") {
+    return "exempt";
+  }
+  if (!project.claRequired) return "not_required";
+  if (decision.status === "CHECK_REQUIRED" && decision.reason === "cla_stale") {
+    return "stale";
+  }
+  if (
+    decision.status === "CHECK_REQUIRED" &&
+    decision.reason === "cla_required"
+  ) {
+    return "required";
+  }
+  // Decision didn't resolve the CLA (other gate, or it allows): compute
+  // coverage directly so the dedicated check is accurate.
+  const st = await getClaStatus({
+    projectId: project.id,
+    ghId: args.authorGhId,
+    ghLogin: args.authorGhLogin,
+  }).catch(() => null);
+  return st
+    ? st.satisfied
+      ? "satisfied"
+      : st.needsResign
+        ? "stale"
+        : "required"
+    : "required";
 }
 
 type ProjectForSideEffects = {
@@ -351,42 +454,16 @@ export async function handlePullRequestEvent(payload: WebhookPayload) {
     : null;
   if (!project) return;
 
-  // DCO layer. DCO is independent of CLA and needs the PR's commits, so it is
-  // evaluated here (not in the decision pipeline). It applies when the base
-  // outcome already lets the PR proceed (a non-checker-disabled APPROVED, or a
-  // collaborator BYPASS) or is already a CLA CHECK_REQUIRED. When DCO fails on
-  // an otherwise-allowing decision we override to CHECK_REQUIRED{dco_missing};
-  // when CLA is already failing, CLA keeps the gate reason (the comment copy
-  // mentions both). Fully defensive: checkDco never throws.
-  const claGateActive =
-    decision.status === "CHECK_REQUIRED" &&
-    (decision.reason === "cla_required" || decision.reason === "cla_stale");
-  const baseAllows =
-    (decision.status === "APPROVED" &&
-      decision.bypassReason !== "checker_disabled") ||
-    (decision.status === "BYPASSED" && decision.reason === "collaborator");
-  if (project.dcoEnabled && (baseAllows || claGateActive)) {
-    const [owner, name] = repoFullName.split("/");
-    if (owner && name) {
-      const dco = await checkDco({
-        installationId,
-        owner,
-        repo: name,
-        prNumber,
-      });
-      if (!dco.ok && baseAllows) {
-        // CLA was satisfied (or not required) but DCO is missing → gate on DCO.
-        decision = {
-          status: "CHECK_REQUIRED",
-          reason: "dco_missing",
-          repoId: decision.repoId,
-          projectId: decision.projectId,
-        };
-      }
-      // If claGateActive and DCO also fails, CLA wins the reason; the
-      // CHECK_REQUIRED branch's comment covers DCO guidance separately.
-    }
-  }
+  // DCO layer (see applyDcoGate): may override an allowing decision to
+  // CHECK_REQUIRED{dco_missing}. Needs the PR's commits, so it runs here rather
+  // than in the decision pipeline.
+  decision = await applyDcoGate({
+    decision,
+    dcoEnabled: project.dcoEnabled,
+    installationId,
+    repoFullName,
+    prNumber,
+  });
 
   const disabledByChecker =
     decision.status === "APPROVED" &&
@@ -396,41 +473,12 @@ export async function handlePullRequestEvent(payload: WebhookPayload) {
   // `contribution-checker / cla` check accurately reflects the author's CLA
   // coverage even on paths where the decision short-circuited before the CLA
   // layer (manual/application DENIED, no-application PENDING, etc.).
-  let claState: ClaCheckState | null = null;
-  if (project.claEnabled) {
-    if (disabledByChecker) {
-      claState = "not_required"; // whole checker off → CLA off too
-    } else if (decision.status === "BYPASSED" && decision.reason === "bot") {
-      claState = "exempt";
-    } else if (!project.claRequired) {
-      claState = "not_required";
-    } else if (
-      decision.status === "CHECK_REQUIRED" &&
-      decision.reason === "cla_stale"
-    ) {
-      claState = "stale";
-    } else if (
-      decision.status === "CHECK_REQUIRED" &&
-      decision.reason === "cla_required"
-    ) {
-      claState = "required";
-    } else {
-      // Decision didn't resolve the CLA (other gate, or it allows): compute
-      // coverage directly so the dedicated check is accurate.
-      const st = await getClaStatus({
-        projectId: project.id,
-        ghId: author.id,
-        ghLogin: author.login,
-      }).catch(() => null);
-      claState = st
-        ? st.satisfied
-          ? "satisfied"
-          : st.needsResign
-            ? "stale"
-            : "required"
-        : "required";
-    }
-  }
+  const claState = await resolveClaState({
+    project,
+    decision,
+    authorGhId: author.id,
+    authorGhLogin: author.login,
+  });
 
   // CHECK_REQUIRED is an active CLA/DCO gate, so it must always create a
   // PrCheck row (the re-check/sweep machinery finds affected PRs by
@@ -723,6 +771,200 @@ export async function handlePullRequestEvent(payload: WebhookPayload) {
     claUrl,
     claState,
   });
+}
+
+type MergeGroupPayload = {
+  action?: string;
+  installation?: { id: number };
+  repository?: { id: number; full_name: string };
+  merge_group?: {
+    head_sha?: string;
+    head_ref?: string;
+    base_sha?: string;
+    base_ref?: string;
+  };
+};
+
+/**
+ * Extract the PR number(s) encoded in a merge-queue branch ref. GitHub names
+ * the temporary branch `refs/heads/gh-readonly-queue/<base>/pr-<number>-<sha>`;
+ * a batched group can carry several `pr-<number>-` segments. Returns them in
+ * ref order, de-duplicated.
+ */
+export function parsePrNumbersFromMergeRef(ref: string): number[] {
+  const seen = new Set<number>();
+  for (const m of ref.matchAll(/\/pr-(\d+)-/g)) {
+    const n = Number(m[1]);
+    if (Number.isInteger(n)) seen.add(n);
+  }
+  return [...seen];
+}
+
+/**
+ * GitHub `merge_group` event (merge queue). When a PR enters the queue GitHub
+ * builds a temporary `gh-readonly-queue/...` branch with a fresh head commit and
+ * asks (action `checks_requested`) for required checks to be reported against
+ * THAT commit. The pull_request-driven checks only ever land on the PR head SHA,
+ * so without this handler the queue waits forever ("Expected — Waiting for
+ * status to be reported"). Here we re-evaluate each PR in the group and
+ * republish both check runs on the merge-group head SHA.
+ *
+ * Deliberately NO PR side effects (no close/label/comment, no PrCheck row): the
+ * merge-group SHA is transient. We pass prCheckId: null so the publishers create
+ * standalone check runs and never overwrite the PR's stored check-run ids. When
+ * a group batches multiple PRs we publish the most-blocking conclusion, since
+ * the queue must not merge if any member is gated.
+ */
+export async function handleMergeGroupEvent(payload: MergeGroupPayload) {
+  // "checks_requested" asks us to report; "destroyed" needs no action.
+  if (payload.action !== "checks_requested") return;
+  const headSha = payload.merge_group?.head_sha;
+  if (!headSha || !payload.repository || !payload.installation) return;
+
+  const installationId = payload.installation.id;
+  const repoFullName = payload.repository.full_name;
+  const ghRepoId = payload.repository.id;
+
+  const prNumbers = parsePrNumbersFromMergeRef(
+    payload.merge_group?.head_ref ?? "",
+  );
+  if (prNumbers.length === 0) {
+    logger.warn(
+      { repoFullName, headRef: payload.merge_group?.head_ref },
+      "merge_group: no PR number found in ref; cannot publish checks",
+    );
+    return;
+  }
+
+  const repo = await prisma.repo.findUnique({
+    where: { ghRepoId },
+    include: decisionRepoInclude,
+  });
+  if (!repo) return;
+  const project = await prisma.project.findUnique({
+    where: { id: repo.projectId },
+    select: {
+      id: true,
+      slug: true,
+      name: true,
+      checksEnabled: true,
+      claEnabled: true,
+      claRequired: true,
+      dcoEnabled: true,
+    },
+  });
+  if (!project) return;
+  // Checks disabled → the publishers would no-op anyway; skip the eval work.
+  if (!project.checksEnabled) return;
+
+  const applyUrl = `${env.PUBLIC_BASE_URL.replace(/\/$/, "")}/p/${project.slug}`;
+  const claUrl = `${applyUrl}/cla`;
+
+  const evaluations: Array<{
+    decision: PrDecision & { repoId?: string; projectId?: string };
+    claState: ClaCheckState | null;
+  }> = [];
+  for (const prNumber of prNumbers) {
+    // Author comes from the stored PrCheck row when the PR already went through
+    // the pull_request path; fall back to the GitHub API otherwise.
+    const prior = await prisma.prCheck.findUnique({
+      where: { repoId_prNumber: { repoId: repo.id, prNumber } },
+      select: { authorGhLogin: true, authorGhId: true },
+    });
+    let login = prior?.authorGhLogin ?? null;
+    let id = prior?.authorGhId ?? null;
+    if (login == null || id == null) {
+      try {
+        const octokit = await getInstallationOctokit(installationId);
+        const [owner, name] = repoFullName.split("/");
+        if (owner && name) {
+          const res = await octokit.request(
+            "GET /repos/{owner}/{repo}/pulls/{pull_number}",
+            { owner, repo: name, pull_number: prNumber },
+          );
+          login = res.data.user?.login ?? null;
+          id = res.data.user?.id ?? null;
+        }
+      } catch (e) {
+        logger.warn(
+          { err: e, repoFullName, prNumber },
+          "merge_group: failed to fetch PR author",
+        );
+      }
+    }
+    if (login == null || id == null) continue;
+
+    let decision = await decideForRepo({
+      repo,
+      prAuthorGhLogin: login,
+      prAuthorGhId: id,
+    });
+    if (decision.status === "IGNORED") continue;
+    decision = await applyDcoGate({
+      decision,
+      dcoEnabled: project.dcoEnabled,
+      installationId,
+      repoFullName,
+      prNumber,
+    });
+    const claState = await resolveClaState({
+      project,
+      decision,
+      authorGhId: id,
+      authorGhLogin: login,
+    });
+    evaluations.push({ decision, claState });
+  }
+  if (evaluations.length === 0) return;
+
+  // Most-blocking wins: any non-allowing decision (or required/stale CLA) gates
+  // the whole group. Decision and CLA picks may come from different members.
+  const blocking = evaluations.find(
+    (e) =>
+      e.decision.status !== "APPROVED" && e.decision.status !== "BYPASSED",
+  );
+  const chosenDecision = (blocking ?? evaluations[0]).decision;
+  if (chosenDecision.status === "IGNORED") return;
+  const claBlocking = evaluations.find(
+    (e) => e.claState === "required" || e.claState === "stale",
+  );
+  const chosenCla = claBlocking?.claState ?? evaluations[0].claState;
+
+  await publishDecisionCheck({
+    installationId,
+    repoFullName,
+    prCheckId: null,
+    headSha,
+    project: {
+      id: project.id,
+      slug: project.slug,
+      name: project.name,
+      checksEnabled: project.checksEnabled,
+    },
+    decision: chosenDecision,
+    applyUrl,
+    claUrl,
+  }).catch((e) =>
+    logger.warn({ err: e, repoFullName }, "merge_group decision check failed"),
+  );
+
+  if (chosenCla) {
+    await publishClaCheck({
+      installationId,
+      repoFullName,
+      prCheckId: null,
+      headSha,
+      project: {
+        id: project.id,
+        name: project.name,
+        checksEnabled: project.checksEnabled,
+      },
+      state: chosenCla,
+      claUrl,
+    }).catch((e) =>
+      logger.warn({ err: e, repoFullName }, "merge_group cla check failed"),
+    );
+  }
 }
 
 export async function handleInstallationEvent(payload: WebhookPayload) {
