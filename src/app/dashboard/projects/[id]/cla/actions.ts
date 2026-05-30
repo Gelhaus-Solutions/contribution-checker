@@ -354,9 +354,17 @@ export async function grantWaiver(formData: FormData) {
 
   const { session } = await requireProjectRole(parsed.projectId, "ADMIN");
 
+  // Capture the stable numeric id if we know this account, so the waiver also
+  // matches by ghId (survives a login rename), not only by login.
+  const existingUser = await prisma.user.findUnique({
+    where: { ghLogin: parsed.ghLogin.toLowerCase() },
+    select: { ghId: true },
+  });
+
   const waiver = await claMutations.grantWaiver({
     projectId: parsed.projectId,
     ghLogin: parsed.ghLogin,
+    ghId: existingUser?.ghId ?? null,
     reason: parsed.reason,
     actorUserId: session.user.id,
   });

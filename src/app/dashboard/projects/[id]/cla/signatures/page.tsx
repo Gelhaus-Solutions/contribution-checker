@@ -12,7 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SubmitButton } from "@/components/ui/submit-button";
-import { revokeSignature } from "../actions";
+import { revokeSignature, grantWaiver, revokeWaiver } from "../actions";
 
 function fmt(d: Date): string {
   return d.toISOString().replace("T", " ").slice(0, 19);
@@ -26,13 +26,17 @@ export default async function ClaSignatureLog({
   const { id } = await params;
   await requireProjectRole(id, "ADMIN");
 
-  const [signatures, events, chain] = await Promise.all([
+  const [signatures, waivers, events, chain] = await Promise.all([
     prisma.claSignature.findMany({
       where: { projectId: id },
       include: {
         corporateSignatory: { select: { id: true, companyName: true } },
       },
       orderBy: { signedAt: "desc" },
+    }),
+    prisma.claWaiver.findMany({
+      where: { projectId: id },
+      orderBy: { grantedAt: "desc" },
     }),
     prisma.claEventLog.findMany({
       where: { projectId: id },
@@ -141,6 +145,95 @@ export default async function ClaSignatureLog({
                         required
                       />
                       <SubmitButton variant="destructive" size="sm">
+                        Revoke
+                      </SubmitButton>
+                    </form>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">CLA waivers</CardTitle>
+          <CardDescription>
+            Exempt a specific GitHub account from signing the CLA — they are
+            treated as covered and won&apos;t be blocked. Revoking re-blocks them.
+            Every grant and revoke is recorded in the ledger above.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <form
+            action={grantWaiver}
+            className="flex flex-wrap items-end gap-2"
+          >
+            <input type="hidden" name="projectId" value={id} />
+            <div className="space-y-1">
+              <label
+                htmlFor="waiver-login"
+                className="text-xs text-muted-foreground"
+              >
+                GitHub username
+              </label>
+              <Input
+                id="waiver-login"
+                name="ghLogin"
+                required
+                maxLength={39}
+                placeholder="octocat"
+                className="h-8 w-48 text-sm"
+              />
+            </div>
+            <div className="min-w-[14rem] flex-1 space-y-1">
+              <label
+                htmlFor="waiver-reason"
+                className="text-xs text-muted-foreground"
+              >
+                Reason
+              </label>
+              <Input
+                id="waiver-reason"
+                name="reason"
+                required
+                maxLength={500}
+                placeholder="e.g. covered by a separate signed agreement"
+                className="h-8 text-sm"
+              />
+            </div>
+            <SubmitButton size="sm">Grant waiver</SubmitButton>
+          </form>
+
+          {waivers.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No waivers yet.</p>
+          ) : (
+            <ul className="divide-y divide-border rounded-md border border-border">
+              {waivers.map((w) => (
+                <li
+                  key={w.id}
+                  className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-sm"
+                >
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-mono">@{w.ghLogin}</span>
+                    {w.status === "ACTIVE" ? (
+                      <Badge variant="success">ACTIVE</Badge>
+                    ) : (
+                      <Badge variant="destructive">REVOKED</Badge>
+                    )}
+                    <span className="text-xs text-muted-foreground">
+                      {w.reason}
+                    </span>
+                    <span className="text-xs text-muted-foreground">
+                      · {fmt(w.grantedAt)}
+                    </span>
+                  </div>
+                  {w.status === "ACTIVE" && (
+                    <form action={revokeWaiver}>
+                      <input type="hidden" name="projectId" value={id} />
+                      <input type="hidden" name="waiverId" value={w.id} />
+                      <SubmitButton variant="outline" size="sm">
                         Revoke
                       </SubmitButton>
                     </form>

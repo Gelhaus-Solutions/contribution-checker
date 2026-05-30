@@ -12,6 +12,7 @@ import {
   getUserOverview,
   setApplicationStatus,
   setManualDecisionStatus,
+  waiveClaForUser,
   type UserOverview,
 } from "./actions";
 
@@ -358,6 +359,20 @@ function UserOverviewDialog({
       .catch((e) => setError(e instanceof Error ? e.message : String(e)));
   };
 
+  const waiveCla = () => {
+    const reason = window.prompt(
+      `Reason for waiving the CLA for @${ghLogin}? They won't need to sign it.`,
+      "Covered by a separate signed agreement"
+    );
+    if (!reason || !reason.trim()) return;
+    feedback
+      .run("waive-cla", async () => {
+        await waiveClaForUser({ projectId, ghLogin, reason: reason.trim() });
+        await reload();
+      })
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)));
+  };
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -590,6 +605,33 @@ function UserOverviewDialog({
                   {data.cla.blockedPrCount > 0 && (
                     <p className="mt-1 text-xs text-muted-foreground">
                       {data.cla.blockedPrCount} open PR(s) held open pending CLA.
+                    </p>
+                  )}
+                  {canEdit && !data.cla.satisfied && (
+                    <div className="mt-3">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        loading={feedback.isLoading("waive-cla")}
+                        success={feedback.isSuccess("waive-cla")}
+                        disabled={feedback.isAnyLoading}
+                        onClick={waiveCla}
+                        className="h-7 px-2 text-[11px]"
+                      >
+                        Waive CLA for this user
+                      </Button>
+                    </div>
+                  )}
+                  {data.cla.via === "waiver" && canEdit && (
+                    <p className="mt-2 text-[11px] text-muted-foreground">
+                      Remove this exemption from the{" "}
+                      <Link
+                        href={`/dashboard/projects/${projectId}/cla/signatures`}
+                        className="underline"
+                      >
+                        CLA waivers
+                      </Link>{" "}
+                      list.
                     </p>
                   )}
                 </div>

@@ -18,6 +18,7 @@ import {
   ClaGateError,
 } from "@/lib/applications/decide";
 import { getClaStatus } from "@/lib/cla/status";
+import { grantWaiver as grantClaWaiver } from "@/lib/cla/mutations";
 
 const ghLoginPattern = /^[a-z0-9](?:[a-z0-9]|-(?=[a-z0-9])){0,38}$/i;
 
@@ -283,6 +284,53 @@ export async function setApplicationStatus(args: {
 
   revalidatePath(`/dashboard/projects/${parsed.projectId}/people`);
   revalidatePath(`/dashboard/projects/${parsed.projectId}/applications/${app.id}`);
+}
+
+const waiveSchema = z.object({
+  projectId: z.string().min(1),
+  ghLogin: z.string().trim().min(1).max(39),
+  reason: z.string().trim().min(1).max(500),
+});
+
+/**
+ * Grant a CLA waiver for a specific GitHub account straight from the People
+ * dialog — exempts them from signing the CLA. Mirrors the dashboard CLA waiver
+ * action (capture ghId, mutation appends the immutable ledger event, audit).
+ */
+export async function waiveClaForUser(args: {
+  projectId: string;
+  ghLogin: string;
+  reason: string;
+}) {
+  const parsed = waiveSchema.parse(args);
+  const { session } = await requireProjectRole(parsed.projectId, "ADMIN");
+
+  const existingUser = await prisma.user.findUnique({
+    where: { ghLogin: parsed.ghLogin.toLowerCase() },
+    select: { ghId: true },
+  });
+
+  const waiver = await grantClaWaiver({
+    projectId: parsed.projectId,
+    ghLogin: parsed.ghLogin,
+    ghId: existingUser?.ghId ?? null,
+    reason: parsed.reason,
+    actorUserId: session.user.id,
+  });
+
+  await recordAudit({
+    projectId: parsed.projectId,
+    actorId: session.user.id,
+    kind: "cla.waiver_granted",
+    payload: {
+      waiverId: waiver.id,
+      ghLogin: parsed.ghLogin,
+      reason: parsed.reason,
+      from: "people",
+    },
+  });
+
+  revalidatePath(`/dashboard/projects/${parsed.projectId}/people`);
 }
 
 export async function removeManualDecision(formData: FormData) {
