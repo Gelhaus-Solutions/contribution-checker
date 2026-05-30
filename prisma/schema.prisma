@@ -402,6 +402,10 @@ model PrCheck {
   // GitHub Check Run id (string to avoid BigInt JSON pitfalls). Null when the
   // check publishing is disabled or the installation lacks `checks:write`.
   checkRunId String?
+  // Separate Check Run id for the dedicated "contribution-checker / cla" check
+  // (published independently of the overall decision check so CLA can be a
+  // standalone required status check in branch protection).
+  claCheckRunId String?
   // Latest commit SHA evaluated; used to detect re-eval on push (synchronize).
   headSha    String?
 

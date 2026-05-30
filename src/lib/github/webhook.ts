@@ -14,10 +14,15 @@ import {
   setLabels,
   repoRef,
 } from "@/lib/github/pr-actions";
-import { publishDecisionCheck } from "@/lib/github/check-run";
+import {
+  publishDecisionCheck,
+  publishClaCheck,
+  type ClaCheckState,
+} from "@/lib/github/check-run";
 import { runQualityForPrCheck } from "@/lib/quality/run";
 import { getInstallationOctokit } from "@/lib/github/app";
 import { verifyDco } from "@/lib/cla/dco";
+import { getClaStatus } from "@/lib/cla/status";
 import { syncRepoFileClaForPush } from "@/lib/cla/repo-source";
 
 type WebhookPayload = {
@@ -141,6 +146,7 @@ async function postDecisionSideEffects(args: {
   decision: PrDecision;
   applyUrl: string;
   claUrl?: string;
+  claState?: ClaCheckState | null;
 }): Promise<void> {
   const { decision, project } = args;
   if (decision.status === "IGNORED") return;
@@ -167,6 +173,27 @@ async function postDecisionSideEffects(args: {
       "publishDecisionCheck failed"
     )
   );
+
+  // Dedicated CLA Check Run — only when the project has CLA enabled (claState is
+  // computed null otherwise). Lets maintainers require `contribution-checker /
+  // cla` independently in branch protection.
+  if (args.claState) {
+    await publishClaCheck({
+      installationId: args.installationId,
+      repoFullName: args.repoFullName,
+      prCheckId: args.prCheckId,
+      headSha: args.headSha,
+      project: {
+        id: project.id,
+        name: project.name,
+        checksEnabled: project.checksEnabled,
+      },
+      state: args.claState,
+      claUrl: args.claUrl,
+    }).catch((e) =>
+      logger.warn({ err: e, prCheckId: args.prCheckId }, "publishClaCheck failed")
+    );
+  }
 
   // Quality scoring runs only when there is a tracked PrCheck row AND the
   // feature is enabled.
@@ -294,6 +321,8 @@ export async function handlePullRequestEvent(payload: WebhookPayload) {
           labelDenied: true,
           labelEvaluate: true,
           labelClaPending: true,
+          claEnabled: true,
+          claRequired: true,
           dcoEnabled: true,
           checkerEnabled: true,
           trackWhenDisabled: true,
@@ -347,6 +376,47 @@ export async function handlePullRequestEvent(payload: WebhookPayload) {
 
   const disabledByChecker =
     decision.status === "APPROVED" && decision.bypassReason === "checker_disabled";
+
+  // Dedicated CLA-check state (independent of the overall decision), so the
+  // `contribution-checker / cla` check accurately reflects the author's CLA
+  // coverage even on paths where the decision short-circuited before the CLA
+  // layer (manual/application DENIED, no-application PENDING, etc.).
+  let claState: ClaCheckState | null = null;
+  if (project.claEnabled) {
+    if (disabledByChecker) {
+      claState = "not_required"; // whole checker off → CLA off too
+    } else if (decision.status === "BYPASSED" && decision.reason === "bot") {
+      claState = "exempt";
+    } else if (!project.claRequired) {
+      claState = "not_required";
+    } else if (
+      decision.status === "CHECK_REQUIRED" &&
+      decision.reason === "cla_stale"
+    ) {
+      claState = "stale";
+    } else if (
+      decision.status === "CHECK_REQUIRED" &&
+      decision.reason === "cla_required"
+    ) {
+      claState = "required";
+    } else {
+      // Decision didn't resolve the CLA (other gate, or it allows): compute
+      // coverage directly so the dedicated check is accurate.
+      const st = await getClaStatus({
+        projectId: project.id,
+        ghId: author.id,
+        ghLogin: author.login,
+      }).catch(() => null);
+      claState = st
+        ? st.satisfied
+          ? "satisfied"
+          : st.needsResign
+            ? "stale"
+            : "required"
+        : "required";
+    }
+  }
+
   // CHECK_REQUIRED is an active CLA/DCO gate, so it must always create a
   // PrCheck row (the re-check/sweep machinery finds affected PRs by
   // gateReason) regardless of trackWhenDisabled.
@@ -476,6 +546,7 @@ export async function handlePullRequestEvent(payload: WebhookPayload) {
       decision,
       applyUrl,
       claUrl,
+      claState,
     });
     return;
   }
@@ -543,6 +614,7 @@ export async function handlePullRequestEvent(payload: WebhookPayload) {
       decision,
       applyUrl,
       claUrl,
+      claState,
     });
     return;
   }
@@ -609,6 +681,8 @@ export async function handlePullRequestEvent(payload: WebhookPayload) {
     project,
     decision,
     applyUrl,
+    claUrl,
+    claState,
   });
 }
 

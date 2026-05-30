@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildDecisionCheckPayload } from "@/lib/github/check-run";
+import { buildDecisionCheckPayload, buildClaCheckPayload } from "@/lib/github/check-run";
 
 const applyUrl = "https://example.test/p/proj";
 const projectName = "Demo";
@@ -92,3 +92,29 @@ describe("buildDecisionCheckPayload", () => {
     expect(p.title).toBe("Denied until 2030-01-15.");
   });
 });
+
+describe("buildClaCheckPayload", () => {
+  const claUrl = "https://example.test/p/proj/cla";
+
+  it("required → action_required with the CLA name + details link", () => {
+    const p = buildClaCheckPayload({ state: "required", projectName, claUrl });
+    expect(p.name).toBe("contribution-checker / cla");
+    expect(p.conclusion).toBe("action_required");
+    expect(p.title).toBe("CLA required");
+    expect(p.detailsUrl).toBe(claUrl);
+  });
+
+  it("stale → action_required (re-sign)", () => {
+    const p = buildClaCheckPayload({ state: "stale", projectName, claUrl });
+    expect(p.conclusion).toBe("action_required");
+    expect(p.title).toBe("Re-sign the CLA");
+  });
+
+  it("satisfied / exempt / not_required → success", () => {
+    for (const state of ["satisfied", "exempt", "not_required"] as const) {
+      const p = buildClaCheckPayload({ state, projectName });
+      expect(p.conclusion, state).toBe("success");
+      expect(p.name).toBe("contribution-checker / cla");
+    }
+  });
+})
