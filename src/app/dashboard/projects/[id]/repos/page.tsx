@@ -15,6 +15,8 @@ import { Button } from "@/components/ui/button";
 import { SubmitButton } from "@/components/ui/submit-button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { SearchInput } from "@/components/ui/search-input";
+import { parsePageParams, type SearchParamRecord } from "@/lib/pagination";
 import { addRepoByName, removeRepo } from "./actions";
 
 function ciGateYaml(baseUrl: string, slug: string): string {
@@ -184,10 +186,13 @@ jobs:
 
 export default async function ProjectRepos({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<SearchParamRecord>;
 }) {
   const { id } = await params;
+  const { q } = parsePageParams(await searchParams);
   await requireProjectRole(id, "ADMIN");
 
   const project = await prisma.project.findUnique({
@@ -197,7 +202,10 @@ export default async function ProjectRepos({
   if (!project) notFound();
 
   const repos = await prisma.repo.findMany({
-    where: { projectId: id },
+    where: {
+      projectId: id,
+      ...(q ? { fullName: { contains: q, mode: "insensitive" } } : {}),
+    },
     orderBy: { fullName: "asc" },
   });
 
@@ -258,8 +266,15 @@ export default async function ProjectRepos({
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+          <SearchInput
+            pathname={`/dashboard/projects/${id}/repos`}
+            q={q}
+            placeholder="Search repos"
+          />
           {repos.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No repos yet.</p>
+            <p className="text-sm text-muted-foreground">
+              {q ? "No repos match your search." : "No repos yet."}
+            </p>
           ) : (
             <ul className="divide-y divide-border">
               {repos.map((r) => (

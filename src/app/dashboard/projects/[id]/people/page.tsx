@@ -40,6 +40,9 @@ export default async function ProjectPeople({
         decidedBy: { select: { ghLogin: true } },
       },
       orderBy: { decidedAt: "desc" },
+      // People are merged in-memory and paginated client-side, so this is the
+      // in-memory ceiling. If a project ever exceeds it, switch this view to
+      // true server-side pagination rather than raising the cap.
       take: 500,
     }),
   ]);
