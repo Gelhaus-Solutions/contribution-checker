@@ -5,6 +5,7 @@ import {
   signatureSchema,
   collectSignature,
   collectClaCustomAnswers,
+  parseChainPayload,
   CLA_CUSTOM_FIELD_PREFIX,
 } from "@/lib/cla/schema";
 import type { FormSchema } from "@/lib/applications/schema";
@@ -156,5 +157,69 @@ describe("collectClaCustomAnswers", () => {
   it("treats an absent checkbox as false and absent text as empty", () => {
     const out = collectClaCustomAnswers(new FormData(), fields);
     expect(out).toEqual({ company: "", agree_terms: false });
+  });
+});
+
+describe("parseChainPayload (ledger payloads)", () => {
+  it("accepts a doc.resign_set payload", () => {
+    const res = parseChainPayload(
+      JSON.stringify({
+        kind: "doc.resign_set",
+        documentKind: "ICLA",
+        versions: [
+          { versionId: "v2id", version: 2, resignRequired: true },
+          { versionId: "v3id", version: 3, resignRequired: true },
+        ],
+        setAt: "2026-06-01T00:00:00.000Z",
+      })
+    );
+    expect(res.ok).toBe(true);
+  });
+
+  it("rejects a doc.resign_set payload with no versions", () => {
+    const res = parseChainPayload(
+      JSON.stringify({
+        kind: "doc.resign_set",
+        documentKind: "ICLA",
+        versions: [],
+        setAt: "2026-06-01T00:00:00.000Z",
+      })
+    );
+    expect(res.ok).toBe(false);
+  });
+
+  it("accepts a legacy doc.published payload without resignVersionIds", () => {
+    // Historical entries (pre per-version re-sign) must still validate so
+    // verifyChain re-hashes them identically.
+    const res = parseChainPayload(
+      JSON.stringify({
+        kind: "doc.published",
+        documentVersionId: "vid",
+        documentKind: "ICLA",
+        version: 1,
+        contentHash: "abc",
+        sourceType: "manual",
+        requireResign: false,
+        publishedAt: "2026-01-01T00:00:00.000Z",
+      })
+    );
+    expect(res.ok).toBe(true);
+  });
+
+  it("accepts a doc.published payload carrying resignVersionIds", () => {
+    const res = parseChainPayload(
+      JSON.stringify({
+        kind: "doc.published",
+        documentVersionId: "vid",
+        documentKind: "ICLA",
+        version: 4,
+        contentHash: "abc",
+        sourceType: "manual",
+        requireResign: false,
+        resignVersionIds: ["v2id", "v3id"],
+        publishedAt: "2026-06-01T00:00:00.000Z",
+      })
+    );
+    expect(res.ok).toBe(true);
   });
 });
