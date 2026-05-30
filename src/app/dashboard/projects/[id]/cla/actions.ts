@@ -87,7 +87,13 @@ export async function updateClaSettings(formData: FormData) {
     claIclaRequireSignature:
       formData.get("claIclaRequireSignature") ?? undefined,
     dcoEnabled: formData.get("dcoEnabled") ?? undefined,
-    labelClaPending: formData.get("labelClaPending") ?? undefined,
+    // Coerce a blank label input to undefined so the existing value is kept
+    // (the schema's .min(1) would otherwise reject "").
+    labelClaPending:
+      typeof formData.get("labelClaPending") === "string" &&
+      (formData.get("labelClaPending") as string).trim().length > 0
+        ? formData.get("labelClaPending")
+        : undefined,
   });
 
   const { session } = await requireProjectRole(parsed.projectId, "ADMIN");
@@ -170,14 +176,20 @@ export async function updateClaSettings(formData: FormData) {
 // (+ capture the commit sha). For manual, use the pasted bodyMarkdown.
 // ---------------------------------------------------------------------------
 export async function publishClaVersion(formData: FormData) {
+  // Optional text inputs post "" when left blank; coerce blanks to undefined so
+  // `.min(1).optional()` fields (e.g. an empty "Ref") validate as absent.
+  const opt = (key: string) => {
+    const v = formData.get(key);
+    return typeof v === "string" && v.trim().length > 0 ? v : undefined;
+  };
   const parsed = publishVersionSchema.parse({
     projectId: formData.get("projectId"),
     kind: formData.get("kind"),
     sourceType: formData.get("sourceType"),
-    bodyMarkdown: formData.get("bodyMarkdown") ?? undefined,
-    sourceRepoId: formData.get("sourceRepoId") ?? undefined,
-    sourcePath: formData.get("sourcePath") ?? undefined,
-    sourceRef: formData.get("sourceRef") ?? undefined,
+    bodyMarkdown: opt("bodyMarkdown"),
+    sourceRepoId: opt("sourceRepoId"),
+    sourcePath: opt("sourcePath"),
+    sourceRef: opt("sourceRef"),
     requireResign: formData.get("requireResign") ?? false,
   });
 
