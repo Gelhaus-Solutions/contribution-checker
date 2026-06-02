@@ -16,6 +16,15 @@ export const metadata: Metadata = {
   description: "Gate PRs behind a contributor application form.",
 };
 
+// Force every route to render at request time. The app is built into a generic
+// image with NO Hexclave env (STACK_*), so at build time auth() short-circuits
+// to null BEFORE reading cookies -> Next would prerender auth-gated pages like
+// /dashboard, /admin and /welcome as STATIC and bake their unauthenticated
+// "redirect to /handler/sign-in" into the output, which is then served to every
+// signed-in user (the redirect loop). Rendering dynamically makes auth() run at
+// runtime with the real session. The whole app depends on the session anyway.
+export const dynamic = "force-dynamic";
+
 export default async function RootLayout({
   children,
 }: {
