@@ -40,6 +40,18 @@ const schema = z.object({
   SUPER_ADMINS: z.string().optional(),
   PROJECT_CREATORS: z.string().optional(),
 
+  // Hexclave (self-hosted Stack Auth fork) — human login. Project id and the
+  // publishable client key are public (NEXT_PUBLIC_*); the secret server key is
+  // sensitive and may instead live in Vault (resolved via getSecret at request
+  // time, like the GitHub OAuth credentials). NEXT_PUBLIC_STACK_API_URL points
+  // the SDK at the operator's self-hosted backend instead of the managed cloud.
+  NEXT_PUBLIC_STACK_PROJECT_ID: z.string().optional(),
+  NEXT_PUBLIC_STACK_PUBLISHABLE_CLIENT_KEY: z.string().optional(),
+  STACK_SECRET_SERVER_KEY: z.string().optional(),
+  NEXT_PUBLIC_STACK_API_URL: z.string().url().optional(),
+  // Svix signing secret for verifying Hexclave webhooks (user.created, etc.).
+  STACK_WEBHOOK_SECRET: z.string().optional(),
+
   SMTP_HOST: z.string().optional(),
   SMTP_PORT: z.coerce.number().int().positive().default(587),
   SMTP_USER: z.string().optional(),
@@ -122,6 +134,13 @@ export const env = {
   oauthConfigured,
   superAdmins: csv(raw.SUPER_ADMINS).map((s) => s.toLowerCase()),
   projectCreators: csv(raw.PROJECT_CREATORS).map((s) => s.toLowerCase()),
+  // Hexclave is "configured" when the public identifiers are present and the
+  // secret server key is available (env or Vault). The auth layer short-circuits
+  // when this is false the same way the webhook path does for GitHub.
+  stackConfigured:
+    !!raw.NEXT_PUBLIC_STACK_PROJECT_ID &&
+    !!raw.NEXT_PUBLIC_STACK_PUBLISHABLE_CLIENT_KEY &&
+    presentInEnvOrVault("STACK_SECRET_SERVER_KEY"),
   githubAppConfigured:
     presentInEnvOrVault("GITHUB_APP_ID") &&
     presentInEnvOrVault("GITHUB_APP_PRIVATE_KEY") &&

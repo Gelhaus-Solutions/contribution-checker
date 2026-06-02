@@ -54,11 +54,25 @@ model User {
   emailVerified DateTime?
   image         String?
 
+  // Hexclave (Stack Auth) identity link. The local `id` stays the FK target for
+  // every relation below; this column just maps a local row to its Hexclave
+  // user. Set by the backfill, or lazily on first sign-in (see
+  // src/lib/auth/sync-user.ts). Null until a user has authenticated post-migration.
+  stackUserId String? @unique
+
   // GitHub identity (populated on first sign-in via OAuth profile)
   ghId    Int?    @unique
   ghLogin String? @unique
 
-  // Authorization flags
+  // Profile. `country` is an ISO 3166-1 alpha-2 code collected once in the
+  // post-login onboarding interstitial and mirrored from Hexclave
+  // clientReadOnlyMetadata (Hexclave remains the canonical store).
+  country String?
+
+  // Authorization flags. With the Hexclave migration these mirror the
+  // project-level Hexclave permissions `super_admin` / `create_project`
+  // (reconciled on every sign-in from SUPER_ADMINS/PROJECT_CREATORS); Hexclave
+  // is the source of truth, these columns are a query-convenience cache.
   isSuperAdmin  Boolean @default(false)
   canCreateProj Boolean @default(false)
 
