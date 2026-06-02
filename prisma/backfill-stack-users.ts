@@ -1,20 +1,27 @@
 /**
- * One-off backfill: pre-create a Hexclave (Stack Auth) user for every existing
- * local User and deterministically attach their GitHub OAuth connection by
- * account_id (= ghId), so that when the user signs in via GitHub after cutover
- * Hexclave matches the existing connection (no duplicate) and the local row's
- * stackUserId already points at it.
+ * One-off backfill + reconcile for Hexclave (Stack Auth) users.
+ *
+ * For every local User it pre-creates a Hexclave user and deterministically
+ * attaches the GitHub OAuth connection by account_id (= ghId), so that on first
+ * GitHub sign-in Hexclave matches the existing connection (no duplicate) and the
+ * local row's stackUserId already points at it.
+ *
+ * It is also a RECONCILER: re-running it processes ALL users (not just unlinked
+ * ones) and fixes the primary-email "verified" flag to match what we actually
+ * know (local User.emailVerified). We do NOT claim an email is verified just
+ * because GitHub gave us one. (An earlier version set verified=true for every
+ * user with an email; re-run this to correct them.)
  *
  * Idempotent and re-runnable:
- *   - Skips users whose stackUserId is already set.
+ *   - Already-linked users are fetched and reconciled (verified flag,
+ *     permissions, OAuth link), not recreated.
  *   - On a partial prior run (Hexclave user created but local row not updated),
  *     re-finds the Hexclave user by email and reuses it.
- *   - createOAuthProvider's "account id already used" error is treated as
- *     success (the link already exists).
+ *   - createOAuthProvider's "account id already used" error means it's already
+ *     linked -> fine.
  *
- * Conflicts (null email, duplicate ghId/email, undefined permission) are logged
- * and skipped per the agreed policy; those users lazy-link by ghId on their
- * first sign-in (src/lib/auth/sync-user.ts).
+ * Users with no ghId are skipped (they lazy-link by ghId on first sign-in,
+ * src/lib/auth/sync-user.ts).
  *
  * Run with the Hexclave env vars present (Prisma loads DATABASE_URL + the rest
  * of .env into process.env; export them if they live in Vault):
@@ -23,7 +30,7 @@
  *   DRY_RUN=1 pnpm db:backfill:stack  # report only, no writes
  */
 import { PrismaClient } from "@prisma/client";
-import { StackServerApp } from "@hexclave/next";
+import { StackServerApp, type ServerUser } from "@hexclave/next";
 
 // Inlined (not imported from src/lib/auth/constants) so this script stays
 // self-contained: the production Docker image ships the built app + prisma/,
@@ -59,13 +66,27 @@ const stackApp = new StackServerApp({
 type Counts = {
   total: number;
   created: number;
+  reconciled: number;
   reusedExisting: number;
-  skippedLinked: number;
   oauthAlreadyLinked: number;
+  emailVerifiedFixed: number;
   errors: number;
 };
 
-async function findStackUserByEmail(email: string) {
+type LocalUser = {
+  id: string;
+  stackUserId: string | null;
+  email: string | null;
+  emailVerified: Date | null;
+  name: string | null;
+  ghId: number | null;
+  ghLogin: string | null;
+  country: string | null;
+  isSuperAdmin: boolean;
+  canCreateProj: boolean;
+};
+
+async function findStackUserByEmail(email: string): Promise<ServerUser | null> {
   const matches = await stackApp.listUsers({ query: email, limit: 10 });
   return (
     matches.find(
@@ -74,19 +95,7 @@ async function findStackUserByEmail(email: string) {
   );
 }
 
-async function backfillOne(
-  user: {
-    id: string;
-    email: string | null;
-    name: string | null;
-    ghId: number | null;
-    ghLogin: string | null;
-    country: string | null;
-    isSuperAdmin: boolean;
-    canCreateProj: boolean;
-  },
-  counts: Counts,
-): Promise<void> {
+async function backfillOne(user: LocalUser, counts: Counts): Promise<void> {
   if (user.ghId == null) {
     console.warn(`skip ${user.id}: no ghId (will lazy-link on first sign-in)`);
     counts.errors++;
@@ -94,45 +103,62 @@ async function backfillOne(
   }
 
   const email = user.email?.trim() || null;
-  // User.country is a new column (null for existing users at migration time);
-  // country is captured in the background from geo on first sign-in.
+  // We only assert email verification we actually have (local emailVerified).
+  // GitHub giving us an address does NOT mean it's verified.
+  const desiredVerified = !!user.emailVerified;
+  // User.country is captured in the background from geo on first sign-in.
   const clientReadOnlyMetadata = user.country
     ? { country: user.country.toUpperCase() }
     : {};
 
+  // Resolve the existing Hexclave user when already linked (read-only).
+  let stackUser: ServerUser | null = user.stackUserId
+    ? await stackApp.getUser(user.stackUserId)
+    : null;
+
   if (DRY_RUN) {
-    console.log(
-      `[dry-run] would create Hexclave user for ${user.ghLogin ?? user.id} (ghId=${user.ghId}, email=${email ?? "none"})`,
-    );
-    counts.created++;
+    if (stackUser) {
+      const willFix = stackUser.primaryEmailVerified !== desiredVerified;
+      console.log(
+        `[dry-run] reconcile ${user.ghLogin ?? user.id}: verified ${stackUser.primaryEmailVerified} -> ${desiredVerified}${willFix ? " (FIX)" : ""}`,
+      );
+      counts.reconciled++;
+      if (willFix) counts.emailVerifiedFixed++;
+    } else {
+      console.log(
+        `[dry-run] would create ${user.ghLogin ?? user.id} (ghId=${user.ghId}, verified=${desiredVerified})`,
+      );
+      counts.created++;
+    }
     return;
   }
 
-  // 1. Create (or reuse on re-run) the Hexclave user.
-  let stackUser: Awaited<ReturnType<typeof stackApp.createUser>> | null = null;
-  try {
-    stackUser = await stackApp.createUser({
-      primaryEmail: email ?? undefined,
-      primaryEmailVerified: !!email,
-      displayName: user.name ?? user.ghLogin ?? undefined,
-      serverMetadata: { ghId: user.ghId, ghLogin: user.ghLogin },
-      clientReadOnlyMetadata,
-    });
-    counts.created++;
-  } catch (e) {
-    // Likely a prior partial run already created the user (email taken). Reuse.
-    if (email) {
-      stackUser = await findStackUserByEmail(email);
+  // 1. Create the Hexclave user if it doesn't exist yet.
+  if (!stackUser) {
+    try {
+      stackUser = await stackApp.createUser({
+        primaryEmail: email ?? undefined,
+        primaryEmailVerified: desiredVerified,
+        displayName: user.name ?? user.ghLogin ?? undefined,
+        serverMetadata: { ghId: user.ghId, ghLogin: user.ghLogin },
+        clientReadOnlyMetadata,
+      });
+      counts.created++;
+    } catch (e) {
+      // Likely a prior partial run already created the user (email taken). Reuse.
+      if (email) stackUser = await findStackUserByEmail(email);
+      if (!stackUser) {
+        console.error(`error ${user.ghLogin ?? user.id}: createUser failed`, e);
+        counts.errors++;
+        return;
+      }
+      counts.reusedExisting++;
     }
-    if (!stackUser) {
-      console.error(`error ${user.ghLogin ?? user.id}: createUser failed`, e);
-      counts.errors++;
-      return;
-    }
-    counts.reusedExisting++;
+  } else {
+    counts.reconciled++;
   }
 
-  // 2. Attach the GitHub OAuth connection by account_id (= ghId).
+  // 2. Attach the GitHub OAuth connection by account_id (= ghId). Idempotent.
   try {
     const result = await stackApp.createOAuthProvider({
       userId: stackUser.id,
@@ -143,8 +169,7 @@ async function backfillOne(
       allowConnectedAccounts: true,
     });
     if (result.status === "error") {
-      // Account id already used for sign-in -> already linked. Fine.
-      counts.oauthAlreadyLinked++;
+      counts.oauthAlreadyLinked++; // account id already used -> already linked.
     }
   } catch (e) {
     console.error(
@@ -152,11 +177,23 @@ async function backfillOne(
       e,
     );
     counts.errors++;
-    // Don't return: still link stackUserId so the row resolves; the connection
-    // can be repaired on first sign-in.
   }
 
-  // 3. Grant org permissions matching the local cache columns.
+  // 3. Reconcile the email "verified" flag to the truth. Fixes users that an
+  //    earlier run wrongly marked verified. Only writes when it differs.
+  try {
+    if (stackUser.primaryEmailVerified !== desiredVerified) {
+      await stackUser.update({ primaryEmailVerified: desiredVerified });
+      counts.emailVerifiedFixed++;
+    }
+  } catch (e) {
+    console.warn(
+      `warn ${user.ghLogin ?? user.id}: could not update primaryEmailVerified`,
+      e,
+    );
+  }
+
+  // 4. Grant org permissions matching the local cache columns.
   try {
     if (user.isSuperAdmin) await stackUser.grantPermission(SUPER_ADMIN_PERMISSION);
     if (user.isSuperAdmin || user.canCreateProj) {
@@ -169,33 +206,37 @@ async function backfillOne(
     );
   }
 
-  // 4. Link the local row.
-  await prisma.user.update({
-    where: { id: user.id },
-    data: { stackUserId: stackUser.id },
-  });
+  // 5. Link the local row if not already linked.
+  if (!user.stackUserId) {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { stackUserId: stackUser.id },
+    });
+  }
 }
 
 async function main(): Promise<void> {
   const counts: Counts = {
     total: 0,
     created: 0,
+    reconciled: 0,
     reusedExisting: 0,
-    skippedLinked: 0,
     oauthAlreadyLinked: 0,
+    emailVerifiedFixed: 0,
     errors: 0,
   };
 
   let cursor: string | undefined;
   for (;;) {
-    const batch = await prisma.user.findMany({
-      where: { stackUserId: null },
+    const batch: LocalUser[] = await prisma.user.findMany({
       orderBy: { id: "asc" },
       take: BATCH,
       ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
       select: {
         id: true,
+        stackUserId: true,
         email: true,
+        emailVerified: true,
         name: true,
         ghId: true,
         ghLogin: true,
@@ -217,11 +258,6 @@ async function main(): Promise<void> {
       }
     }
   }
-
-  // Count already-linked rows for the summary.
-  counts.skippedLinked = await prisma.user.count({
-    where: { stackUserId: { not: null } },
-  });
 
   console.log("\nBackfill summary:", JSON.stringify(counts, null, 2));
   if (DRY_RUN) console.log("(dry run: no writes performed)");
