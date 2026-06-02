@@ -1,10 +1,16 @@
 import "server-only";
+import { cache } from "react";
 import { redirect } from "next/navigation";
+import { prisma } from "@/lib/db";
 import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
 import { getStackServerApp } from "@/lib/stack";
 import { resolveLocalUserFromStack } from "@/lib/auth/resolve-user";
-import { captureGeoCountry, recordSignOutMetric } from "@/lib/auth/sync-user";
+import {
+  captureGeoCountry,
+  recordSignOutMetric,
+  resolveOrgRoles,
+} from "@/lib/auth/sync-user";
 import { setSentryUser } from "@/lib/observability/sentry-user";
 import type { Session } from "@/lib/auth-types";
 
@@ -18,11 +24,14 @@ export type { Session } from "@/lib/auth-types";
  * already consumes. Returns null when there is no session or Hexclave is not
  * configured (keeps build/test and unconfigured deploys safe).
  *
- * Org permissions (isSuperAdmin/canCreateProj) are read from the mirrored local
- * columns here (cheap); they are kept fresh by the onboarding flow and the
- * Hexclave webhook (src/lib/auth/sync-user.ts).
+ * Org roles (isSuperAdmin/canCreateProj) are resolved LIVE from Hexclave each
+ * request (env CSV + project permissions + team metadata + whitelisted-team
+ * team permissions; see resolveOrgRoles) so team-membership changes take effect
+ * on the next request, and the local cache columns are kept in sync. Wrapped in
+ * React `cache()` so the (potentially several) Hexclave round-trips run once
+ * per request even though auth() is called from many components.
  */
-export async function auth(): Promise<Session | null> {
+export const auth = cache(async function auth(): Promise<Session | null> {
   if (!env.stackConfigured) return null;
   try {
     const stackApp = await getStackServerApp();
@@ -55,6 +64,28 @@ export async function auth(): Promise<Session | null> {
       }
     }
 
+    // Resolve org roles live, then keep the local cache columns in sync.
+    const roles = await resolveOrgRoles(stackUser, u.ghLogin);
+    if (
+      roles.isSuperAdmin !== u.isSuperAdmin ||
+      roles.canCreateProj !== u.canCreateProj
+    ) {
+      await prisma.user
+        .update({
+          where: { id: u.id },
+          data: {
+            isSuperAdmin: roles.isSuperAdmin,
+            canCreateProj: roles.canCreateProj,
+          },
+        })
+        .catch((e) =>
+          logger.warn(
+            { err: e, "auth.user_id": u.id },
+            "auth: mirroring org roles failed",
+          ),
+        );
+    }
+
     setSentryUser({ id: u.id, ghLogin: u.ghLogin, email: u.email });
 
     return {
@@ -66,15 +97,15 @@ export async function auth(): Promise<Session | null> {
         ghId: u.ghId,
         ghLogin: u.ghLogin,
         country,
-        isSuperAdmin: u.isSuperAdmin,
-        canCreateProj: u.canCreateProj,
+        isSuperAdmin: roles.isSuperAdmin,
+        canCreateProj: roles.canCreateProj,
       },
     };
   } catch (e) {
     logger.error({ err: e }, "auth: failed to resolve session");
     return null;
   }
-}
+});
 
 function handlerUrl(action: "sign-in" | "sign-out", returnTo?: string): string {
   const base = `/handler/${action}`;

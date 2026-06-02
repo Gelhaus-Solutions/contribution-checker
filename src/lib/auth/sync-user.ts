@@ -1,6 +1,6 @@
 import "server-only";
 import * as Sentry from "@sentry/nextjs";
-import type { ServerUser } from "@hexclave/next";
+import type { ServerTeam, ServerUser } from "@hexclave/next";
 import { prisma } from "@/lib/db";
 import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
@@ -126,65 +126,102 @@ export async function syncGitHubIdentity(
   return { userId: localUserId, ghId, ghLogin };
 }
 
+export type OrgRoles = { isSuperAdmin: boolean; canCreateProj: boolean };
+
 /**
- * Reconcile the org-level Hexclave permissions from the SUPER_ADMINS /
- * PROJECT_CREATORS env CSVs (additive promotion only, mirroring the old
- * sign-in behavior; /admin/allowlist handles revocation), then mirror the
- * effective Hexclave permission state to the local cache columns.
- *
- * Hexclave is the source of truth; the local columns are a hot-path cache read
- * by auth().
+ * A team confers org roles via its metadata (client-read-only or server
+ * metadata, merged with server winning):
+ *   - `grantedRoles: string[]`  -> every member of the team gets these roles.
+ *   - `roleWhitelist: true`     -> team permissions named super_admin /
+ *                                  create_project held WITHIN this team count
+ *                                  toward those roles (team permissions only
+ *                                  apply for whitelisted teams).
+ */
+function teamRoleMeta(team: ServerTeam): {
+  grantedRoles: string[];
+  roleWhitelist: boolean;
+} {
+  const merged = {
+    ...((team.clientReadOnlyMetadata as Record<string, unknown> | null) ?? {}),
+    ...((team.serverMetadata as Record<string, unknown> | null) ?? {}),
+  };
+  const grantedRoles = Array.isArray(merged.grantedRoles)
+    ? merged.grantedRoles.map(String)
+    : [];
+  return { grantedRoles, roleWhitelist: merged.roleWhitelist === true };
+}
+
+/**
+ * Resolve a user's org roles (super-admin / can-create-project). A user has a
+ * role if ANY of:
+ *   1. the SUPER_ADMINS / PROJECT_CREATORS env CSV lists their GitHub login,
+ *   2. they hold the matching PROJECT (global) permission,
+ *   3. they're a member of a team whose metadata `grantedRoles` includes it, or
+ *   4. they hold the matching TEAM permission in a team whose metadata sets
+ *      `roleWhitelist: true`.
+ * Pure: reads only, no writes. Hexclave is the source of truth; the local
+ * columns are a cache that auth() keeps in sync.
+ */
+export async function resolveOrgRoles(
+  stackUser: ServerUser,
+  ghLogin: string | null,
+): Promise<OrgRoles> {
+  const lower = (ghLogin ?? "").toLowerCase();
+  let isSuperAdmin = !!lower && env.superAdmins.includes(lower);
+  let canCreateProj = !!lower && env.projectCreators.includes(lower);
+
+  // 2. Direct project (global) permissions.
+  try {
+    if (await stackUser.getPermission(SUPER_ADMIN_PERMISSION)) isSuperAdmin = true;
+    if (await stackUser.getPermission(CREATE_PROJECT_PERMISSION))
+      canCreateProj = true;
+  } catch (e) {
+    logger.warn(
+      { err: e, "stack.user_id": stackUser.id },
+      "auth: reading project permissions failed",
+    );
+  }
+
+  // 3/4. Team metadata grants + whitelisted-team team permissions.
+  try {
+    const teams = await stackUser.listTeams();
+    for (const team of teams) {
+      const { grantedRoles, roleWhitelist } = teamRoleMeta(team);
+      if (grantedRoles.includes(SUPER_ADMIN_PERMISSION)) isSuperAdmin = true;
+      if (grantedRoles.includes(CREATE_PROJECT_PERMISSION)) canCreateProj = true;
+      if (roleWhitelist) {
+        if (await stackUser.getPermission(team, SUPER_ADMIN_PERMISSION))
+          isSuperAdmin = true;
+        if (await stackUser.getPermission(team, CREATE_PROJECT_PERMISSION))
+          canCreateProj = true;
+      }
+    }
+  } catch (e) {
+    logger.warn(
+      { err: e, "stack.user_id": stackUser.id },
+      "auth: reading team roles failed",
+    );
+  }
+
+  // Super-admin always implies project creation.
+  if (isSuperAdmin) canCreateProj = true;
+  return { isSuperAdmin, canCreateProj };
+}
+
+/**
+ * Resolve roles and mirror them to the local cache columns. Used by the
+ * onboarding flow and the Hexclave webhook for immediacy; auth() also keeps the
+ * mirror current on each request.
  */
 export async function reconcileOrgPermissions(
   stackUser: ServerUser,
   ghLogin: string | null,
   localUserId: string,
 ): Promise<void> {
-  const lower = (ghLogin ?? "").toLowerCase();
-  // Grant inputs are additive: the env CSV bootstrap OR an existing mirror
-  // column (e.g. an /admin/allowlist grant made while the user was not yet
-  // linked to Hexclave). Revocation goes through /admin/allowlist, which clears
-  // both the column and the Hexclave permission, so a false column won't
-  // re-grant here.
-  const current = await prisma.user.findUnique({
-    where: { id: localUserId },
-    select: { isSuperAdmin: true, canCreateProj: true },
-  });
-  const shouldBeSuper =
-    (!!lower && env.superAdmins.includes(lower)) ||
-    !!current?.isSuperAdmin;
-  const shouldBeCreator =
-    shouldBeSuper ||
-    (!!lower && env.projectCreators.includes(lower)) ||
-    !!current?.canCreateProj;
-
-  try {
-    if (shouldBeSuper && !(await stackUser.hasPermission(SUPER_ADMIN_PERMISSION))) {
-      await stackUser.grantPermission(SUPER_ADMIN_PERMISSION);
-    }
-    if (
-      shouldBeCreator &&
-      !(await stackUser.hasPermission(CREATE_PROJECT_PERMISSION))
-    ) {
-      await stackUser.grantPermission(CREATE_PROJECT_PERMISSION);
-    }
-  } catch (e) {
-    // Most likely the project permission isn't defined in Hexclave yet. Log and
-    // continue so onboarding still completes; the operator defines the
-    // permissions per /admin/setup.
-    logger.error(
-      { err: e, "stack.user_id": stackUser.id },
-      "auth: failed to grant Hexclave permission",
-    );
-  }
-
-  const [isSuper, canCreate] = await Promise.all([
-    stackUser.hasPermission(SUPER_ADMIN_PERMISSION).catch(() => false),
-    stackUser.hasPermission(CREATE_PROJECT_PERMISSION).catch(() => false),
-  ]);
+  const roles = await resolveOrgRoles(stackUser, ghLogin);
   await prisma.user.update({
     where: { id: localUserId },
-    data: { isSuperAdmin: isSuper, canCreateProj: canCreate },
+    data: { isSuperAdmin: roles.isSuperAdmin, canCreateProj: roles.canCreateProj },
   });
 }
 
