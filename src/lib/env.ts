@@ -20,7 +20,10 @@ const schema = z.object({
   DATABASE_URL: z.string().min(1),
   PUBLIC_BASE_URL: z.string().url().default("http://localhost:3000"),
 
-  AUTH_SECRET: z.string().min(16),
+  // Legacy NextAuth vars. No longer used after the Hexclave migration (login is
+  // handled by Hexclave); kept optional for backward compat and removed in the
+  // post-cutover cleanup. AUTH_SECRET is no longer required.
+  AUTH_SECRET: z.string().min(16).optional(),
   AUTH_URL: z.string().url().optional(),
   AUTH_TRUST_HOST: z.string().optional(),
 

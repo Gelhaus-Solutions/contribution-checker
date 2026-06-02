@@ -32,7 +32,8 @@ The bot runs in two modes per repo:
 
 - Next.js 15 App Router + React 19
 - Prisma + PostgreSQL
-- Auth.js v5 (GitHub OAuth) for users
+- Hexclave (self-hosted Stack Auth fork, `@hexclave/next`) for human login;
+  GitHub OAuth is configured inside Hexclave. Cookie sessions + edge middleware.
 - `@octokit/app` + `@octokit/webhooks` for the App
 - `jose` for verifying GitHub Actions OIDC JWTs
 - Tailwind v4 + shadcn-style UI primitives
@@ -115,13 +116,27 @@ Audit, notifications, jobs:
 
 ## Auth & roles
 
-- Super-admin: `User.isSuperAdmin` (set on first sign-in from `SUPER_ADMINS`
-  env, or via `/admin/allowlist`).
-- Per-project: `ProjectMember.role` ∈ {`OWNER`, `ADMIN`, `REVIEWER`}.
-  `requireProjectRole(projectId, minRole)` enforces this in server components
-  and actions.
+- Login is Hexclave (`@hexclave/next`). `auth()` (`src/auth.ts`) reads the
+  Hexclave cookie session, resolves it to the local `User` row by
+  `stackUserId`, and returns the same `session.user` shape as before, so
+  consumers and `requireSession()`/`requireProjectRole()` are unchanged.
+- Onboarding gate: `requireSession()` redirects to `/welcome` until the user
+  has a linked GitHub identity (`ghId`) and a `country`. Edge `middleware.ts`
+  does a fast cookie-presence gate for `/dashboard` and `/admin`.
+- Org roles (super-admin, can-create-project) are **Hexclave project
+  permissions** (`super_admin` / `create_project`) — Hexclave is the source of
+  truth. `User.isSuperAdmin` / `User.canCreateProj` are mirror cache columns
+  read on the hot path; reconciled on sign-in from `SUPER_ADMINS`/
+  `PROJECT_CREATORS` (additive) and managed via `/admin/allowlist`, which
+  grants/revokes the Hexclave permission. The operator must define these two
+  project permissions in Hexclave.
+- Per-project: `ProjectMember.role` ∈ {`OWNER`, `ADMIN`, `REVIEWER`} stays
+  **local**. `requireProjectRole(projectId, minRole)` enforces this in server
+  components and actions.
 - Approval/denial requires REVIEWER. Settings/team/quality/people require
   ADMIN. Project deletion requires OWNER.
+- The bot's GitHub App installation (`getInstallationOctokit`,
+  `Repo.installationId`) is independent of login and unchanged.
 
 ## Adding a new quality heuristic
 

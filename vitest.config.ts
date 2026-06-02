@@ -7,9 +7,12 @@ export default defineConfig({
     environment: "node",
     env: {
       DATABASE_URL: "file:./data/test.db",
-      AUTH_SECRET: "test-auth-secret-at-least-16-chars",
       PUBLIC_BASE_URL: "http://localhost:3000",
       NODE_ENV: "test",
+      // Hexclave test config (project id must be a UUID for the SDK).
+      NEXT_PUBLIC_STACK_PROJECT_ID: "00000000-0000-4000-8000-000000000000",
+      NEXT_PUBLIC_STACK_PUBLISHABLE_CLIENT_KEY: "pck_test",
+      STACK_SECRET_SERVER_KEY: "ssk_test",
     },
   },
   resolve: {
