@@ -201,6 +201,12 @@ model Project {
   // ----- DCO (Developer Certificate of Origin): independent of CLA -----
   dcoEnabled Boolean @default(false)
 
+  // Hexclave (Stack Auth) team backing this project. Stack Auth is the source
+  // of truth for membership/roles; this maps the project to its team. Null for
+  // legacy/unmigrated projects or when team creation failed (reconciled by the
+  // backfill/webhook). Unique: one project = one team.
+  teamId String? @unique
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -273,7 +279,15 @@ model ProjectMember {
   id        String @id @default(cuid())
   projectId String
   userId    String
-  role      String // "OWNER" | "ADMIN" | "REVIEWER"
+  role      String // "OWNER" | "ADMIN" | "REVIEWER" -- bundle cache (display + owner-only checks)
+
+  // Synced cache of the member's effective LEAF permission ids (JSON string[]),
+  // mirroring the Stack Auth team-permission recursive expansion of their role
+  // bundle plus any explicit extra grants. The hot path (requireProjectPermission)
+  // reads this so gating needs no Stack Auth round-trip. Reconciled on every
+  // membership write and by the team webhook. Parse via the helper in
+  // src/lib/authz.ts (never JSON.parse-and-trust).
+  permissions String @default("[]")
 
   createdAt DateTime @default(now())
 
