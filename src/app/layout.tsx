@@ -1,6 +1,9 @@
 import type { Metadata } from "next";
+import { StackProvider, StackTheme } from "@hexclave/next";
 import "./globals.css";
 import { auth } from "@/auth";
+import { getStackServerApp } from "@/lib/stack";
+import { env } from "@/lib/env";
 import {
   setSentryUser,
   userFromSession,
@@ -24,14 +27,30 @@ export default async function RootLayout({
   // the rest of this request's render path.
   setSentryUser(user);
 
+  // Only build/mount the Hexclave provider when configured, so unconfigured
+  // deploys and the build phase don't require a live instance.
+  const stackApp = env.stackConfigured ? await getStackServerApp() : null;
+
+  const content = (
+    <>
+      <SentryUserClient user={user} />
+      {children}
+    </>
+  );
+
   return (
     <html lang="en">
       <head>
         <RuntimeEnvScript />
       </head>
       <body className="min-h-screen antialiased">
-        <SentryUserClient user={user} />
-        {children}
+        {stackApp ? (
+          <StackProvider app={stackApp}>
+            <StackTheme>{content}</StackTheme>
+          </StackProvider>
+        ) : (
+          content
+        )}
       </body>
     </html>
   );

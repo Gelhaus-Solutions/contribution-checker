@@ -16,6 +16,7 @@
     "db:reader:generate": "prisma generate --schema=prisma/sqlite-reader.prisma",
     "db:migrate:sqlite-to-postgres": "tsx prisma/migrate-sqlite-to-postgres.ts",
     "db:verify:counts": "tsx prisma/verify-counts.ts",
+    "db:backfill:stack": "tsx prisma/backfill-stack-users.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
@@ -23,6 +24,7 @@
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.7.4",
+    "@hexclave/next": "1.0.1",
     "@octokit/app": "^15.1.4",
     "@octokit/auth-app": "^7.2.1",
     "@octokit/webhooks": "^13.4.4",

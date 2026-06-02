@@ -27,7 +27,9 @@ const STATUS_VARIANT: Record<
 
 export default async function DashboardHome() {
   const session = await auth();
-  if (!session?.user) redirect("/api/auth/signin?callbackUrl=/dashboard");
+  if (!session?.user)
+    redirect("/handler/sign-in?after_auth_return_to=/dashboard");
+  if (!session.user.ghId) redirect("/welcome");
 
   const [memberships, applications] = await Promise.all([
     listProjectsForUser(session.user.id),

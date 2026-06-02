@@ -20,7 +20,10 @@ const schema = z.object({
   DATABASE_URL: z.string().min(1),
   PUBLIC_BASE_URL: z.string().url().default("http://localhost:3000"),
 
-  AUTH_SECRET: z.string().min(16),
+  // Legacy NextAuth vars. No longer used after the Hexclave migration (login is
+  // handled by Hexclave); kept optional for backward compat and removed in the
+  // post-cutover cleanup. AUTH_SECRET is no longer required.
+  AUTH_SECRET: z.string().min(16).optional(),
   AUTH_URL: z.string().url().optional(),
   AUTH_TRUST_HOST: z.string().optional(),
 
@@ -39,6 +42,21 @@ const schema = z.object({
 
   SUPER_ADMINS: z.string().optional(),
   PROJECT_CREATORS: z.string().optional(),
+
+  // Hexclave (self-hosted Stack Auth fork) — human login. Deliberately NOT
+  // prefixed NEXT_PUBLIC_: the project id and publishable client key are
+  // public, but we ship a single generic Docker image built in CI and configure
+  // it at container runtime, so nothing may be inlined at `next build`. These
+  // are read server-side at runtime and reach the browser via <StackProvider>'s
+  // toClientJson serialization (runtime), not via build-time inlining. The
+  // secret server key may live in Vault (resolved via getSecret at request
+  // time). STACK_API_URL points the SDK at the operator's self-hosted backend.
+  STACK_PROJECT_ID: z.string().optional(),
+  STACK_PUBLISHABLE_CLIENT_KEY: z.string().optional(),
+  STACK_SECRET_SERVER_KEY: z.string().optional(),
+  STACK_API_URL: z.string().url().optional(),
+  // Svix signing secret for verifying Hexclave webhooks (user.created, etc.).
+  STACK_WEBHOOK_SECRET: z.string().optional(),
 
   SMTP_HOST: z.string().optional(),
   SMTP_PORT: z.coerce.number().int().positive().default(587),
@@ -122,6 +140,13 @@ export const env = {
   oauthConfigured,
   superAdmins: csv(raw.SUPER_ADMINS).map((s) => s.toLowerCase()),
   projectCreators: csv(raw.PROJECT_CREATORS).map((s) => s.toLowerCase()),
+  // Hexclave is "configured" when the public identifiers are present and the
+  // secret server key is available (env or Vault). The auth layer short-circuits
+  // when this is false the same way the webhook path does for GitHub.
+  stackConfigured:
+    !!raw.STACK_PROJECT_ID &&
+    !!raw.STACK_PUBLISHABLE_CLIENT_KEY &&
+    presentInEnvOrVault("STACK_SECRET_SERVER_KEY"),
   githubAppConfigured:
     presentInEnvOrVault("GITHUB_APP_ID") &&
     presentInEnvOrVault("GITHUB_APP_PRIVATE_KEY") &&

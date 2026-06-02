@@ -1,211 +1,105 @@
-import NextAuth from "next-auth";
-import GitHub from "next-auth/providers/github";
-import { PrismaAdapter } from "@auth/prisma-adapter";
-import * as Sentry from "@sentry/nextjs";
-import { prisma } from "@/lib/db";
+import "server-only";
+import { redirect } from "next/navigation";
 import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
-import { getSecret } from "@/lib/vault/resolver";
-import { authConfig } from "@/auth.config";
+import { getStackServerApp } from "@/lib/stack";
+import { resolveLocalUserFromStack } from "@/lib/auth/resolve-user";
+import { captureGeoCountry, recordSignOutMetric } from "@/lib/auth/sync-user";
+import { setSentryUser } from "@/lib/observability/sentry-user";
+import type { Session } from "@/lib/auth-types";
 
-declare module "next-auth" {
-  interface Session {
-    user: {
-      id: string;
-      name?: string | null;
-      email?: string | null;
-      image?: string | null;
-      ghLogin?: string | null;
-      ghId?: number | null;
-      isSuperAdmin: boolean;
-      canCreateProj: boolean;
+export type { Session } from "@/lib/auth-types";
+
+/**
+ * Drop-in replacement for the old NextAuth `auth()`.
+ *
+ * Reads the Hexclave (Stack Auth) cookie session, resolves it to the local
+ * `User` row, and returns the SAME `{ user: {...} }` shape the rest of the app
+ * already consumes. Returns null when there is no session or Hexclave is not
+ * configured (keeps build/test and unconfigured deploys safe).
+ *
+ * Org permissions (isSuperAdmin/canCreateProj) are read from the mirrored local
+ * columns here (cheap); they are kept fresh by the onboarding flow and the
+ * Hexclave webhook (src/lib/auth/sync-user.ts).
+ */
+export async function auth(): Promise<Session | null> {
+  if (!env.stackConfigured) return null;
+  try {
+    const stackApp = await getStackServerApp();
+    const stackUser = await stackApp.getUser();
+    if (!stackUser) {
+      setSentryUser(null);
+      return null;
+    }
+
+    const u = await resolveLocalUserFromStack({
+      id: stackUser.id,
+      primaryEmail: stackUser.primaryEmail,
+      displayName: stackUser.displayName,
+      profileImageUrl: stackUser.profileImageUrl,
+    });
+
+    // Capture the country in the background (no prompt) when it's still unset:
+    // a one-time, bounded write from Hexclave's geo signal. This also covers
+    // backfilled users who skip /welcome (they already have ghId). It's a sync
+    // no-op when geo is unavailable, so the steady state costs nothing.
+    let country = u.country;
+    if (!country) {
+      try {
+        country = await captureGeoCountry(stackUser, u.id);
+      } catch (e) {
+        logger.warn(
+          { err: e, "stack.user_id": stackUser.id },
+          "auth: geo country capture failed",
+        );
+      }
+    }
+
+    setSentryUser({ id: u.id, ghLogin: u.ghLogin, email: u.email });
+
+    return {
+      user: {
+        id: u.id,
+        name: u.name,
+        email: u.email ?? "",
+        image: u.image,
+        ghId: u.ghId,
+        ghLogin: u.ghLogin,
+        country,
+        isSuperAdmin: u.isSuperAdmin,
+        canCreateProj: u.canCreateProj,
+      },
     };
+  } catch (e) {
+    logger.error({ err: e }, "auth: failed to resolve session");
+    return null;
   }
 }
 
-// NextAuth v5 supports a function-form config so we can `await` secret
-// resolution before constructing providers. The function runs once per
-// auth-handler invocation; the resolver caches secret values so the cost is
-// near-zero after the first call.
-export const { handlers, auth, signIn, signOut } = NextAuth(async () => {
-  let authGhId: string | undefined,
-    authGhSecret: string | undefined,
-    appClientId: string | undefined,
-    appClientSecret: string | undefined;
-  try {
-    [authGhId, authGhSecret, appClientId, appClientSecret] = await Promise.all([
-      getSecret("AUTH_GITHUB_ID"),
-      getSecret("AUTH_GITHUB_SECRET"),
-      getSecret("GITHUB_APP_CLIENT_ID"),
-      getSecret("GITHUB_APP_CLIENT_SECRET"),
-    ]);
-  } catch (e) {
-    // Without OAuth credentials we cannot sign anyone in. Send to Sentry as a
-    // fatal so it's loud, then re-throw so Auth.js produces a meaningful 5xx
-    // instead of the opaque OAuthCallbackError seen when client_id="" hits GH.
-    logger.fatal(
-      { err: e },
-      "auth: OAuth client credentials could not be resolved",
-    );
-    throw e;
-  }
-  const clientId = authGhId || appClientId || "";
-  const clientSecret = authGhSecret || appClientSecret || "";
+function handlerUrl(action: "sign-in" | "sign-out", returnTo?: string): string {
+  const base = `/handler/${action}`;
+  return returnTo
+    ? `${base}?after_auth_return_to=${encodeURIComponent(returnTo)}`
+    : base;
+}
 
-  if (!clientId || !clientSecret) {
-    const err = new Error(
-      "GitHub OAuth client_id/client_secret not configured (env or Vault). Sign-in will fail with OAuthCallbackError.",
-    );
-    logger.fatal(
-      {
-        err,
-        "auth.has_client_id": !!clientId,
-        "auth.has_client_secret": !!clientSecret,
-      },
-      "auth: missing OAuth credentials",
-    );
-  }
+/**
+ * Sign-in shim. The `provider` argument is accepted for call-site
+ * compatibility but ignored: Hexclave renders its own login form (GitHub plus
+ * whatever the operator enabled). Redirects to the Hexclave handler, preserving
+ * the post-auth return path used by the apply/CLA flows.
+ */
+export async function signIn(
+  _provider?: string,
+  opts?: { redirectTo?: string },
+): Promise<void> {
+  redirect(handlerUrl("sign-in", opts?.redirectTo));
+}
 
-  return {
-    ...authConfig,
-    // Pipe Auth.js's own logger into Sentry. Auth.js emits the underlying
-    // OAuth provider error (token-exchange failure, profile fetch failure,
-    // state mismatch, etc.) here before wrapping it in OAuthCallbackError, so
-    // this is the only place we can capture the real cause.
-    logger: {
-      error(error) {
-        const err =
-          error instanceof Error ? error : new Error(String(error));
-        Sentry.captureException(err, {
-          level: "error",
-          tags: { component: "auth.js" },
-          extra: { name: err.name },
-        });
-        logger.error({ err }, `auth.js: ${err.name ?? "error"}`);
-      },
-      warn(code) {
-        logger.warn({ "authjs.code": code }, `auth.js warn: ${code}`);
-      },
-      debug(message, metadata) {
-        logger.debug({ "authjs.meta": metadata }, `auth.js debug: ${message}`);
-      },
-    },
-    adapter: PrismaAdapter(prisma),
-    providers: [
-      GitHub({
-        clientId,
-        clientSecret,
-        profile(profile) {
-          return {
-            id: String(profile.id),
-            name: profile.name ?? profile.login,
-            email: profile.email,
-            image: profile.avatar_url,
-            ghId: profile.id,
-            ghLogin: profile.login,
-          };
-        },
-      }),
-    ],
-    callbacks: {
-      async session({ session, user }) {
-        try {
-          const u = await prisma.user.findUnique({
-            where: { id: user.id },
-            select: {
-              id: true,
-              name: true,
-              email: true,
-              image: true,
-              ghId: true,
-              ghLogin: true,
-              isSuperAdmin: true,
-              canCreateProj: true,
-            },
-          });
-          if (u) {
-            session.user = {
-              ...session.user,
-              id: u.id,
-              name: u.name,
-              email: u.email ?? "",
-              image: u.image,
-              ghId: u.ghId,
-              ghLogin: u.ghLogin,
-              isSuperAdmin: u.isSuperAdmin,
-              canCreateProj: u.canCreateProj,
-            };
-            Sentry.setUser({
-              id: u.id,
-              username: u.ghLogin ?? undefined,
-              email: u.email ?? undefined,
-            });
-          }
-          return session;
-        } catch (e) {
-          logger.error(
-            { err: e, "auth.user_id": user?.id },
-            "auth: session callback failed",
-          );
-          return session;
-        }
-      },
-    },
-    events: {
-      async signIn({ user, account, profile, isNewUser }) {
-        Sentry.metrics.count("auth.signin", 1, {
-          attributes: {
-            provider: account?.provider ?? "unknown",
-            "auth.is_new_user": Boolean(isNewUser),
-          },
-        });
-
-        if (account?.provider !== "github" || !profile) return;
-        const ghId =
-          typeof profile.id === "number" ? profile.id : Number(profile.id);
-        const ghLogin = String((profile as { login?: string }).login ?? "");
-        if (!ghLogin || !Number.isFinite(ghId)) {
-          logger.warn(
-            { "auth.user_id": user?.id, "github.login": ghLogin, "github.id": ghId },
-            "auth: signin profile missing ghId or ghLogin",
-          );
-          return;
-        }
-
-        const lowerLogin = ghLogin.toLowerCase();
-        const shouldBeSuper = env.superAdmins.includes(lowerLogin);
-        const shouldBeCreator =
-          shouldBeSuper || env.projectCreators.includes(lowerLogin);
-
-        try {
-          await prisma.user.update({
-            where: { id: user.id! },
-            data: {
-              ghId,
-              ghLogin,
-              ...(shouldBeSuper ? { isSuperAdmin: true } : {}),
-              ...(shouldBeCreator ? { canCreateProj: true } : {}),
-            },
-          });
-        } catch (e) {
-          // Most likely a P2002 unique-violation on ghId/ghLogin (same GH
-          // identity already attached to another User row). Surface to Sentry:
-          // this is exactly the kind of OAuthCallbackError trigger that's
-          // hard to diagnose without a captured exception.
-          logger.error(
-            {
-              err: e,
-              "auth.user_id": user?.id,
-              "github.login": ghLogin,
-              "github.id": ghId,
-            },
-            "auth: signin event prisma update failed",
-          );
-        }
-      },
-      async signOut() {
-        Sentry.metrics.count("auth.signout", 1);
-      },
-    },
-  };
-});
+export async function signOut(opts?: { redirectTo?: string }): Promise<void> {
+  // Fired here (the app's "Sign out" button calls this shim) since Hexclave has
+  // no server-side sign-out hook in our app. Emit before the redirect throws.
+  recordSignOutMetric();
+  setSentryUser(null);
+  redirect(handlerUrl("sign-out", opts?.redirectTo));
+}
