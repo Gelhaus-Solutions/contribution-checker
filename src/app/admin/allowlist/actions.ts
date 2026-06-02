@@ -3,8 +3,10 @@
 import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
+import { recordAudit } from "@/lib/audit";
 import { requireSuperAdmin } from "@/lib/authz";
 import { setOrgPermission } from "@/lib/auth/sync-user";
+import { ensureInstanceAdminTeam } from "@/lib/stack-provisioning";
 import { CREATE_PROJECT_PERMISSION, SUPER_ADMIN_PERMISSION } from "@/lib/stack";
 
 // Org roles live in Hexclave (source of truth). These actions write the
@@ -71,14 +73,32 @@ export async function toggleSuperAdmin(formData: FormData) {
     select: { isSuperAdmin: true, stackUserId: true },
   });
   if (!u) throw new Error("User not found");
-  const next = !u.isSuperAdmin;
-  if (u.stackUserId) {
-    await setOrgPermission(u.stackUserId, SUPER_ADMIN_PERMISSION, next);
-    // Granting super always grants creator; revoking super preserves creator.
-    if (next) {
-      await setOrgPermission(u.stackUserId, CREATE_PROJECT_PERMISSION, true);
-    }
+  if (!u.stackUserId) {
+    throw new Error(
+      "This user must sign in once before their super-admin status can be changed."
+    );
   }
+  const next = !u.isSuperAdmin;
+
+  // Super-admin is membership in the Instance Admin team (the live authority).
+  const team = await ensureInstanceAdminTeam();
+  if (next) {
+    await team.addUser(u.stackUserId);
+    await setOrgPermission(u.stackUserId, CREATE_PROJECT_PERMISSION, true);
+  } else {
+    await team.removeUser(u.stackUserId);
+    // Also revoke any break-glass global super_admin grant so revocation sticks
+    // (the cache is then re-mirrored from the live team membership by auth()).
+    await setOrgPermission(u.stackUserId, SUPER_ADMIN_PERMISSION, false);
+  }
+
+  await recordAudit({
+    projectId: null,
+    actorId: session.user.id,
+    kind: next ? "user.superadmin_granted" : "user.superadmin_revoked",
+    payload: { userId },
+  });
+
   await prisma.user.update({
     where: { id: userId },
     data: {

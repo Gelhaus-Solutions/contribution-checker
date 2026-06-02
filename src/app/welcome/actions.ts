@@ -35,12 +35,10 @@ export async function finishOnboarding(_formData: FormData): Promise<void> {
   try {
     // 1. GitHub identity (also resolves the lazy-link merge); returns the local
     //    user id the session is now bound to.
-    const { userId, ghLogin } = await syncGitHubIdentity(
-      stackUser,
-      session.user.id,
-    );
-    // 2. Org permissions from env CSVs (additive) + mirror to local columns.
-    await reconcileOrgPermissions(stackUser, ghLogin, userId);
+    const { userId } = await syncGitHubIdentity(stackUser, session.user.id);
+    // 2. Org roles (Instance Admin team membership / global permissions) mirrored
+    //    to the local cache columns.
+    await reconcileOrgPermissions(stackUser, userId);
     // 3. Country (background, best-effort) -> Hexclave metadata + User.country.
     await captureGeoCountry(stackUser, userId);
   } catch (e) {

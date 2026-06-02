@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/db";
-import { requireProjectRole, roleAtLeast } from "@/lib/authz";
+import { requireProjectPermission, roleAtLeast } from "@/lib/authz";
 import { parseFormSchema } from "@/lib/applications/schema";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { SubmitButton } from "@/components/ui/submit-button";
@@ -13,7 +13,7 @@ export default async function ProjectFormPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const { session, role } = await requireProjectRole(id, "REVIEWER");
+  const { session, role } = await requireProjectPermission(id, "project_form_view");
   const canEdit = roleAtLeast(role, "ADMIN");
 
   const project = await prisma.project.findUnique({

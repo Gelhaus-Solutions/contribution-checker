@@ -2,7 +2,7 @@ import Link from "next/link";
 import Image from "next/image";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
-import { requireProjectRole } from "@/lib/authz";
+import { requireProjectPermission } from "@/lib/authz";
 import {
   Card,
   CardContent,
@@ -38,7 +38,7 @@ export default async function ProjectApplications({
 }) {
   const { id } = await params;
   const sp = await searchParams;
-  await requireProjectRole(id, "REVIEWER");
+  await requireProjectPermission(id, "project_applications_review");
 
   const { page, perPage, skip, take, q } = parsePageParams(sp);
 

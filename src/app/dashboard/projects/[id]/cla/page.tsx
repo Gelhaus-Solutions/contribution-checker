@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { prisma } from "@/lib/db";
-import { requireProjectRole } from "@/lib/authz";
+import { requireProjectPermission } from "@/lib/authz";
 import {
   Card,
   CardContent,
@@ -33,7 +33,7 @@ export default async function ClaSettings({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  await requireProjectRole(id, "ADMIN");
+  await requireProjectPermission(id, "project_cla_manage");
 
   const project = await prisma.project.findUnique({ where: { id } });
   if (!project) return null;

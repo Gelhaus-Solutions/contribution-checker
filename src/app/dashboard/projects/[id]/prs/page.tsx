@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/db";
-import { requireProjectRole, roleAtLeast } from "@/lib/authz";
+import { requireProjectPermission, roleAtLeast } from "@/lib/authz";
 import {
   Card,
   CardContent,
@@ -34,7 +34,7 @@ export default async function ProjectPRs({
 }) {
   const { id } = await params;
   const sp = await searchParams;
-  const { role } = await requireProjectRole(id, "REVIEWER");
+  const { role } = await requireProjectPermission(id, "project_prs_view");
   const canEdit = roleAtLeast(role, "ADMIN");
 
   const project = await prisma.project.findUnique({

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { prisma } from "@/lib/db";
-import { requireProjectRole } from "@/lib/authz";
+import { requireProjectPermission } from "@/lib/authz";
 import {
   Card,
   CardContent,
@@ -25,7 +25,7 @@ export default async function ProjectOverview({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  await requireProjectRole(id, "REVIEWER");
+  await requireProjectPermission(id, "project_overview_view");
 
   const [counts, recent] = await Promise.all([
     prisma.application.groupBy({
