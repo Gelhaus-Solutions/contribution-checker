@@ -16,6 +16,7 @@
     "db:reader:generate": "prisma generate --schema=prisma/sqlite-reader.prisma",
     "db:migrate:sqlite-to-postgres": "tsx prisma/migrate-sqlite-to-postgres.ts",
     "db:verify:counts": "tsx prisma/verify-counts.ts",
+    "db:backfill:stack": "tsx prisma/backfill-stack-users.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",

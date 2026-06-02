@@ -2,6 +2,16 @@ import "server-only";
 import { StackServerApp } from "@hexclave/next";
 import { getSecret } from "@/lib/vault/resolver";
 
+// Re-export the shared constants so existing importers of "@/lib/stack" keep
+// working; definitions live in the non-server-only constants module so the
+// backfill script can use them too.
+export {
+  SUPER_ADMIN_PERMISSION,
+  CREATE_PROJECT_PERMISSION,
+  GITHUB_PROVIDER_CONFIG_ID,
+  GITHUB_OAUTH_SCOPES,
+} from "@/lib/auth/constants";
+
 /**
  * Hexclave (self-hosted Stack Auth fork) server app. This is the single place
  * the app talks to Hexclave with server credentials.
@@ -17,15 +27,6 @@ import { getSecret } from "@/lib/vault/resolver";
  * migration). The same instance is passed to `<StackProvider>` in the root
  * layout, so the browser only ever receives the client-safe projection.
  */
-
-/** Project-level Hexclave permission ids (global, not team-scoped). */
-export const SUPER_ADMIN_PERMISSION = "super_admin";
-export const CREATE_PROJECT_PERMISSION = "create_project";
-
-/** GitHub provider config id in Hexclave + the OAuth scopes we require so the
- * connected-account token can read the numeric id, login, and primary email. */
-export const GITHUB_PROVIDER_CONFIG_ID = "github";
-export const GITHUB_OAUTH_SCOPES = ["read:user", "user:email"];
 
 let cached: Promise<StackServerApp<true>> | null = null;
 
