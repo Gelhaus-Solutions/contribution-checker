@@ -121,8 +121,12 @@ Audit, notifications, jobs:
   `stackUserId`, and returns the same `session.user` shape as before, so
   consumers and `requireSession()`/`requireProjectRole()` are unchanged.
 - Onboarding gate: `requireSession()` redirects to `/welcome` until the user
-  has a linked GitHub identity (`ghId`) and a `country`. Edge `middleware.ts`
-  does a fast cookie-presence gate for `/dashboard` and `/admin`.
+  has a linked GitHub identity (`ghId`); `/welcome` forces a GitHub connect for
+  non-GitHub signups. The `country` code is captured automatically in the
+  background (Hexclave's best-effort geo `countryCode`, mirrored to
+  `User.country` by `captureGeoCountry`) — the user is never prompted, and it is
+  not gated on. Edge `middleware.ts` does a fast cookie-presence gate for
+  `/dashboard` and `/admin`.
 - Org roles (super-admin, can-create-project) are **Hexclave project
   permissions** (`super_admin` / `create_project`) — Hexclave is the source of
   truth. `User.isSuperAdmin` / `User.canCreateProj` are mirror cache columns

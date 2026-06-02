@@ -4,7 +4,7 @@ import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
 import { getStackServerApp } from "@/lib/stack";
 import { resolveLocalUserFromStack } from "@/lib/auth/resolve-user";
-import { recordSignOutMetric } from "@/lib/auth/sync-user";
+import { captureGeoCountry, recordSignOutMetric } from "@/lib/auth/sync-user";
 import { setSentryUser } from "@/lib/observability/sentry-user";
 import type { Session } from "@/lib/auth-types";
 
@@ -39,6 +39,22 @@ export async function auth(): Promise<Session | null> {
       profileImageUrl: stackUser.profileImageUrl,
     });
 
+    // Capture the country in the background (no prompt) when it's still unset:
+    // a one-time, bounded write from Hexclave's geo signal. This also covers
+    // backfilled users who skip /welcome (they already have ghId). It's a sync
+    // no-op when geo is unavailable, so the steady state costs nothing.
+    let country = u.country;
+    if (!country) {
+      try {
+        country = await captureGeoCountry(stackUser, u.id);
+      } catch (e) {
+        logger.warn(
+          { err: e, "stack.user_id": stackUser.id },
+          "auth: geo country capture failed",
+        );
+      }
+    }
+
     setSentryUser({ id: u.id, ghLogin: u.ghLogin, email: u.email });
 
     return {
@@ -49,7 +65,7 @@ export async function auth(): Promise<Session | null> {
         image: u.image,
         ghId: u.ghId,
         ghLogin: u.ghLogin,
-        country: u.country,
+        country,
         isSuperAdmin: u.isSuperAdmin,
         canCreateProj: u.canCreateProj,
       },

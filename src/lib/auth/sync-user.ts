@@ -189,28 +189,28 @@ export async function reconcileOrgPermissions(
 }
 
 /**
- * Persist the onboarding country: ISO 3166-1 alpha-2, written to Hexclave
- * clientReadOnlyMetadata (canonical, with an `onboarded` flag for the edge/UX)
- * and mirrored to User.country.
+ * Capture the country code in the background (no user prompt): use Hexclave's
+ * best-effort geo `countryCode` (captured from request geo headers at sign-up).
+ * When it resolves to a valid ISO 3166-1 alpha-2 code, write it to Hexclave
+ * clientReadOnlyMetadata (canonical) and mirror it to User.country. When geo is
+ * unavailable/invalid we leave it unset rather than asking the user.
  */
-export async function setOnboardingCountry(
+export async function captureGeoCountry(
   stackUser: ServerUser,
   localUserId: string,
-  country: string,
-): Promise<void> {
-  const code = country.trim().toUpperCase();
-  if (!isValidCountryCode(code)) {
-    throw new Error("Country must be a valid ISO 3166-1 alpha-2 code");
-  }
+): Promise<string | null> {
+  const code = (stackUser.countryCode ?? "").trim().toUpperCase();
+  if (!isValidCountryCode(code)) return null;
   const existing =
     (stackUser.clientReadOnlyMetadata as Record<string, unknown> | null) ?? {};
   await stackUser.update({
-    clientReadOnlyMetadata: { ...existing, country: code, onboarded: true },
+    clientReadOnlyMetadata: { ...existing, country: code },
   });
   await prisma.user.update({
     where: { id: localUserId },
     data: { country: code },
   });
+  return code;
 }
 
 /** Emit the auth.signin metric (preserved from the old NextAuth signIn event). */

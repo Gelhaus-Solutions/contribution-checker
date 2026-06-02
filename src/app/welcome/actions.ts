@@ -3,26 +3,24 @@
 import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { getStackServerApp } from "@/lib/stack";
-import { isValidCountryCode } from "@/lib/countries";
 import { logger } from "@/lib/logger";
 import {
+  captureGeoCountry,
   reconcileOrgPermissions,
-  setOnboardingCountry,
   syncGitHubIdentity,
 } from "@/lib/auth/sync-user";
 
 /**
- * Complete onboarding: bind the GitHub identity (ghId/ghLogin) to the local
- * row, reconcile org permissions, and persist the country code into Hexclave +
- * the local mirror. By the time this runs the welcome client has already forced
- * the GitHub connection, so the connected-account token is available.
+ * Complete onboarding (no user input): bind the GitHub identity (ghId/ghLogin)
+ * to the local row, reconcile org permissions, and capture the country code in
+ * the background from Hexclave's geo signal. By the time this runs the welcome
+ * client has already ensured the GitHub connection, so the connected-account
+ * token is available server-side (read-only, no cookie write).
+ *
+ * Takes a FormData arg because it's invoked as a `<form action>` (the form has
+ * no fields; it's just the submit trigger), but reads nothing from it.
  */
-export async function finishOnboarding(formData: FormData): Promise<void> {
-  const country = String(formData.get("country") ?? "").trim();
-  if (!isValidCountryCode(country)) {
-    redirect("/welcome?error=country");
-  }
-
+export async function finishOnboarding(_formData: FormData): Promise<void> {
   const session = await auth();
   if (!session?.user) {
     redirect("/handler/sign-in?after_auth_return_to=/welcome");
@@ -43,8 +41,8 @@ export async function finishOnboarding(formData: FormData): Promise<void> {
     );
     // 2. Org permissions from env CSVs (additive) + mirror to local columns.
     await reconcileOrgPermissions(stackUser, ghLogin, userId);
-    // 3. Country -> Hexclave clientReadOnlyMetadata + User.country.
-    await setOnboardingCountry(stackUser, userId, country);
+    // 3. Country (background, best-effort) -> Hexclave metadata + User.country.
+    await captureGeoCountry(stackUser, userId);
   } catch (e) {
     logger.error(
       { err: e, "stack.user_id": stackUser.id },

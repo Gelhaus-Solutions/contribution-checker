@@ -92,8 +92,10 @@ async function backfillOne(
   }
 
   const email = user.email?.trim() || null;
+  // User.country is a new column (null for existing users at migration time);
+  // country is captured in the background from geo on first sign-in.
   const clientReadOnlyMetadata = user.country
-    ? { country: user.country.toUpperCase(), onboarded: true }
+    ? { country: user.country.toUpperCase() }
     : {};
 
   if (DRY_RUN) {
