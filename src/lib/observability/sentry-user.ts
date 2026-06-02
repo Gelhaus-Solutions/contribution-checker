@@ -1,5 +1,5 @@
 import * as Sentry from "@sentry/nextjs";
-import type { Session } from "next-auth";
+import type { Session } from "@/lib/auth-types";
 
 export type SentryUser = {
   id: string;

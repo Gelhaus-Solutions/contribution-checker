@@ -12,8 +12,8 @@ import { prisma } from "@/lib/db";
 export async function GET(req: Request) {
   const session = await auth();
   if (!session?.user) {
-    const url = new URL("/api/auth/signin", req.url);
-    url.searchParams.set("callbackUrl", req.url);
+    const url = new URL("/handler/sign-in", req.url);
+    url.searchParams.set("after_auth_return_to", req.url);
     return NextResponse.redirect(url);
   }
 
