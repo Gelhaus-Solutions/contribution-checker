@@ -29,7 +29,9 @@ export function cspReportEndpoint(): string | null {
 
 export function buildCsp(): string {
   // The browser-side Hexclave SDK (mounted app-wide via <StackProvider>) calls
-  // the backend directly, so its origin must be allowed in connect-src.
+  // the backend directly, so its origin must be allowed in connect-src. The SDK
+  // also bundles Stripe (Hexclave billing), which loads js.stripe.com and talks
+  // to api.stripe.com / renders Stripe iframes, so those hosts are allowed too.
   const stackOrigin = originOf(process.env.STACK_API_URL);
   const connectSrc = [
     "'self'",
@@ -37,6 +39,7 @@ export function buildCsp(): string {
     "https://*.ingest.sentry.io",
     "https://*.ingest.us.sentry.io",
     "https://*.ingest.de.sentry.io",
+    "https://api.stripe.com",
     stackOrigin,
   ]
     .filter(Boolean)
@@ -46,11 +49,12 @@ export function buildCsp(): string {
     "default-src 'self'",
     "img-src 'self' https://avatars.githubusercontent.com data: blob:",
     "media-src 'self' blob:",
-    "script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:",
+    "script-src 'self' 'unsafe-inline' 'unsafe-eval' blob: https://js.stripe.com",
     "worker-src 'self' blob:",
     "style-src 'self' 'unsafe-inline'",
     "font-src 'self' data:",
     `connect-src ${connectSrc}`,
+    "frame-src 'self' https://js.stripe.com https://hooks.stripe.com",
     "frame-ancestors 'none'",
     "base-uri 'self'",
     "form-action 'self'",
