@@ -1,5 +1,4 @@
 import "server-only";
-import { cache } from "react";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { env } from "@/lib/env";
@@ -27,11 +26,14 @@ export type { Session } from "@/lib/auth-types";
  * Org roles (isSuperAdmin/canCreateProj) are resolved LIVE from Hexclave each
  * request (env CSV + project permissions + team metadata + whitelisted-team
  * team permissions; see resolveOrgRoles) so team-membership changes take effect
- * on the next request, and the local cache columns are kept in sync. Wrapped in
- * React `cache()` so the (potentially several) Hexclave round-trips run once
- * per request even though auth() is called from many components.
+ * on the next request, and the local cache columns are kept in sync. The
+ * Hexclave SDK already dedupes getUser()/permission/team reads per request, so
+ * calling auth() from many components is cheap. (Do NOT wrap this in
+ * React.cache(): getUser() reads cookies(), and Next 15 throws when a dynamic
+ * API is used inside a cache scope -> auth() would throw and every protected
+ * page would bounce to sign-in.)
  */
-export const auth = cache(async function auth(): Promise<Session | null> {
+export async function auth(): Promise<Session | null> {
   if (!env.stackConfigured) return null;
   try {
     const stackApp = await getStackServerApp();
@@ -105,7 +107,7 @@ export const auth = cache(async function auth(): Promise<Session | null> {
     logger.error({ err: e }, "auth: failed to resolve session");
     return null;
   }
-});
+}
 
 function handlerUrl(action: "sign-in" | "sign-out", returnTo?: string): string {
   const base = `/handler/${action}`;
