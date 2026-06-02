@@ -1,6 +1,11 @@
 import Link from "next/link";
 import { requireSession } from "@/lib/authz";
-import { listNotifications } from "@/lib/notifications/inbox";
+import {
+  KIND_LABELS,
+  listNotifications,
+  notificationHref,
+  parseNotificationPayload,
+} from "@/lib/notifications/inbox";
 import { SiteHeader } from "@/components/site-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { SubmitButton } from "@/components/ui/submit-button";
@@ -8,24 +13,6 @@ import { SearchInput } from "@/components/ui/search-input";
 import { Pagination } from "@/components/ui/pagination";
 import { parsePageParams, type SearchParamRecord } from "@/lib/pagination";
 import { markAllReadAction } from "./actions";
-
-const KIND_LABELS: Record<string, string> = {
-  "application.submitted": "New application",
-  "application.approved": "Application approved",
-  "application.denied": "Application denied",
-  "application.revoked": "Approval revoked",
-  "application.note_added": "Note added",
-  "application.awaiting_review": "Application awaiting review",
-  "project.invited": "Invited to a project",
-  "pr.blocked": "PR blocked",
-  "cla.ccla_signed": "Corporate CLA signed",
-  "cla.ccla_approved": "Corporate CLA approved",
-  "cla.ccla_rejected": "Corporate CLA rejected",
-  "cla.roster_changed": "Corporate CLA roster changed",
-  "cla.roster_disputed": "Corporate CLA membership disputed",
-  "cla.signature_required": "Sign the CLA",
-  "cla.resign_required": "Re-sign the CLA",
-};
 
 export default async function NotificationsPage({
   searchParams,
@@ -76,28 +63,10 @@ export default async function NotificationsPage({
             ) : (
               <ul className="divide-y divide-border">
                 {items.map((n) => {
-                  const payload = (() => {
-                    try {
-                      return JSON.parse(n.payload) as Record<string, unknown>;
-                    } catch {
-                      return {} as Record<string, unknown>;
-                    }
-                  })();
-                  const projectId =
-                    typeof payload.projectId === "string"
-                      ? payload.projectId
-                      : null;
-                  const projectSlug =
-                    typeof payload.projectSlug === "string"
-                      ? payload.projectSlug
-                      : null;
+                  const payload = parseNotificationPayload(n.payload);
                   const projectName =
                     typeof payload.projectName === "string"
                       ? payload.projectName
-                      : null;
-                  const applicationId =
-                    typeof payload.applicationId === "string"
-                      ? payload.applicationId
                       : null;
                   const ghLogin =
                     typeof payload.ghLogin === "string"
@@ -106,23 +75,7 @@ export default async function NotificationsPage({
                   const reason =
                     typeof payload.reason === "string" ? payload.reason : null;
 
-                  // Reviewer-side notifications go to the application detail
-                  // page; CLA-sign reminders go to the standalone signing page;
-                  // other applicant-side go to the public apply page.
-                  const href =
-                    n.kind === "application.submitted" &&
-                    projectId &&
-                    applicationId
-                      ? `/dashboard/projects/${projectId}/applications/${applicationId}`
-                      : n.kind === "project.invited" && projectId
-                        ? `/dashboard/projects/${projectId}`
-                        : (n.kind === "cla.signature_required" ||
-                              n.kind === "cla.resign_required") &&
-                            projectSlug
-                          ? `/p/${projectSlug}/cla`
-                          : projectSlug
-                            ? `/p/${projectSlug}`
-                            : null;
+                  const href = notificationHref(n.kind, payload);
 
                   const body = (
                     <>

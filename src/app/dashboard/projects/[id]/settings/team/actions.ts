@@ -2,11 +2,13 @@
 
 import { z } from "zod";
 import { revalidatePath } from "next/cache";
-import { requireProjectRole } from "@/lib/authz";
+import { PROJECT_LEAF_PERMISSIONS } from "@/lib/auth/constants";
+import { requireProjectPermission, requireProjectRole } from "@/lib/authz";
 import {
   inviteMemberByGhLogin,
   changeMemberRole,
   removeMember,
+  setMemberExtraPermission,
 } from "@/lib/teams";
 
 const roleEnum = z.enum(["OWNER", "ADMIN", "REVIEWER"]);
@@ -74,6 +76,35 @@ export async function removeMemberAction(formData: FormData) {
     projectId: parsed.projectId,
     actorId: session.user.id,
     memberId: parsed.memberId,
+  });
+  revalidatePath(`/dashboard/projects/${parsed.projectId}/settings/team`);
+}
+
+const setPermissionSchema = z.object({
+  projectId: z.string().min(1),
+  memberId: z.string().min(1),
+  permission: z.enum(PROJECT_LEAF_PERMISSIONS),
+  granted: z.boolean(),
+});
+
+/** Grant/revoke a single explicit extra-access leaf permission for a member. */
+export async function setMemberPermissionAction(input: {
+  projectId: string;
+  memberId: string;
+  permission: string;
+  granted: boolean;
+}) {
+  const parsed = setPermissionSchema.parse(input);
+  const { session } = await requireProjectPermission(
+    parsed.projectId,
+    "project_members_manage",
+  );
+  await setMemberExtraPermission({
+    projectId: parsed.projectId,
+    actorId: session.user.id,
+    memberId: parsed.memberId,
+    permission: parsed.permission,
+    granted: parsed.granted,
   });
   revalidatePath(`/dashboard/projects/${parsed.projectId}/settings/team`);
 }
