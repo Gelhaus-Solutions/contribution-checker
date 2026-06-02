@@ -25,34 +25,13 @@ const config: NextConfig = {
   },
   async headers() {
     const isHttps = (process.env.PUBLIC_BASE_URL ?? "").startsWith("https://");
-    const cspReportEndpoint = (() => {
-      const raw = process.env.SENTRY_CSP_ENDPOINT;
-      if (!raw) return null;
-      try {
-        return new URL(raw).toString();
-      } catch {
-        return null;
-      }
-    })();
-    const directives = [
-      "default-src 'self'",
-      "img-src 'self' https://avatars.githubusercontent.com data: blob:",
-      "media-src 'self' blob:",
-      "script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:",
-      "worker-src 'self' blob:",
-      "style-src 'self' 'unsafe-inline'",
-      "font-src 'self' data:",
-      "connect-src 'self' https://*.sentry.io https://*.ingest.sentry.io https://*.ingest.us.sentry.io https://*.ingest.de.sentry.io",
-      "frame-ancestors 'none'",
-      "base-uri 'self'",
-      "form-action 'self'",
-      "object-src 'none'",
-    ];
-    if (cspReportEndpoint) {
-      directives.push(`report-uri ${cspReportEndpoint}`);
-      directives.push(`report-to csp-endpoint`);
-    }
-    const csp = directives.join("; ");
+    // The Content-Security-Policy is deliberately NOT set here: these header
+    // rules are baked into routes-manifest.json at `next build`, but the CSP's
+    // connect-src must include the operator's Hexclave backend (STACK_API_URL),
+    // which is only known at container runtime in our generic CI image. The CSP
+    // (and its Report-To) is therefore set per-request in src/middleware.ts
+    // (see src/lib/security/csp.ts). The static headers below are constant and
+    // safe to bake.
     return [
       {
         source: "/:path*",
@@ -62,19 +41,6 @@ const config: NextConfig = {
           { key: "X-Frame-Options", value: "DENY" },
           { key: "X-Content-Type-Options", value: "nosniff" },
           { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
-          { key: "Content-Security-Policy", value: csp },
-          ...(cspReportEndpoint
-            ? [
-                {
-                  key: "Report-To",
-                  value: JSON.stringify({
-                    group: "csp-endpoint",
-                    max_age: 10886400,
-                    endpoints: [{ url: cspReportEndpoint }],
-                  }),
-                },
-              ]
-            : []),
           ...(isHttps
             ? [
                 {
