@@ -75,16 +75,35 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false }, { status: 503 });
   }
 
-  const id = req.headers.get("webhook-id");
-  const timestamp = req.headers.get("webhook-timestamp");
-  const signature = req.headers.get("webhook-signature");
+  // Accept both the Standard-Webhooks header names (webhook-*) and Svix's
+  // default header names (svix-*); Hexclave uses Svix, which sends svix-*.
+  const id = req.headers.get("webhook-id") ?? req.headers.get("svix-id");
+  const timestamp =
+    req.headers.get("webhook-timestamp") ?? req.headers.get("svix-timestamp");
+  const signature =
+    req.headers.get("webhook-signature") ?? req.headers.get("svix-signature");
   if (!id || !timestamp || !signature) {
+    logger.warn(
+      {
+        "has.id": !!id,
+        "has.timestamp": !!timestamp,
+        "has.signature": !!signature,
+      },
+      "stack webhook: missing signature headers (expected webhook-*/svix-*)",
+    );
     return NextResponse.json({ ok: false }, { status: 401 });
   }
 
   // Reject stale deliveries (replay protection).
   const ts = Number(timestamp);
-  if (!Number.isFinite(ts) || Math.abs(Date.now() / 1000 - ts) > TIMESTAMP_TOLERANCE_S) {
+  if (
+    !Number.isFinite(ts) ||
+    Math.abs(Date.now() / 1000 - ts) > TIMESTAMP_TOLERANCE_S
+  ) {
+    logger.warn(
+      { "stack.webhook_id": id, "webhook.timestamp": timestamp },
+      "stack webhook: timestamp outside tolerance (clock skew?)",
+    );
     return NextResponse.json({ ok: false }, { status: 401 });
   }
 
@@ -93,6 +112,10 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false }, { status: 413 });
   }
   if (!verifySvixSignature(secret, id, timestamp, signature, body)) {
+    logger.warn(
+      { "stack.webhook_id": id },
+      "stack webhook: signature verification failed (check STACK_WEBHOOK_SECRET matches the endpoint secret)",
+    );
     return NextResponse.json({ ok: false }, { status: 401 });
   }
 

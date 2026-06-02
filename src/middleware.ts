@@ -25,7 +25,8 @@ export function middleware(): NextResponse {
 }
 
 export const config = {
-  // All document routes (not Next internals/static assets) so the CSP covers
-  // every page (the Hexclave client SDK is mounted app-wide via <StackProvider>).
-  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
+  // All document routes (not Next internals/static assets, and not /api/* which
+  // returns JSON and needs no CSP) so the CSP covers every page (the Hexclave
+  // client SDK is mounted app-wide via <StackProvider>).
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|api/).*)"],
 };
