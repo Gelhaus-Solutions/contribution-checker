@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
+import { auth } from "@/auth";
+import { prisma } from "@/lib/db";
 import { env } from "@/lib/env";
 import { getStackServerApp } from "@/lib/stack";
 
@@ -7,12 +9,10 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * TEMPORARY diagnostic for the sign-in loop. Reports what the SERVER sees:
- * whether Hexclave is configured, which hexclave/stack cookies reached the
- * server, and whether getStackServerApp().getUser() resolves a user. Returns
- * cookie NAMES only (no values) and no secrets. Remove once the loop is solved.
- *
- * Visit /api/debug/whoami in the same browser right after signing in.
+ * TEMPORARY diagnostic for the sign-in loop. Compares raw getUser() with the
+ * full auth() result, and shows how the Hexclave user maps to local User rows
+ * (the loop is most likely auth() returning null/ghId-less, or a mislinked
+ * row). No secrets / no cookie values. Remove once solved.
  */
 export async function GET() {
   const cookieStore = await cookies();
@@ -21,29 +21,61 @@ export async function GET() {
     .map((c) => c.name)
     .filter((n) => /hexclave|stack/i.test(n));
 
-  let hasUser = false;
-  let userId: string | null = null;
+  // 1. Raw getUser (works per the previous test).
+  let stackUserId: string | null = null;
   let primaryEmail: string | null = null;
-  let error: string | null = null;
-
+  let getUserError: string | null = null;
   try {
     if (env.stackConfigured) {
-      const stackUser = await (await getStackServerApp()).getUser();
-      hasUser = !!stackUser;
-      userId = stackUser?.id ?? null;
-      primaryEmail = stackUser?.primaryEmail ?? null;
+      const su = await (await getStackServerApp()).getUser();
+      stackUserId = su?.id ?? null;
+      primaryEmail = su?.primaryEmail ?? null;
     }
   } catch (e) {
-    error = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
+    getUserError = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
   }
+
+  // 2. The full auth() the pages actually use (this is what /dashboard checks).
+  let sessionUser: unknown = null;
+  let authError: string | null = null;
+  try {
+    const session = await auth();
+    sessionUser = session?.user
+      ? {
+          id: session.user.id,
+          ghId: session.user.ghId,
+          ghLogin: session.user.ghLogin,
+          isSuperAdmin: session.user.isSuperAdmin,
+          canCreateProj: session.user.canCreateProj,
+        }
+      : null;
+  } catch (e) {
+    authError = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
+  }
+
+  // 3. Local linkage.
+  const byStackId = stackUserId
+    ? await prisma.user.findMany({
+        where: { stackUserId },
+        select: { id: true, ghId: true, ghLogin: true, email: true },
+      })
+    : [];
+  const byEmail = primaryEmail
+    ? await prisma.user.findMany({
+        where: { email: primaryEmail },
+        select: { id: true, ghId: true, ghLogin: true, stackUserId: true },
+      })
+    : [];
 
   return NextResponse.json({
     stackConfigured: env.stackConfigured,
-    hasStackApiUrl: !!process.env.STACK_API_URL,
     cookieNames,
-    hasUser,
-    userId,
+    stackUserId,
     primaryEmail,
-    error,
+    getUserError,
+    sessionUser, // null here = auth() returned null (its catch swallowed a throw)
+    authError, // populated only if auth() threw OUT (shouldn't; it catches)
+    localRowsLinkedToThisStackUser: byStackId,
+    localRowsWithThisEmail: byEmail,
   });
 }
