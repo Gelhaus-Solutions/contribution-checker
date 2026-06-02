@@ -220,6 +220,15 @@ export function recordSignInMetric(isNewUser: boolean): void {
   });
 }
 
+/** Emit the auth.signout metric (preserved from the old NextAuth signOut event).
+ * Fired from the signOut() shim, which is what the app's "Sign out" button
+ * calls (the same trigger the old metric had). */
+export function recordSignOutMetric(): void {
+  Sentry.metrics.count("auth.signout", 1, {
+    attributes: { provider: "hexclave" },
+  });
+}
+
 /**
  * Grant or revoke a project-level Hexclave permission for a linked user
  * (Hexclave is the source of truth). Used by /admin/allowlist. Idempotent: only

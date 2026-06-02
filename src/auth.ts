@@ -4,6 +4,7 @@ import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
 import { getStackServerApp } from "@/lib/stack";
 import { resolveLocalUserFromStack } from "@/lib/auth/resolve-user";
+import { recordSignOutMetric } from "@/lib/auth/sync-user";
 import { setSentryUser } from "@/lib/observability/sentry-user";
 import type { Session } from "@/lib/auth-types";
 
@@ -80,5 +81,9 @@ export async function signIn(
 }
 
 export async function signOut(opts?: { redirectTo?: string }): Promise<void> {
+  // Fired here (the app's "Sign out" button calls this shim) since Hexclave has
+  // no server-side sign-out hook in our app. Emit before the redirect throws.
+  recordSignOutMetric();
+  setSentryUser(null);
   redirect(handlerUrl("sign-out", opts?.redirectTo));
 }
