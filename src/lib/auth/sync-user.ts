@@ -8,6 +8,7 @@ import {
   CREATE_PROJECT_PERMISSION,
   GITHUB_OAUTH_SCOPES,
   GITHUB_PROVIDER_CONFIG_ID,
+  getStackServerApp,
   SUPER_ADMIN_PERMISSION,
 } from "@/lib/stack";
 import { isValidCountryCode } from "@/lib/countries";
@@ -140,9 +141,22 @@ export async function reconcileOrgPermissions(
   localUserId: string,
 ): Promise<void> {
   const lower = (ghLogin ?? "").toLowerCase();
-  const shouldBeSuper = !!lower && env.superAdmins.includes(lower);
+  // Grant inputs are additive: the env CSV bootstrap OR an existing mirror
+  // column (e.g. an /admin/allowlist grant made while the user was not yet
+  // linked to Hexclave). Revocation goes through /admin/allowlist, which clears
+  // both the column and the Hexclave permission, so a false column won't
+  // re-grant here.
+  const current = await prisma.user.findUnique({
+    where: { id: localUserId },
+    select: { isSuperAdmin: true, canCreateProj: true },
+  });
+  const shouldBeSuper =
+    (!!lower && env.superAdmins.includes(lower)) ||
+    !!current?.isSuperAdmin;
   const shouldBeCreator =
-    shouldBeSuper || (!!lower && env.projectCreators.includes(lower));
+    shouldBeSuper ||
+    (!!lower && env.projectCreators.includes(lower)) ||
+    !!current?.canCreateProj;
 
   try {
     if (shouldBeSuper && !(await stackUser.hasPermission(SUPER_ADMIN_PERMISSION))) {
@@ -204,4 +218,24 @@ export function recordSignInMetric(isNewUser: boolean): void {
   Sentry.metrics.count("auth.signin", 1, {
     attributes: { provider: "hexclave", "auth.is_new_user": isNewUser },
   });
+}
+
+/**
+ * Grant or revoke a project-level Hexclave permission for a linked user
+ * (Hexclave is the source of truth). Used by /admin/allowlist. Idempotent: only
+ * writes when the desired state differs. Throws if the Hexclave user is missing.
+ */
+export async function setOrgPermission(
+  stackUserId: string,
+  permissionId: string,
+  granted: boolean,
+): Promise<void> {
+  const stackApp = await getStackServerApp();
+  const stackUser = await stackApp.getUser(stackUserId);
+  if (!stackUser) {
+    throw new Error(`Hexclave user not found for ${stackUserId}`);
+  }
+  const has = await stackUser.hasPermission(permissionId);
+  if (granted && !has) await stackUser.grantPermission(permissionId);
+  if (!granted && has) await stackUser.revokePermission(permissionId);
 }
