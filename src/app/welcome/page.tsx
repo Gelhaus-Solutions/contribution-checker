@@ -1,6 +1,14 @@
+import { Suspense } from "react";
 import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { SiteHeader } from "@/components/site-header";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { WelcomeClient } from "./welcome-client";
 
 /**
@@ -33,8 +41,33 @@ export default async function WelcomePage({
     <>
       <SiteHeader />
       <main className="mx-auto max-w-md p-6">
-        <WelcomeClient error={error} />
+        {/*
+         * WelcomeClient uses Hexclave client hooks (useUser/useConnectedAccount
+         * with `or: "redirect"`) that call suspendIfSsr() internally. For users
+         * without GitHub connected (email/Google sign-ups) those hooks bail to
+         * client-side rendering, which Next requires a Suspense boundary for;
+         * without it the page 500s with NoSuspenseBoundaryError.
+         */}
+        <Suspense fallback={<WelcomeFallback />}>
+          <WelcomeClient error={error} />
+        </Suspense>
       </main>
     </>
+  );
+}
+
+function WelcomeFallback() {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">Finishing setup</CardTitle>
+        <CardDescription>
+          Linking your GitHub identity. This only takes a moment.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <p className="text-sm text-muted-foreground">Loading…</p>
+      </CardContent>
+    </Card>
   );
 }
