@@ -1,4 +1,5 @@
 import { cookies } from "next/headers";
+import { auth } from "@/auth";
 import { env } from "@/lib/env";
 import { getStackServerApp } from "@/lib/stack";
 import { resolveLocalUserFromStack } from "@/lib/auth/resolve-user";
@@ -75,6 +76,22 @@ export default async function DebugAuthPage() {
       e instanceof Error ? (e.stack ?? "").split("\n").slice(0, 12) : null;
   }
   out.reachedStep = step;
+
+  // The missing comparison: call the REAL auth() (what /dashboard uses) in this
+  // same RSC context. If the steps above succeed but this is null, the deployed
+  // auth() itself is broken (e.g. a stale build still has the cache() wrapper).
+  try {
+    const s = await auth();
+    out.authResult = s?.user
+      ? {
+          id: s.user.id,
+          ghId: s.user.ghId,
+          isSuperAdmin: s.user.isSuperAdmin,
+        }
+      : null;
+  } catch (e) {
+    out.authThrew = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
+  }
 
   return (
     <pre style={{ whiteSpace: "pre-wrap", padding: 16, fontSize: 12 }}>
