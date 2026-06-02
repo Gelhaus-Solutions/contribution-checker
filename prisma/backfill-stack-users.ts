@@ -24,11 +24,13 @@
  */
 import { PrismaClient } from "@prisma/client";
 import { StackServerApp } from "@hexclave/next";
-import {
-  CREATE_PROJECT_PERMISSION,
-  GITHUB_PROVIDER_CONFIG_ID,
-  SUPER_ADMIN_PERMISSION,
-} from "../src/lib/auth/constants";
+
+// Inlined (not imported from src/lib/auth/constants) so this script stays
+// self-contained: the production Docker image ships the built app + prisma/,
+// not the src/ tree. Keep these in sync with src/lib/auth/constants.ts.
+const SUPER_ADMIN_PERMISSION = "super_admin";
+const CREATE_PROJECT_PERMISSION = "create_project";
+const GITHUB_PROVIDER_CONFIG_ID = "github";
 
 const DRY_RUN = process.env.DRY_RUN === "1";
 const BATCH = 100;
