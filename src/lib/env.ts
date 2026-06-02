@@ -43,15 +43,18 @@ const schema = z.object({
   SUPER_ADMINS: z.string().optional(),
   PROJECT_CREATORS: z.string().optional(),
 
-  // Hexclave (self-hosted Stack Auth fork) — human login. Project id and the
-  // publishable client key are public (NEXT_PUBLIC_*); the secret server key is
-  // sensitive and may instead live in Vault (resolved via getSecret at request
-  // time, like the GitHub OAuth credentials). NEXT_PUBLIC_STACK_API_URL points
-  // the SDK at the operator's self-hosted backend instead of the managed cloud.
-  NEXT_PUBLIC_STACK_PROJECT_ID: z.string().optional(),
-  NEXT_PUBLIC_STACK_PUBLISHABLE_CLIENT_KEY: z.string().optional(),
+  // Hexclave (self-hosted Stack Auth fork) — human login. Deliberately NOT
+  // prefixed NEXT_PUBLIC_: the project id and publishable client key are
+  // public, but we ship a single generic Docker image built in CI and configure
+  // it at container runtime, so nothing may be inlined at `next build`. These
+  // are read server-side at runtime and reach the browser via <StackProvider>'s
+  // toClientJson serialization (runtime), not via build-time inlining. The
+  // secret server key may live in Vault (resolved via getSecret at request
+  // time). STACK_API_URL points the SDK at the operator's self-hosted backend.
+  STACK_PROJECT_ID: z.string().optional(),
+  STACK_PUBLISHABLE_CLIENT_KEY: z.string().optional(),
   STACK_SECRET_SERVER_KEY: z.string().optional(),
-  NEXT_PUBLIC_STACK_API_URL: z.string().url().optional(),
+  STACK_API_URL: z.string().url().optional(),
   // Svix signing secret for verifying Hexclave webhooks (user.created, etc.).
   STACK_WEBHOOK_SECRET: z.string().optional(),
 
@@ -141,8 +144,8 @@ export const env = {
   // secret server key is available (env or Vault). The auth layer short-circuits
   // when this is false the same way the webhook path does for GitHub.
   stackConfigured:
-    !!raw.NEXT_PUBLIC_STACK_PROJECT_ID &&
-    !!raw.NEXT_PUBLIC_STACK_PUBLISHABLE_CLIENT_KEY &&
+    !!raw.STACK_PROJECT_ID &&
+    !!raw.STACK_PUBLISHABLE_CLIENT_KEY &&
     presentInEnvOrVault("STACK_SECRET_SERVER_KEY"),
   githubAppConfigured:
     presentInEnvOrVault("GITHUB_APP_ID") &&

@@ -11,19 +11,23 @@ import { NextResponse, type NextRequest } from "next/server";
  * has DB and Hexclave access.
  *
  * Hexclave refresh cookies are named `hexclave-refresh-<projectId>` /
- * `stack-refresh-<projectId>` with optional `__Host-` prefix and `--default` /
- * `--custom-*` structured suffixes, so we match any cookie whose name contains
- * `refresh-<projectId>`.
+ * `stack-refresh-<projectId>` with an optional `__Host-` prefix and
+ * `--default` / `--custom-*` structured suffixes. We match the name prefix
+ * directly (no projectId needed), so this works with runtime-supplied config in
+ * a generic CI-built image (nothing is inlined at build time). STACK_PROJECT_ID
+ * is read only as a runtime "is Hexclave configured?" signal; it is NOT
+ * NEXT_PUBLIC_, so it is read at runtime, never inlined.
  */
-export function middleware(req: NextRequest): NextResponse {
-  const projectId = process.env.NEXT_PUBLIC_STACK_PROJECT_ID;
-  // Not configured (e.g. local/build): don't gate; pages still call requireSession.
-  if (!projectId) return NextResponse.next();
+const REFRESH_COOKIE = /^(?:__Host-)?(?:hexclave|stack)-refresh-/;
 
-  const marker = `refresh-${projectId}`;
+export function middleware(req: NextRequest): NextResponse {
+  // Not configured (e.g. local dev / build): don't gate; pages still call
+  // requireSession.
+  if (!process.env.STACK_PROJECT_ID) return NextResponse.next();
+
   const hasSession = req.cookies
     .getAll()
-    .some((c) => c.name.includes(marker) && c.value.length > 0);
+    .some((c) => REFRESH_COOKIE.test(c.name) && c.value.length > 0);
   if (hasSession) return NextResponse.next();
 
   const url = req.nextUrl.clone();
@@ -35,5 +39,5 @@ export function middleware(req: NextRequest): NextResponse {
 }
 
 export const config = {
-  matcher: ["/dashboard/:path*", "/admin/:path*"],
+  matcher: ["/dashboard/:path*", "/admin/:path*", "/welcome"],
 };

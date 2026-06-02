@@ -19,7 +19,7 @@ export default async function GitHubAppSetup() {
   const slug = env.githubAppConfigured ? await getAppSlug() : null;
   const webhookUrl = `${base}/api/github/webhook`;
   const stackBackend = (
-    env.NEXT_PUBLIC_STACK_API_URL ?? "https://<your-hexclave-backend>"
+    env.STACK_API_URL ?? "https://<your-hexclave-backend>"
   ).replace(/\/$/, "");
   // GitHub OAuth (login) is owned by Hexclave now, so the App's OAuth callback
   // points at the Hexclave backend, not this app.
@@ -100,10 +100,10 @@ export default async function GitHubAppSetup() {
               </li>
               <li>
                 Fill in your <code>.env</code>:
-                <pre className="mt-2 overflow-x-auto rounded bg-muted px-3 py-2 text-xs">{`NEXT_PUBLIC_STACK_PROJECT_ID="<project id>"
-NEXT_PUBLIC_STACK_PUBLISHABLE_CLIENT_KEY="<publishable client key>"
+                <pre className="mt-2 overflow-x-auto rounded bg-muted px-3 py-2 text-xs">{`STACK_PROJECT_ID="<project id>"
+STACK_PUBLISHABLE_CLIENT_KEY="<publishable client key>"
 STACK_SECRET_SERVER_KEY="<secret server key>"   # may live in Vault
-NEXT_PUBLIC_STACK_API_URL="${stackBackend}"
+STACK_API_URL="${stackBackend}"
 STACK_WEBHOOK_SECRET="<svix signing secret>"`}</pre>
               </li>
               <li>

@@ -48,10 +48,10 @@ function requireEnv(name: string): string {
 
 const stackApp = new StackServerApp({
   tokenStore: "memory",
-  projectId: requireEnv("NEXT_PUBLIC_STACK_PROJECT_ID"),
-  publishableClientKey: requireEnv("NEXT_PUBLIC_STACK_PUBLISHABLE_CLIENT_KEY"),
+  projectId: requireEnv("STACK_PROJECT_ID"),
+  publishableClientKey: requireEnv("STACK_PUBLISHABLE_CLIENT_KEY"),
   secretServerKey: requireEnv("STACK_SECRET_SERVER_KEY"),
-  baseUrl: process.env.NEXT_PUBLIC_STACK_API_URL,
+  baseUrl: process.env.STACK_API_URL,
 });
 
 type Counts = {

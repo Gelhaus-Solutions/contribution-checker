@@ -9,6 +9,7 @@ export default async function NewProject() {
   const session = await auth();
   if (!session?.user)
     redirect("/handler/sign-in?after_auth_return_to=/dashboard/projects/new");
+  if (!session.user.ghId || !session.user.country) redirect("/welcome");
   if (!session.user.canCreateProj) redirect("/dashboard");
 
   return (

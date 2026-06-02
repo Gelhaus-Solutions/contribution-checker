@@ -34,12 +34,14 @@ export function getStackServerApp(): Promise<StackServerApp<true>> {
   if (!cached) {
     cached = (async () => {
       const secretServerKey = await getSecret("STACK_SECRET_SERVER_KEY");
+      // Read at runtime (server-side) so a single CI-built image can be
+      // configured per-deployment. These reach the browser via
+      // <StackProvider>'s toClientJson serialization, not build-time inlining.
       return new StackServerApp({
         tokenStore: "nextjs-cookie",
-        baseUrl: process.env.NEXT_PUBLIC_STACK_API_URL,
-        projectId: process.env.NEXT_PUBLIC_STACK_PROJECT_ID,
-        publishableClientKey:
-          process.env.NEXT_PUBLIC_STACK_PUBLISHABLE_CLIENT_KEY,
+        baseUrl: process.env.STACK_API_URL,
+        projectId: process.env.STACK_PROJECT_ID,
+        publishableClientKey: process.env.STACK_PUBLISHABLE_CLIENT_KEY,
         secretServerKey,
         urls: {
           afterSignIn: "/dashboard",
