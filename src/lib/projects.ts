@@ -1,7 +1,10 @@
 import { prisma } from "@/lib/db";
 import { recordAudit } from "@/lib/audit";
 import { DEFAULT_FORM_SCHEMA } from "@/lib/applications/schema";
+import { permissionsForRole } from "@/lib/auth/constants";
 import type { Role } from "@/lib/authz";
+import { logger } from "@/lib/logger";
+import { createProjectTeam } from "@/lib/stack-teams";
 
 export async function createProject(args: {
   ownerId: string;
@@ -16,7 +19,11 @@ export async function createProject(args: {
       description: args.description,
       formSchema: JSON.stringify(DEFAULT_FORM_SCHEMA),
       members: {
-        create: { userId: args.ownerId, role: "OWNER" },
+        create: {
+          userId: args.ownerId,
+          role: "OWNER",
+          permissions: JSON.stringify(permissionsForRole("OWNER")),
+        },
       },
     },
   });
@@ -27,6 +34,50 @@ export async function createProject(args: {
     kind: "project.created",
     payload: { slug: project.slug, name: project.name },
   });
+
+  // Dual-write to Stack Auth: create the backing team and grant the owner the
+  // project_owner bundle. SA is the source of truth, but a failure here must not
+  // fail project creation -- leave teamId null and let the backfill/webhook
+  // reconcile it (audited as team.provision_failed).
+  const owner = await prisma.user.findUnique({
+    where: { id: args.ownerId },
+    select: { stackUserId: true },
+  });
+  if (owner?.stackUserId) {
+    try {
+      const teamId = await createProjectTeam({
+        projectId: project.id,
+        displayName: project.name,
+        ownerStackUserId: owner.stackUserId,
+      });
+      await prisma.project.update({
+        where: { id: project.id },
+        data: { teamId },
+      });
+      await recordAudit({
+        projectId: project.id,
+        actorId: args.ownerId,
+        kind: "team.provisioned",
+        payload: { teamId },
+      });
+    } catch (e) {
+      logger.error(
+        { err: e, "project.id": project.id },
+        "createProject: Stack Auth team provisioning failed; left teamId null",
+      );
+      await recordAudit({
+        projectId: project.id,
+        actorId: args.ownerId,
+        kind: "team.provision_failed",
+        payload: { error: e instanceof Error ? e.message : String(e) },
+      });
+    }
+  } else {
+    logger.warn(
+      { "project.id": project.id, "owner.id": args.ownerId },
+      "createProject: owner has no stackUserId; skipping team provisioning",
+    );
+  }
 
   return project;
 }
