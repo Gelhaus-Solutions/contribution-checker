@@ -67,7 +67,7 @@ export default async function CorporateClaPage({
             <CardHeader>
               <CardTitle className="text-base">Sign in required</CardTitle>
               <CardDescription>
-                Sign in with GitHub to sign or manage a corporate CLA.
+                Log in to sign or manage a corporate CLA.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -79,7 +79,7 @@ export default async function CorporateClaPage({
                   });
                 }}
               >
-                <SubmitButton>Sign in with GitHub</SubmitButton>
+                <SubmitButton>Login</SubmitButton>
               </form>
             </CardContent>
           </Card>

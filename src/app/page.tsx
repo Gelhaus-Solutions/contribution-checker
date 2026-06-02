@@ -31,7 +31,7 @@ export default async function Home() {
                 await signIn("github");
               }}
             >
-              <SubmitButton>Sign in with GitHub</SubmitButton>
+              <SubmitButton>Login</SubmitButton>
             </form>
           )}
         </div>

@@ -77,7 +77,7 @@ export async function SiteHeader() {
                 await signIn("github");
               }}
             >
-              <SubmitButton size="sm">Sign in with GitHub</SubmitButton>
+              <SubmitButton size="sm">Login</SubmitButton>
             </form>
           )}
         </nav>

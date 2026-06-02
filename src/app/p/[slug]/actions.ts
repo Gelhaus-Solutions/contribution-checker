@@ -55,7 +55,7 @@ export async function applyAction(
 ): Promise<ApplyState> {
   const session = await auth();
   if (!session?.user) {
-    return { status: "error", reason: "Sign in with GitHub first." };
+    return { status: "error", reason: "Log in first." };
   }
 
   const projectId = String(formData.get("projectId") ?? "");

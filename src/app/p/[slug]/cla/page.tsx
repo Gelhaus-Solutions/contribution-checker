@@ -86,7 +86,7 @@ export default async function ClaSignPage({
                   });
                 }}
               >
-                <SubmitButton>Sign in with GitHub to sign the CLA</SubmitButton>
+                <SubmitButton>Login to sign the CLA</SubmitButton>
               </form>
             </CardContent>
           </Card>

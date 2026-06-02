@@ -216,7 +216,7 @@ export default async function PublicProjectPage({
                   });
                 }}
               >
-                <SubmitButton>Sign in with GitHub to apply</SubmitButton>
+                <SubmitButton>Login to apply</SubmitButton>
               </form>
             ) : (
               <ApplicantSurface

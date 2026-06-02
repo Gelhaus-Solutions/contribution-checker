@@ -76,7 +76,7 @@ async function gate(): Promise<RateLimited> {
   const session = await auth();
   const user = session?.user;
   if (!user) {
-    return { ok: false, reason: "Sign in with GitHub first." };
+    return { ok: false, reason: "Log in first." };
   }
   if (typeof user.ghId !== "number" || !user.ghLogin) {
     return {
