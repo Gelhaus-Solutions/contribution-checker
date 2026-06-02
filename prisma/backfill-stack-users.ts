@@ -87,11 +87,18 @@ type LocalUser = {
 };
 
 async function findStackUserByEmail(email: string): Promise<ServerUser | null> {
-  const matches = await stackApp.listUsers({ query: email, limit: 10 });
+  const matches = await stackApp.listUsers({ query: email, limit: 20 });
+  const byEmail = matches.filter(
+    (u) => u.primaryEmail?.toLowerCase() === email.toLowerCase(),
+  );
+  // Prefer the user that already has the GitHub connection (the account they
+  // actually sign in as), so we link to it rather than a duplicate.
   return (
-    matches.find(
-      (u) => u.primaryEmail?.toLowerCase() === email.toLowerCase(),
-    ) ?? null
+    byEmail.find((u) =>
+      u.oauthProviders.some((p) => p.id === GITHUB_PROVIDER_CONFIG_ID),
+    ) ??
+    byEmail[0] ??
+    null
   );
 }
 
@@ -111,10 +118,15 @@ async function backfillOne(user: LocalUser, counts: Counts): Promise<void> {
     ? { country: user.country.toUpperCase() }
     : {};
 
-  // Resolve the existing Hexclave user when already linked (read-only).
+  // Resolve the existing Hexclave user (read-only) BEFORE deciding to create,
+  // so re-runs never create duplicates: by the stored link first, then by email
+  // (preferring the GitHub-connected account).
   let stackUser: ServerUser | null = user.stackUserId
     ? await stackApp.getUser(user.stackUserId)
     : null;
+  if (!stackUser && email) {
+    stackUser = await findStackUserByEmail(email);
+  }
 
   if (DRY_RUN) {
     if (stackUser) {
@@ -158,25 +170,35 @@ async function backfillOne(user: LocalUser, counts: Counts): Promise<void> {
     counts.reconciled++;
   }
 
-  // 2. Attach the GitHub OAuth connection by account_id (= ghId). Idempotent.
-  try {
-    const result = await stackApp.createOAuthProvider({
-      userId: stackUser.id,
-      accountId: String(user.ghId),
-      providerConfigId: GITHUB_PROVIDER_CONFIG_ID,
-      email: email ?? "",
-      allowSignIn: true,
-      allowConnectedAccounts: true,
-    });
-    if (result.status === "error") {
-      counts.oauthAlreadyLinked++; // account id already used -> already linked.
+  // 2. Attach the GitHub OAuth connection by account_id (= ghId) ONLY if it's
+  //    not already present. Re-attaching a connected provider throws
+  //    "the same provider type with sign-in enabled already exists for this
+  //    user" (400), so skip it when github is already connected.
+  const hasGithub = stackUser.oauthProviders.some(
+    (p) => p.id === GITHUB_PROVIDER_CONFIG_ID,
+  );
+  if (hasGithub) {
+    counts.oauthAlreadyLinked++;
+  } else {
+    try {
+      const result = await stackApp.createOAuthProvider({
+        userId: stackUser.id,
+        accountId: String(user.ghId),
+        providerConfigId: GITHUB_PROVIDER_CONFIG_ID,
+        email: email ?? "",
+        allowSignIn: true,
+        allowConnectedAccounts: true,
+      });
+      if (result.status === "error") {
+        counts.oauthAlreadyLinked++; // account id already used -> already linked.
+      }
+    } catch (e) {
+      console.error(
+        `error ${user.ghLogin ?? user.id}: createOAuthProvider failed`,
+        e,
+      );
+      counts.errors++;
     }
-  } catch (e) {
-    console.error(
-      `error ${user.ghLogin ?? user.id}: createOAuthProvider failed`,
-      e,
-    );
-    counts.errors++;
   }
 
   // 3. Reconcile the email "verified" flag to the truth. Fixes users that an
@@ -206,8 +228,8 @@ async function backfillOne(user: LocalUser, counts: Counts): Promise<void> {
     );
   }
 
-  // 5. Link the local row if not already linked.
-  if (!user.stackUserId) {
+  // 5. Link the local row to the resolved user (also repairs a stale link).
+  if (user.stackUserId !== stackUser.id) {
     await prisma.user.update({
       where: { id: user.id },
       data: { stackUserId: stackUser.id },
