@@ -37,10 +37,49 @@ export async function auth(): Promise<Session | null> {
   if (!env.stackConfigured) return null;
   try {
     const stackApp = await getStackServerApp();
-    const stackUser = await stackApp.getUser();
+    const stackUser = await stackApp.getUser({ includeRestricted: true });
     if (!stackUser) {
       setSentryUser(null);
       return null;
+    }
+
+    // Restriction handling. includeRestricted:true surfaces users the SDK would
+    // otherwise hide (it filters restricted users out by default). Preserve that
+    // behavior for onboarding restriction states (anonymous / email_not_verified)
+    // by returning null, so requireSession() bounces them to sign-in exactly as
+    // before. ONLY admin restrictions get the dedicated /restricted treatment.
+    const restrictedByAdmin =
+      stackUser.restrictedByAdmin === true ||
+      stackUser.restrictedReason?.type === "restricted_by_administrator";
+    if (stackUser.isRestricted && !restrictedByAdmin) {
+      setSentryUser(null);
+      return null;
+    }
+    if (restrictedByAdmin) {
+      // Minimal flagged session: skip the local-user resolve, country capture,
+      // and org-role round-trips. Force privileges off so even a restricted
+      // super-admin cannot act. requireSession() reads `.restricted` and
+      // redirects to /restricted before any privileged work runs.
+      setSentryUser({
+        id: stackUser.id,
+        ghLogin: null,
+        email: stackUser.primaryEmail,
+      });
+      return {
+        user: {
+          id: stackUser.id,
+          name: stackUser.displayName,
+          email: stackUser.primaryEmail ?? "",
+          image: stackUser.profileImageUrl,
+          ghId: null,
+          ghLogin: null,
+          country: null,
+          isSuperAdmin: false,
+          canCreateProj: false,
+          restricted: true,
+          restrictionReason: stackUser.restrictedByAdminReason,
+        },
+      };
     }
 
     const u = await resolveLocalUserFromStack({

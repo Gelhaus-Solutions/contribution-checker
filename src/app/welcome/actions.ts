@@ -25,6 +25,7 @@ export async function finishOnboarding(_formData: FormData): Promise<void> {
   if (!session?.user) {
     redirect("/handler/sign-in?after_auth_return_to=/welcome");
   }
+  if (session.user.restricted) redirect("/restricted");
 
   const stackApp = await getStackServerApp();
   const stackUser = await stackApp.getUser();

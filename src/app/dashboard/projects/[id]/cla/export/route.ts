@@ -1,7 +1,12 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/db";
-import { getProjectMembership, roleAtLeast, type Role } from "@/lib/authz";
+import {
+  getProjectMembership,
+  isRestricted,
+  roleAtLeast,
+  type Role,
+} from "@/lib/authz";
 import { recordAudit } from "@/lib/audit";
 import { verifyChain } from "@/lib/cla/integrity";
 
@@ -30,6 +35,9 @@ export async function GET(
   const session = await auth();
   if (!session?.user) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
+  if (isRestricted(session)) {
+    return NextResponse.json({ error: "restricted" }, { status: 403 });
   }
 
   const membership = await getProjectMembership(projectId, session.user.id);

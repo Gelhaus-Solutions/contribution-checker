@@ -57,6 +57,9 @@ export async function applyAction(
   if (!session?.user) {
     return { status: "error", reason: "Log in first." };
   }
+  if (session.user.restricted) {
+    return { status: "error", reason: "Your account is restricted." };
+  }
 
   const projectId = String(formData.get("projectId") ?? "");
   if (!projectId) {

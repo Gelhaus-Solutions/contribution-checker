@@ -78,6 +78,9 @@ async function gate(): Promise<RateLimited> {
   if (!user) {
     return { ok: false, reason: "Log in first." };
   }
+  if (user.restricted) {
+    return { ok: false, reason: "Your account is restricted." };
+  }
   if (typeof user.ghId !== "number" || !user.ghLogin) {
     return {
       ok: false,

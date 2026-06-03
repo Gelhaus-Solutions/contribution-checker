@@ -30,6 +30,7 @@ export default async function WelcomePage({
   if (!session?.user) {
     redirect("/handler/sign-in?after_auth_return_to=/welcome");
   }
+  if (session.user.restricted) redirect("/restricted");
   // GitHub already linked -> onboarding is done.
   if (session.user.ghId) {
     redirect("/dashboard");

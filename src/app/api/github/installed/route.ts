@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
+import { isRestricted } from "@/lib/authz";
 import { prisma } from "@/lib/db";
 
 /**
@@ -15,6 +16,9 @@ export async function GET(req: Request) {
     const url = new URL("/handler/sign-in", req.url);
     url.searchParams.set("after_auth_return_to", req.url);
     return NextResponse.redirect(url);
+  }
+  if (isRestricted(session)) {
+    return NextResponse.redirect(new URL("/restricted", req.url));
   }
 
   const url = new URL(req.url);

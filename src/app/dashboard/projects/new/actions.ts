@@ -24,6 +24,7 @@ export async function createProjectAction(
 ): Promise<CreateProjectState> {
   const session = await auth();
   if (!session?.user) return { error: "Not signed in" };
+  if (session.user.restricted) redirect("/restricted");
   if (!session.user.canCreateProj) return { error: "Not authorized to create projects" };
 
   const raw = {
