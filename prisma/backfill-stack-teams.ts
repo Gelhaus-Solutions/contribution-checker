@@ -306,6 +306,7 @@ async function backfillProject(
     where: { projectId: project.id },
     select: {
       id: true,
+      userId: true,
       role: true,
       user: { select: { stackUserId: true } },
     },
@@ -352,7 +353,13 @@ async function backfillProject(
     }
     try {
       if (teamId) await setRole(teamId, m.user.stackUserId, m.role);
-      await prisma.projectMember.update({ where: { id: m.id }, data: { permissions: perms } });
+      // upsert (not update): the team webhook may reconcile this row concurrently
+      // while the backfill runs, so the row must not be assumed to still exist.
+      await prisma.projectMember.upsert({
+        where: { projectId_userId: { projectId: project.id, userId: m.userId } },
+        update: { permissions: perms },
+        create: { projectId: project.id, userId: m.userId, role: m.role, permissions: perms },
+      });
       counts.membersGranted++;
     } catch (e) {
       console.error(`error project ${project.id} member ${m.id}: setRole failed`, e);

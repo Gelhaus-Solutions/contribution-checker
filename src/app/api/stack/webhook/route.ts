@@ -91,12 +91,18 @@ async function reconcileProjectMembers(
   projectId: string,
   teamId: string,
 ): Promise<void> {
-  const roster = (await readTeamMemberships(teamId)).filter(
+  const all = await readTeamMemberships(teamId);
+  // Delete decision is based on ACTUAL team membership (all members), not on who
+  // currently holds a role bundle. A member can transiently lack a role between
+  // addUser and grant (e.g. during the backfill); deleting them then races their
+  // own grant and clobbers the cache. Only drop members truly removed from the
+  // team.
+  const teamMemberStackIds = new Set(all.map((r) => r.stackUserId));
+  const withRole = all.filter(
     (r): r is { stackUserId: string; role: "OWNER" | "ADMIN" | "REVIEWER"; leaves: string[] } =>
       r.role !== null,
   );
-  const stackIds = roster.map((r) => r.stackUserId);
-  const rosterStackSet = new Set(stackIds);
+  const stackIds = withRole.map((r) => r.stackUserId);
 
   const users = await prisma.user.findMany({
     where: { stackUserId: { in: stackIds } },
@@ -104,7 +110,7 @@ async function reconcileProjectMembers(
   });
   const localByStack = new Map(users.map((u) => [u.stackUserId as string, u.id]));
 
-  for (const r of roster) {
+  for (const r of withRole) {
     const userId = localByStack.get(r.stackUserId);
     if (!userId) continue; // SA member not linked to a local user yet
     const permissions = JSON.stringify(r.leaves);
@@ -121,8 +127,8 @@ async function reconcileProjectMembers(
   });
   for (const m of localMembers) {
     const sid = m.user.stackUserId;
-    if (sid && !rosterStackSet.has(sid)) {
-      await prisma.projectMember.delete({ where: { id: m.id } });
+    if (sid && !teamMemberStackIds.has(sid)) {
+      await prisma.projectMember.deleteMany({ where: { id: m.id } });
     }
   }
 }

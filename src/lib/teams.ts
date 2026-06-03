@@ -164,7 +164,9 @@ export async function removeMember(args: {
     );
   }
 
-  await prisma.projectMember.delete({ where: { id: args.memberId } });
+  // deleteMany (not delete): the team webhook may have already removed the cache
+  // row in response to the Stack Auth removeUser above; deleteMany is idempotent.
+  await prisma.projectMember.deleteMany({ where: { id: args.memberId } });
 
   await recordAudit({
     projectId: args.projectId,
