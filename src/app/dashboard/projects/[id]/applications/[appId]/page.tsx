@@ -14,7 +14,13 @@ import { Badge } from "@/components/ui/badge";
 import { SubmitButton } from "@/components/ui/submit-button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { approveAction, denyAction, revokeAction, addNoteAction } from "./actions";
+import {
+  approveAction,
+  denyAction,
+  revokeAction,
+  allowResubmitAction,
+  addNoteAction,
+} from "./actions";
 import { computeScore } from "@/lib/quality/score";
 import { ALL_HEURISTICS, parseQualityConfig } from "@/lib/quality/registry";
 import type { SignalsRaw } from "@/lib/quality/types";
@@ -415,7 +421,7 @@ export default async function ApplicationDetail({
                   <input type="hidden" name="projectId" value={id} />
                   <input type="hidden" name="appId" value={app.id} />
                   <Label htmlFor="reason-deny" className="text-xs">
-                    Reason (shown to applicant)
+                    Reason (shown to the applicant, never public on the PR)
                   </Label>
                   <Textarea
                     id="reason-deny"
@@ -445,7 +451,7 @@ export default async function ApplicationDetail({
                 <input type="hidden" name="projectId" value={id} />
                 <input type="hidden" name="appId" value={app.id} />
                 <Label htmlFor="reason-revoke" className="text-xs">
-                  Reason (shown to applicant)
+                  Reason (shown to the applicant, never public on the PR)
                 </Label>
                 <Textarea
                   id="reason-revoke"
@@ -475,31 +481,65 @@ export default async function ApplicationDetail({
                 <SubmitButton variant="destructive">Revoke approval</SubmitButton>
               </form>
             ) : (
-              <form action={approveAction} className="space-y-2">
-                <input type="hidden" name="projectId" value={id} />
-                <input type="hidden" name="appId" value={app.id} />
-                <Label htmlFor="reason-reapprove" className="text-xs">
-                  Optional note
-                </Label>
-                <Textarea
-                  id="reason-reapprove"
-                  name="reason"
-                  rows={2}
-                  placeholder="Welcome back…"
-                />
-                <p className="text-xs text-muted-foreground">
-                  Re-approving will reopen any PRs that were closed when this
-                  application was denied.
-                </p>
-                {approvalGateNote}
-                {claGateNote}
-                <SubmitButton
-                  variant="success"
-                  disabled={!gateMet || !claGateMet}
-                >
-                  Re-approve
-                </SubmitButton>
-              </form>
+              <>
+                <div className="rounded-md border border-border bg-muted/30 p-3 text-xs text-muted-foreground">
+                  {app.allowResubmit ? (
+                    app.cooldownUntil && app.cooldownUntil > new Date() ? (
+                      <>
+                        Resubmitting is allowed. Cooldown until{" "}
+                        <span className="font-medium text-foreground">
+                          {app.cooldownUntil.toISOString().slice(0, 10)}
+                        </span>
+                        .
+                      </>
+                    ) : (
+                      <>Resubmitting is allowed; the applicant may apply again now.</>
+                    )
+                  ) : (
+                    <>Resubmitting is currently blocked for this applicant.</>
+                  )}
+                </div>
+
+                {!app.allowResubmit && (
+                  <form action={allowResubmitAction} className="space-y-2">
+                    <input type="hidden" name="projectId" value={id} />
+                    <input type="hidden" name="appId" value={app.id} />
+                    <p className="text-xs text-muted-foreground">
+                      Let this applicant submit a new application without
+                      re-approving. The denial stays on record. {cooldownHelp}
+                    </p>
+                    <SubmitButton variant="secondary">
+                      Allow resubmitting
+                    </SubmitButton>
+                  </form>
+                )}
+
+                <form action={approveAction} className="space-y-2">
+                  <input type="hidden" name="projectId" value={id} />
+                  <input type="hidden" name="appId" value={app.id} />
+                  <Label htmlFor="reason-reapprove" className="text-xs">
+                    Optional note
+                  </Label>
+                  <Textarea
+                    id="reason-reapprove"
+                    name="reason"
+                    rows={2}
+                    placeholder="Welcome back…"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Re-approving will reopen any PRs that were closed when this
+                    application was denied.
+                  </p>
+                  {approvalGateNote}
+                  {claGateNote}
+                  <SubmitButton
+                    variant="success"
+                    disabled={!gateMet || !claGateMet}
+                  >
+                    Re-approve
+                  </SubmitButton>
+                </form>
+              </>
             )}
           </CardContent>
         </Card>

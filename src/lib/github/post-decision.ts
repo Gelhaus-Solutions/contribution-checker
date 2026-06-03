@@ -217,10 +217,12 @@ export async function onApplicationRevokedWithClose(args: {
   for (const check of checks) {
     if (check.repo.installationId == null) continue;
     const ref = repoRef(check.repo.fullName, check.repo.installationId);
+    // The revocation reason is confidential: not posted publicly on the PR. The
+    // applicant can still read it on their status page (and via email); link
+    // there instead of inlining it.
     const body =
-      `@${app.user.ghLogin}, your contributor approval for **${app.project.name}** has been revoked` +
-      (args.reason ? `: ${args.reason}` : "") +
-      `. This PR is being closed.`;
+      `@${app.user.ghLogin}, your contributor approval for **${app.project.name}** has been revoked. ` +
+      `This PR is being closed. You can view the details at ${buildApplyUrl(app.project.slug)}.`;
     try {
       await closePullRequest(ref, check.prNumber, body);
       if (app.project.labelsEnabled) {

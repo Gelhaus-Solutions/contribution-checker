@@ -53,7 +53,7 @@ describe("buildDecisionMessage", () => {
     expect(msg).not.toContain("Please apply");
   });
 
-  it("includes the cooldown date for DENIED with cooldown", () => {
+  it("includes the cooldown date for DENIED with cooldown but never the reason", () => {
     const cooldownUntil = new Date("2030-04-15T12:00:00Z");
     const msg = buildDecisionMessage({
       decision: {
@@ -65,7 +65,10 @@ describe("buildDecisionMessage", () => {
       applyUrl,
       ghLogin,
     });
-    expect(msg).toContain("spam");
+    // The reason is confidential; it must not appear in the PR comment.
+    expect(msg).not.toContain("spam");
+    // Instead the comment links to the applicant's status page to view it.
+    expect(msg).toContain(applyUrl);
     expect(msg).toContain("2030-04-15");
     expect(msg).toContain("re-apply");
   });
@@ -78,6 +81,7 @@ describe("buildDecisionMessage", () => {
       ghLogin,
     });
     expect(msg).toContain("project admin");
+    expect(msg).toContain(applyUrl);
     expect(msg).not.toContain("re-apply");
   });
 });

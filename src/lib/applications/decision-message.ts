@@ -55,14 +55,17 @@ export function buildDecisionMessage(args: {
     return args.needsCla ? base + claPendingReminderNote(claUrl) : base;
   }
   if (decision.status === "DENIED") {
-    const reasonPart = decision.reason ? `: ${decision.reason}` : "";
+    // The denial reason is confidential: it's NOT posted publicly on the PR.
+    // The applicant can still read it (on their status page, while signed in,
+    // and via email) and maintainers see it in the dashboard. So we link to the
+    // status page rather than inlining the reason. The cooldown date is fine to
+    // show: it tells the contributor when they may re-apply.
     const tail = decision.cooldownUntil
       ? `You may re-apply on ${decision.cooldownUntil.toISOString().slice(0, 10)}.`
       : `Please contact a project admin if you believe this is in error.`;
     return (
-      `Hi @${ghLogin}, your application for **${projectName}** was previously declined` +
-      reasonPart +
-      `. ` +
+      `Hi @${ghLogin}, your application for **${projectName}** was previously declined. ` +
+      `You can view the reason and your application status at ${applyUrl}. ` +
       tail
     );
   }

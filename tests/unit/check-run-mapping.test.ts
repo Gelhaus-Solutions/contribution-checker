@@ -70,7 +70,7 @@ describe("buildDecisionCheckPayload", () => {
     expect(p.summary).toContain("awaiting reviewer action");
   });
 
-  it("DENIED permanent → failure", () => {
+  it("DENIED permanent → failure, without leaking the reason", () => {
     const p = buildDecisionCheckPayload({
       decision: { status: "DENIED", reason: "spam", cooldownUntil: null },
       applyUrl,
@@ -78,7 +78,8 @@ describe("buildDecisionCheckPayload", () => {
     });
     expect(p.conclusion).toBe("failure");
     expect(p.title).toBe("Denied.");
-    expect(p.summary).toContain("spam");
+    // The reason is confidential; the Check Run summary must not expose it.
+    expect(p.summary).not.toContain("spam");
   });
 
   it("DENIED with cooldown encodes the date in the title", () => {

@@ -108,7 +108,8 @@ describe("onApplicationDenied", () => {
     const [, , firstBody] = commentOnPr.mock.calls[0];
     expect(firstBody).toContain("@octocat");
     expect(firstBody).toContain("**Acme**");
-    expect(firstBody).toContain("spam");
+    // The denial reason is confidential and must not be posted to the PR.
+    expect(firstBody).not.toContain("spam");
 
     // Pending and approved labels are stripped, denied label applied.
     expect(removeLabelIfPresent).toHaveBeenCalledWith(

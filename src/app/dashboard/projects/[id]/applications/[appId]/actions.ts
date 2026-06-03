@@ -8,6 +8,7 @@ import {
   approveApplication,
   denyApplication,
   revokeApplication,
+  allowApplicationResubmit,
   ApprovalGateError,
   ClaGateError,
 } from "@/lib/applications/decide";
@@ -124,6 +125,33 @@ export async function denyAction(formData: FormData) {
 
   revalidatePath(`/dashboard/projects/${parsed.projectId}/applications`);
   revalidatePath(`/dashboard/projects/${parsed.projectId}/applications/${parsed.appId}`);
+}
+
+/**
+ * Re-open resubmission on a DENIED application that was denied with
+ * "allow resubmitting" off. Same gate as denying (REVIEWER): softening a denial
+ * is no more privileged than issuing one.
+ */
+export async function allowResubmitAction(formData: FormData) {
+  const parsed = baseSchema.parse({
+    projectId: formData.get("projectId"),
+    appId: formData.get("appId"),
+  });
+  const { session } = await requireProjectRole(parsed.projectId, "REVIEWER");
+  const app = await ensureApplicationInProject(parsed.projectId, parsed.appId);
+  if (app.status !== "DENIED") {
+    throw new Error(`Cannot allow resubmitting on an application with status ${app.status}.`);
+  }
+
+  await allowApplicationResubmit({
+    applicationId: parsed.appId,
+    decidedById: session.user.id,
+  });
+
+  revalidatePath(`/dashboard/projects/${parsed.projectId}/applications`);
+  revalidatePath(`/dashboard/projects/${parsed.projectId}/applications/${parsed.appId}`);
+  const slug = await projectSlug(parsed.projectId);
+  if (slug) revalidatePath(`/p/${slug}`);
 }
 
 const revokeSchema = baseSchema.extend({

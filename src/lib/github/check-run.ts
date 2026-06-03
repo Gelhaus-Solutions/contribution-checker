@@ -119,16 +119,17 @@ export function buildDecisionCheckPayload(args: {
       };
     }
     case "DENIED": {
+      // The denial reason is confidential (admin/dashboard only); never put it
+      // in the Check Run summary, which is publicly visible on the PR.
       const cooldownText = decision.cooldownUntil
         ? `Denied until ${decision.cooldownUntil.toISOString().slice(0, 10)}.`
         : "Denied.";
-      const reasonText = decision.reason ? ` Reason: ${decision.reason}` : "";
       return {
         name: CHECK_RUN_NAME,
         status: "completed",
         conclusion: "failure",
         title: cooldownText,
-        summary: `${cooldownText}${reasonText}`,
+        summary: cooldownText,
         detailsUrl: applyUrl,
       };
     }

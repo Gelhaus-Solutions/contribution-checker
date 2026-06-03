@@ -281,6 +281,72 @@ export async function denyApplication(args: {
   return updated;
 }
 
+/**
+ * Manually re-open resubmission on an application that was denied with
+ * `allowResubmit: false`. The application stays DENIED (we don't reopen any
+ * PRs), but the contributor may submit a fresh application: `decideForRepo`
+ * treats a DENIED-but-resubmittable app whose cooldown has elapsed as PENDING.
+ *
+ * The project's cooldown (if configured) is applied from now, mirroring the
+ * "allow resubmit" path at deny time. Idempotent-ish: callers should only show
+ * this for currently-blocked apps, but re-running it just refreshes the cooldown.
+ */
+export async function allowApplicationResubmit(args: {
+  applicationId: string;
+  decidedById: string;
+}) {
+  const app = await prisma.application.findUnique({
+    where: { id: args.applicationId },
+    include: {
+      project: { select: { id: true, name: true, slug: true, cooldownDays: true } },
+      user: { select: { ghLogin: true } },
+    },
+  });
+  if (!app) throw new Error("Application not found");
+  if (app.status !== "DENIED") {
+    throw new Error(
+      `Can only allow resubmitting on a DENIED application (status ${app.status}).`,
+    );
+  }
+
+  const cooldownUntil =
+    app.project.cooldownDays != null
+      ? new Date(Date.now() + app.project.cooldownDays * 24 * 60 * 60 * 1000)
+      : null;
+
+  const updated = await prisma.application.update({
+    where: { id: args.applicationId },
+    data: { allowResubmit: true, cooldownUntil },
+  });
+
+  await recordAudit({
+    projectId: app.projectId,
+    actorId: args.decidedById,
+    kind: "application.resubmit_allowed",
+    payload: {
+      applicationId: app.id,
+      applicantId: app.userId,
+      cooldownUntil: cooldownUntil?.toISOString() ?? null,
+    },
+  });
+
+  // Tell the applicant they can re-apply. The denial reason stays out of this
+  // message (it's already on their status page and the original denial email).
+  const when = cooldownUntil
+    ? `You may submit a new application on ${cooldownUntil.toISOString().slice(0, 10)}.`
+    : `You may submit a new application now.`;
+  await emailUser({
+    userId: app.userId,
+    subject: `You may re-apply: ${app.project.name}`,
+    text:
+      `A reviewer has re-opened resubmission for your ${app.project.name} application.\n\n` +
+      `${when}\n\n` +
+      `${applyUrl(app.project.slug)}\n`,
+  });
+
+  return updated;
+}
+
 export type RevokeTarget = "DENIED" | "SUBMITTED" | "PENDING";
 
 export async function revokeApplication(args: {
