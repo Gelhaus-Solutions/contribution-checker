@@ -27,6 +27,7 @@ const settingsSchema = z.object({
   requireApprovalCount: z
     .union([z.string().length(0), z.coerce.number().int().min(0).max(10)])
     .optional(),
+  allowAppeals: z.string().optional(),
 });
 
 export async function updateProjectSettings(formData: FormData) {
@@ -37,6 +38,7 @@ export async function updateProjectSettings(formData: FormData) {
     description: String(formData.get("description") ?? "").trim() || undefined,
     cooldownDays: formData.get("cooldownDays") ?? undefined,
     requireApprovalCount: formData.get("requireApprovalCount") ?? undefined,
+    allowAppeals: formData.get("allowAppeals") ?? undefined,
   });
 
   const { session } = await requireProjectRole(parsed.projectId, "ADMIN");
@@ -49,6 +51,7 @@ export async function updateProjectSettings(formData: FormData) {
       description: true,
       cooldownDays: true,
       requireApprovalCount: true,
+      allowAppeals: true,
     },
   });
   if (!before) throw new Error("Project not found");
@@ -69,6 +72,7 @@ export async function updateProjectSettings(formData: FormData) {
     typeof parsed.requireApprovalCount === "number"
       ? parsed.requireApprovalCount
       : 0;
+  const allowAppeals = !!parsed.allowAppeals;
 
   await prisma.project.update({
     where: { id: parsed.projectId },
@@ -78,6 +82,7 @@ export async function updateProjectSettings(formData: FormData) {
       description: parsed.description ?? null,
       cooldownDays: cooldown,
       requireApprovalCount,
+      allowAppeals,
     },
   });
 
@@ -96,6 +101,7 @@ export async function updateProjectSettings(formData: FormData) {
             before.requireApprovalCount,
             requireApprovalCount,
           ],
+          allowAppeals: [before.allowAppeals, allowAppeals],
         }).filter(([, [a, b]]) => a !== b)
       ),
     },

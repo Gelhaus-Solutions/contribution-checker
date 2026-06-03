@@ -470,6 +470,141 @@ export async function revokeApplication(args: {
   return updated;
 }
 
+export type AppealResolution = "GRANT" | "ALLOW_RESUBMIT" | "REJECT";
+
+const APPEAL_RESOLUTION_STATUS: Record<AppealResolution, string> = {
+  GRANT: "GRANTED",
+  ALLOW_RESUBMIT: "RESUBMIT_ALLOWED",
+  REJECT: "REJECTED",
+};
+
+/**
+ * Resolve a PENDING appeal on a DENIED application.
+ *  - GRANT          -> approve the application (reusing approveApplication, so
+ *                      the same approval-count / CLA gates apply and a gate
+ *                      failure throws), then overwrite the application's answers
+ *                      with the appeal's revised answers so the approved record
+ *                      reflects what was reviewed.
+ *  - ALLOW_RESUBMIT -> reuse allowApplicationResubmit (application stays DENIED).
+ *  - REJECT         -> close the appeal; the application stays DENIED.
+ *
+ * GRANT and ALLOW_RESUBMIT delegate their applicant notify/email to
+ * approveApplication / allowApplicationResubmit; only REJECT notifies here.
+ * PR reopening on GRANT is the action layer's job (resolveAppealAction calls
+ * onApplicationApproved), matching approveAction. A granted appeal therefore
+ * emits both application.approved (from the delegate) and application.appeal_resolved;
+ * webhook consumers should dedupe on applicationId.
+ */
+export async function resolveAppeal(args: {
+  applicationId: string;
+  resolution: AppealResolution;
+  resolvedById: string;
+  note?: string;
+}) {
+  const appeal = await prisma.applicationAppeal.findUnique({
+    where: { applicationId: args.applicationId },
+    include: {
+      application: {
+        include: {
+          project: { select: { id: true, name: true, slug: true } },
+          user: { select: { ghLogin: true } },
+        },
+      },
+    },
+  });
+  if (!appeal) throw new Error("Appeal not found");
+  if (appeal.status !== "PENDING") {
+    throw new Error(`Appeal already resolved (status ${appeal.status}).`);
+  }
+  const app = appeal.application;
+  const note = args.note?.trim() || undefined;
+
+  if (args.resolution === "GRANT") {
+    if (app.status !== "DENIED") {
+      throw new Error(
+        `Can only grant an appeal on a DENIED application (status ${app.status}).`,
+      );
+    }
+    // May throw ApprovalGateError / ClaGateError; the action layer translates
+    // these. Run it BEFORE touching answers so a gate failure leaves the
+    // original answers (and the still-PENDING appeal) intact.
+    await approveApplication({
+      applicationId: app.id,
+      decidedById: args.resolvedById,
+      reason: note,
+    });
+    await prisma.application.update({
+      where: { id: app.id },
+      data: { answers: appeal.answers },
+    });
+  } else if (args.resolution === "ALLOW_RESUBMIT") {
+    if (app.status !== "DENIED") {
+      throw new Error(
+        `Can only allow resubmit on a DENIED application (status ${app.status}).`,
+      );
+    }
+    await allowApplicationResubmit({
+      applicationId: app.id,
+      decidedById: args.resolvedById,
+    });
+  }
+
+  const updated = await prisma.applicationAppeal.update({
+    where: { id: appeal.id },
+    data: {
+      status: APPEAL_RESOLUTION_STATUS[args.resolution],
+      resolvedById: args.resolvedById,
+      resolvedAt: new Date(),
+      resolutionNote: note ?? null,
+    },
+  });
+
+  if (args.resolution === "REJECT") {
+    await notifyUser({
+      userId: app.userId,
+      kind: "application.appeal_rejected",
+      payload: {
+        projectId: app.projectId,
+        projectSlug: app.project.slug,
+        projectName: app.project.name,
+        reason: note ?? null,
+      },
+    });
+    await emailUser({
+      userId: app.userId,
+      subject: `Appeal declined: ${app.project.name}`,
+      text:
+        `Your appeal for ${app.project.name} was declined; your application remains denied.` +
+        (note ? `\n\nNote: ${note}` : "") +
+        `\n\n${applyUrl(app.project.slug)}\n`,
+    });
+  }
+
+  await recordAudit({
+    projectId: app.projectId,
+    actorId: args.resolvedById,
+    kind: "application.appeal_resolved",
+    payload: {
+      applicationId: app.id,
+      appealId: appeal.id,
+      resolution: args.resolution,
+    },
+  });
+  await enqueueProjectWebhook({
+    projectId: app.projectId,
+    event: "application.appeal_resolved",
+    payload: {
+      applicationId: app.id,
+      ghLogin: app.user.ghLogin,
+      resolution: args.resolution,
+      note: note ?? null,
+    },
+    triggeredById: args.resolvedById,
+  });
+
+  return updated;
+}
+
 export async function notifyAdminsOfNewApplication(args: {
   applicationId: string;
 }) {
@@ -507,6 +642,56 @@ export async function notifyAdminsOfNewApplication(args: {
     event: "application.submitted",
     payload: {
       applicationId: app.id,
+      ghLogin: app.user.ghLogin,
+    },
+    triggeredById: app.userId,
+  });
+}
+
+/**
+ * Tell project reviewers an appeal was filed (inbox + email + webhook). Mirrors
+ * notifyAdminsOfNewApplication; called from the appeal action after submitAppeal.
+ */
+export async function notifyAdminsOfAppeal(args: { appealId: string }) {
+  const appeal = await prisma.applicationAppeal.findUnique({
+    where: { id: args.appealId },
+    include: {
+      application: {
+        include: {
+          project: { select: { id: true, name: true, slug: true } },
+          user: { select: { id: true, ghLogin: true } },
+        },
+      },
+    },
+  });
+  if (!appeal) return;
+  const app = appeal.application;
+  await notifyProjectReviewers({
+    projectId: app.projectId,
+    excludeUserId: app.userId,
+    kind: "application.appeal_submitted",
+    payload: {
+      applicationId: app.id,
+      projectId: app.projectId,
+      projectSlug: app.project.slug,
+      projectName: app.project.name,
+      ghLogin: app.user.ghLogin,
+    },
+  });
+  await emailProjectReviewers({
+    projectId: app.projectId,
+    excludeUserId: app.userId,
+    subject: `[${app.project.name}] Appeal from @${app.user.ghLogin ?? "unknown"}`,
+    text:
+      `@${app.user.ghLogin ?? "(unknown)"} appealed their declined application for ${app.project.name}.\n\n` +
+      `Review the appeal: ${dashboardUrl(`/dashboard/projects/${app.projectId}/applications/${app.id}`)}\n`,
+  });
+  await enqueueProjectWebhook({
+    projectId: app.projectId,
+    event: "application.appeal_submitted",
+    payload: {
+      applicationId: app.id,
+      appealId: appeal.id,
       ghLogin: app.user.ghLogin,
     },
     triggeredById: app.userId,

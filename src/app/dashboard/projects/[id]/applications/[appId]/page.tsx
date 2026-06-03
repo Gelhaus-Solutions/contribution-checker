@@ -19,6 +19,7 @@ import {
   denyAction,
   revokeAction,
   allowResubmitAction,
+  resolveAppealAction,
   addNoteAction,
 } from "./actions";
 import { computeScore } from "@/lib/quality/score";
@@ -81,6 +82,9 @@ export default async function ApplicationDetail({
       reviews: {
         include: { author: { select: { id: true, ghLogin: true } } },
         orderBy: { submittedAt: "asc" },
+      },
+      appeal: {
+        include: { resolvedBy: { select: { ghLogin: true } } },
       },
     },
   });
@@ -294,6 +298,26 @@ export default async function ApplicationDetail({
   const isPending = app.status === "SUBMITTED";
   const isApproved = app.status === "APPROVED";
   const isDenied = app.status === "DENIED";
+  const appeal = app.appeal;
+  const pendingAppeal = appeal?.status === "PENDING" ? appeal : null;
+  // Revised answers carried by the appeal (parsed like the original answers).
+  const appealAnswers = appeal
+    ? (() => {
+        try {
+          return JSON.parse(appeal.answers) as Record<string, unknown>;
+        } catch {
+          return {};
+        }
+      })()
+    : {};
+  const renderAnswer = (v: unknown, isCheckbox: boolean) =>
+    isCheckbox
+      ? v
+        ? "✓ Yes"
+        : "✗ No"
+      : typeof v === "string" && v.length > 0
+        ? v
+        : "n/a";
   const cooldownDays = app.project.cooldownDays;
   const cooldownHelp =
     cooldownDays != null
@@ -382,7 +406,7 @@ export default async function ApplicationDetail({
         </CardContent>
       </Card>
 
-      {(isPending || isApproved || isDenied) && (
+      {(isPending || isApproved || (isDenied && !pendingAppeal)) && (
         <Card>
           <CardHeader>
             <CardTitle className="text-base">
@@ -540,6 +564,125 @@ export default async function ApplicationDetail({
                   </SubmitButton>
                 </form>
               </>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {appeal && (
+        <Card>
+          <CardHeader className="flex-row items-center justify-between">
+            <CardTitle className="text-base">Appeal</CardTitle>
+            {!pendingAppeal && (
+              <Badge
+                variant={appeal.status === "REJECTED" ? "destructive" : "success"}
+              >
+                {appeal.status}
+              </Badge>
+            )}
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="rounded-md border border-border bg-muted/30 p-3 text-sm">
+              <div className="mb-1 text-xs text-muted-foreground">
+                Appeal message
+              </div>
+              <div className="whitespace-pre-wrap">{appeal.message}</div>
+            </div>
+
+            {fields.length > 0 && (
+              <div className="space-y-3">
+                <div className="text-xs font-medium text-muted-foreground">
+                  Revised answers
+                </div>
+                {fields.map((f) => {
+                  const orig = answers[f.id];
+                  const rev = appealAnswers[f.id];
+                  const isCheckbox = f.type === "checkbox";
+                  const changed =
+                    JSON.stringify(orig ?? null) !== JSON.stringify(rev ?? null);
+                  return (
+                    <div key={f.id}>
+                      <Label className="text-xs">
+                        {f.label}
+                        {changed && (
+                          <span className="ml-2 text-[10px] font-medium text-warning">
+                            changed
+                          </span>
+                        )}
+                      </Label>
+                      <div className="mt-1 whitespace-pre-wrap rounded-md border border-border bg-muted/30 px-3 py-2 text-sm">
+                        {renderAnswer(rev, isCheckbox)}
+                      </div>
+                      {changed && (
+                        <div className="mt-1 text-xs text-muted-foreground">
+                          was: {renderAnswer(orig, isCheckbox)}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {pendingAppeal ? (
+              <form action={resolveAppealAction} className="space-y-3">
+                <input type="hidden" name="projectId" value={id} />
+                <input type="hidden" name="appId" value={app.id} />
+                <fieldset className="space-y-1 text-xs">
+                  <legend className="font-medium">Resolve this appeal:</legend>
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="radio"
+                      name="resolution"
+                      value="GRANT"
+                      defaultChecked
+                    />
+                    <span>
+                      Grant (approve the application and reopen closed PRs)
+                    </span>
+                  </label>
+                  <label className="flex items-center gap-2">
+                    <input type="radio" name="resolution" value="ALLOW_RESUBMIT" />
+                    <span>
+                      Allow resubmit (stays denied; applicant may re-apply)
+                    </span>
+                  </label>
+                  <label className="flex items-center gap-2">
+                    <input type="radio" name="resolution" value="REJECT" />
+                    <span>Reject (appeal declined; stays denied)</span>
+                  </label>
+                </fieldset>
+                <div className="space-y-1">
+                  <Label htmlFor="reason-appeal" className="text-xs">
+                    Optional note (shown to the applicant on reject)
+                  </Label>
+                  <Textarea id="reason-appeal" name="reason" rows={2} />
+                </div>
+                {approvalGateNote}
+                {claGateNote}
+                <p className="text-xs text-muted-foreground">
+                  Granting reuses the approval gates above; if they are not met
+                  the grant is rejected with an error. Allow-resubmit and reject
+                  are never gated.
+                </p>
+                <SubmitButton>Resolve appeal</SubmitButton>
+              </form>
+            ) : (
+              appeal.resolutionNote && (
+                <div className="rounded-md border border-border bg-muted/30 p-3 text-sm">
+                  <span className="font-medium">Resolution note: </span>
+                  {appeal.resolutionNote}
+                </div>
+              )
+            )}
+            {!pendingAppeal && appeal.resolvedBy?.ghLogin && (
+              <p className="text-xs text-muted-foreground">
+                Resolved by {appeal.resolvedBy.ghLogin}
+                {appeal.resolvedAt
+                  ? ` on ${appeal.resolvedAt.toISOString().slice(0, 10)}`
+                  : ""}
+                .
+              </p>
             )}
           </CardContent>
         </Card>

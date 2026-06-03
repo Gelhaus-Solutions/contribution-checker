@@ -16,6 +16,8 @@ export type AuditKind =
   | "application.approved"
   | "application.denied"
   | "application.resubmit_allowed"
+  | "application.appeal_submitted"
+  | "application.appeal_resolved"
   | "application.revoked"
   | "application.note_added"
   | "application.note_edited"

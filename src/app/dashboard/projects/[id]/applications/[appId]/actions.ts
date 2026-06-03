@@ -9,6 +9,7 @@ import {
   denyApplication,
   revokeApplication,
   allowApplicationResubmit,
+  resolveAppeal,
   ApprovalGateError,
   ClaGateError,
 } from "@/lib/applications/decide";
@@ -185,6 +186,59 @@ export async function revokeAction(formData: FormData) {
 
   revalidatePath(`/dashboard/projects/${parsed.projectId}/applications`);
   revalidatePath(`/dashboard/projects/${parsed.projectId}/applications/${parsed.appId}`);
+}
+
+const resolveAppealSchema = baseSchema.extend({
+  resolution: z.enum(["GRANT", "ALLOW_RESUBMIT", "REJECT"]),
+});
+
+/**
+ * Resolve a pending appeal. Same REVIEWER gate as approve/deny. GRANT reuses
+ * approveApplication (subject to the approval-count / CLA gates, translated
+ * here just like approveAction) and then reopens prior closed PRs via
+ * onApplicationApproved. ALLOW_RESUBMIT / REJECT do not reopen PRs.
+ */
+export async function resolveAppealAction(formData: FormData) {
+  const parsed = resolveAppealSchema.parse({
+    projectId: formData.get("projectId"),
+    appId: formData.get("appId"),
+    reason: String(formData.get("reason") ?? "").trim() || undefined,
+    resolution: formData.get("resolution"),
+  });
+  const { session } = await requireProjectRole(parsed.projectId, "REVIEWER");
+  await ensureApplicationInProject(parsed.projectId, parsed.appId);
+
+  try {
+    await resolveAppeal({
+      applicationId: parsed.appId,
+      resolution: parsed.resolution,
+      resolvedById: session.user.id,
+      note: parsed.reason,
+    });
+  } catch (e) {
+    if (e instanceof ApprovalGateError) {
+      throw new Error(
+        `Approval gate: this project requires ${e.required} approving review${
+          e.required === 1 ? "" : "s"
+        } from other reviewers (currently ${e.have}).`,
+      );
+    }
+    if (e instanceof ClaGateError) {
+      throw new Error(
+        "CLA gate: this applicant must sign the project's Contributor License Agreement before the appeal can be granted.",
+      );
+    }
+    throw e;
+  }
+
+  if (parsed.resolution === "GRANT") {
+    await onApplicationApproved({ applicationId: parsed.appId });
+  }
+
+  revalidatePath(`/dashboard/projects/${parsed.projectId}/applications`);
+  revalidatePath(`/dashboard/projects/${parsed.projectId}/applications/${parsed.appId}`);
+  const slug = await projectSlug(parsed.projectId);
+  if (slug) revalidatePath(`/p/${slug}`);
 }
 
 const noteSchema = z.object({

@@ -16,8 +16,11 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { ApplyForm, type ClaEmbed } from "./apply-form";
-import { applyAction } from "./actions";
+import { AppealForm } from "./appeal-form";
+import { applyAction, appealAction } from "./actions";
+import { isManuallyBlocked } from "@/lib/applications/lifecycle";
 import { getClaStatus } from "@/lib/cla/status";
+import type { FormValue } from "@/components/form-renderer";
 import { replyToCommentAction } from "@/app/dashboard/projects/[id]/applications/[appId]/actions";
 
 const STATUS_VARIANT: Record<
@@ -44,6 +47,7 @@ export default async function PublicProjectPage({
       slug: true,
       description: true,
       formSchema: true,
+      allowAppeals: true,
       claEnabled: true,
       claRequired: true,
       claPlacementEmbed: true,
@@ -110,8 +114,19 @@ export default async function PublicProjectPage({
     ? await prisma.application.findFirst({
         where: { projectId: project.id, userId: session.user.id },
         orderBy: { createdAt: "desc" },
+        include: {
+          appeal: {
+            select: { status: true, message: true, resolutionNote: true },
+          },
+        },
       })
     : null;
+
+  // A manually DENIED contributor cannot apply or appeal (CLA signing on the
+  // standalone /p/<slug>/cla page is unaffected).
+  const blocked =
+    session?.user != null &&
+    (await isManuallyBlocked(project.id, session.user.id));
 
   // Applicant-visible feedback: review summaries with visibility=APPLICANT
   // plus their attached per-field comments and threaded applicant replies.
@@ -218,12 +233,17 @@ export default async function PublicProjectPage({
               >
                 <SubmitButton>Login to apply</SubmitButton>
               </form>
+            ) : blocked ? (
+              <p className="text-sm text-muted-foreground">
+                You are not eligible to contribute to this project.
+              </p>
             ) : (
               <ApplicantSurface
                 existing={existing}
                 projectId={project.id}
                 fields={fields}
                 claEmbed={claEmbed}
+                allowAppeals={project.allowAppeals}
               />
             )}
           </CardContent>
@@ -379,29 +399,54 @@ function ApplicantReviewBlock({
 }
 
 type ApplicantExisting = {
+  id: string;
   status: string;
   createdAt: Date;
   reason: string | null;
+  answers: string;
   allowResubmit: boolean;
   cooldownUntil: Date | null;
+  appeal: {
+    status: string;
+    message: string;
+    resolutionNote: string | null;
+  } | null;
 };
 
 type ApplicantView = {
   derivedStatus: "SUBMITTED" | "APPROVED" | "DENIED" | "PENDING";
   info: React.ReactNode;
   canApply: boolean;
+  canAppeal: boolean;
 };
+
+/** Parse a stored answers JSON blob into FormRenderer-friendly values. */
+function parseAnswerValues(answers: string): Record<string, FormValue> {
+  try {
+    const obj = JSON.parse(answers);
+    if (!obj || typeof obj !== "object" || Array.isArray(obj)) return {};
+    const out: Record<string, FormValue> = {};
+    for (const [k, v] of Object.entries(obj)) {
+      if (typeof v === "string" || typeof v === "boolean") out[k] = v;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
 
 function ApplicantSurface({
   existing,
   projectId,
   fields,
   claEmbed,
+  allowAppeals,
 }: {
   existing: ApplicantExisting | null;
   projectId: string;
   fields: ReturnType<typeof parseFormSchema>;
   claEmbed: ClaEmbed | null;
+  allowAppeals: boolean;
 }) {
   if (!existing) {
     return (
@@ -413,10 +458,27 @@ function ApplicantSurface({
       />
     );
   }
-  const view = deriveApplicantView(existing);
+  const view = deriveApplicantView(existing, allowAppeals);
   return (
     <div className="space-y-4">
       <ExistingApplication derivedStatus={view.derivedStatus} info={view.info} />
+      {view.canAppeal && (
+        <div className="space-y-3 rounded-md border border-border p-4">
+          <div>
+            <h3 className="text-sm font-semibold">Appeal this decision</h3>
+            <p className="text-xs text-muted-foreground">
+              Make your case to the reviewers. You can also revise your answers.
+              You may appeal once.
+            </p>
+          </div>
+          <AppealForm
+            applicationId={existing.id}
+            fields={fields}
+            initialValues={parseAnswerValues(existing.answers)}
+            action={appealAction}
+          />
+        </div>
+      )}
       {view.canApply && (
         <ApplyForm
           projectId={projectId}
@@ -429,7 +491,10 @@ function ApplicantSurface({
   );
 }
 
-function deriveApplicantView(existing: ApplicantExisting): ApplicantView {
+function deriveApplicantView(
+  existing: ApplicantExisting,
+  allowAppeals: boolean,
+): ApplicantView {
   if (existing.status === "SUBMITTED") {
     return {
       derivedStatus: "SUBMITTED",
@@ -440,6 +505,7 @@ function deriveApplicantView(existing: ApplicantExisting): ApplicantView {
         </p>
       ),
       canApply: false,
+      canAppeal: false,
     };
   }
   if (existing.status === "APPROVED") {
@@ -452,27 +518,72 @@ function deriveApplicantView(existing: ApplicantExisting): ApplicantView {
         </p>
       ),
       canApply: false,
+      canAppeal: false,
     };
   }
   // DENIED
+  const appeal = existing.appeal;
+  const reasonNode = existing.reason ? (
+    <p>
+      <strong>Reason:</strong> {existing.reason}
+    </p>
+  ) : null;
+
+  if (appeal?.status === "PENDING") {
+    return {
+      derivedStatus: "DENIED",
+      info: (
+        <div className="space-y-2 text-sm">
+          <p>Your application was declined.</p>
+          {reasonNode}
+          <p>Your appeal was submitted and is under review.</p>
+          {appeal.message && (
+            <div className="rounded-md border border-border bg-muted/20 p-2">
+              <div className="text-xs text-muted-foreground">Your appeal</div>
+              {appeal.message}
+            </div>
+          )}
+        </div>
+      ),
+      canApply: false,
+      canAppeal: false,
+    };
+  }
+
+  const appealRejectedNode =
+    appeal?.status === "REJECTED" ? (
+      <div className="rounded-md border border-border bg-muted/20 p-2">
+        <p>Your appeal was declined.</p>
+        {appeal.resolutionNote && (
+          <p>
+            <strong>Note:</strong> {appeal.resolutionNote}
+          </p>
+        )}
+      </div>
+    ) : null;
+
+  // One appeal per application: only offer it when the project allows appeals
+  // and the applicant has not appealed yet.
+  const canAppeal = allowAppeals && !appeal;
+
   if (!existing.allowResubmit) {
     return {
       derivedStatus: "DENIED",
       info: (
         <div className="space-y-2 text-sm">
           <p>Your application was declined.</p>
-          {existing.reason && (
-            <p>
-              <strong>Reason:</strong> {existing.reason}
-            </p>
-          )}
+          {reasonNode}
+          {appealRejectedNode}
           <p>
-            Re-applying is disabled. Contact a project admin if you believe
-            this is in error.
+            Re-applying is disabled.{" "}
+            {canAppeal
+              ? "You may appeal this decision below."
+              : "Contact a project admin if you believe this is in error."}
           </p>
         </div>
       ),
       canApply: false,
+      canAppeal,
     };
   }
   if (existing.cooldownUntil && existing.cooldownUntil > new Date()) {
@@ -481,11 +592,8 @@ function deriveApplicantView(existing: ApplicantExisting): ApplicantView {
       info: (
         <div className="space-y-2 text-sm">
           <p>Your application was declined.</p>
-          {existing.reason && (
-            <p>
-              <strong>Reason:</strong> {existing.reason}
-            </p>
-          )}
+          {reasonNode}
+          {appealRejectedNode}
           <p>
             You can re-apply on{" "}
             {existing.cooldownUntil.toISOString().slice(0, 10)}.
@@ -493,6 +601,7 @@ function deriveApplicantView(existing: ApplicantExisting): ApplicantView {
         </div>
       ),
       canApply: false,
+      canAppeal,
     };
   }
   // Derived PENDING: previous denial, resubmit allowed and cooldown elapsed.
@@ -501,15 +610,13 @@ function deriveApplicantView(existing: ApplicantExisting): ApplicantView {
     info: (
       <div className="space-y-2 text-sm">
         <p>Your previous application was declined.</p>
-        {existing.reason && (
-          <p>
-            <strong>Reason:</strong> {existing.reason}
-          </p>
-        )}
+        {reasonNode}
+        {appealRejectedNode}
         <p>You may submit a new application below.</p>
       </div>
     ),
     canApply: true,
+    canAppeal,
   };
 }
 

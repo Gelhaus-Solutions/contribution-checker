@@ -5,8 +5,11 @@ import { headers } from "next/headers";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/db";
 import { rateLimit } from "@/lib/ratelimit";
-import { submitApplication } from "@/lib/applications/lifecycle";
-import { notifyAdminsOfNewApplication } from "@/lib/applications/decide";
+import { submitApplication, submitAppeal } from "@/lib/applications/lifecycle";
+import {
+  notifyAdminsOfNewApplication,
+  notifyAdminsOfAppeal,
+} from "@/lib/applications/decide";
 import {
   parseFormSchema,
   buildAnswersSchema,
@@ -27,6 +30,7 @@ import { onClaCoverageChanged } from "@/lib/cla/post-sign";
 import { notifyApplicantClaRequired } from "@/lib/cla/notify";
 import { getClientIp, getClientUserAgent } from "@/lib/http/client";
 import type { ApplyState } from "./apply-form";
+import type { AppealState } from "./appeal-form";
 
 // Verbatim affirmation snapshotted onto the immutable click-wrap signature.
 const CLA_EMBED_AFFIRMATION =
@@ -287,4 +291,80 @@ export async function applyAction(
 
   revalidatePath(`/p/${project.slug}`);
   return { status: "ok", applicationId: result.applicationId };
+}
+
+export async function appealAction(
+  _prev: AppealState,
+  formData: FormData,
+): Promise<AppealState> {
+  const session = await auth();
+  if (!session?.user) {
+    return { status: "error", reason: "Log in first." };
+  }
+  if (session.user.restricted) {
+    return { status: "error", reason: "Your account is restricted." };
+  }
+
+  const applicationId = String(formData.get("applicationId") ?? "");
+  const message = String(formData.get("message") ?? "");
+  if (!applicationId) {
+    return { status: "error", reason: "Missing application." };
+  }
+
+  // Load the application's form schema so we can collect + echo the revised
+  // answers. submitAppeal re-validates them against the same schema.
+  const application = await prisma.application.findUnique({
+    where: { id: applicationId },
+    select: { project: { select: { slug: true, formSchema: true } } },
+  });
+  if (!application) {
+    return { status: "error", reason: "Application not found." };
+  }
+  const fields = parseFormSchema(application.project.formSchema);
+  const submitted = collectAnswers(formData, fields);
+
+  // Rate limit by user (5/hr) and IP (20/hr), same as application submission.
+  const userLimit = await rateLimit({
+    key: `appeal:user:${session.user.id}`,
+    limit: 5,
+    windowMs: 60 * 60 * 1000,
+  });
+  if (!userLimit.ok) {
+    return {
+      status: "error",
+      reason: "Too many submissions. Try again later.",
+      values: submitted,
+      message,
+    };
+  }
+  const headerList = await headers();
+  const ip = getClientIp(headerList);
+  const ipLimit = await rateLimit({
+    key: `appeal:ip:${ip}`,
+    limit: 20,
+    windowMs: 60 * 60 * 1000,
+  });
+  if (!ipLimit.ok) {
+    return {
+      status: "error",
+      reason: "Too many submissions from your network. Try again later.",
+      values: submitted,
+      message,
+    };
+  }
+
+  const result = await submitAppeal({
+    userId: session.user.id,
+    applicationId,
+    message,
+    rawAnswers: submitted,
+  });
+  if (!result.ok) {
+    return { status: "error", reason: result.reason, values: submitted, message };
+  }
+
+  await notifyAdminsOfAppeal({ appealId: result.appealId });
+
+  revalidatePath(`/p/${application.project.slug}`);
+  return { status: "ok" };
 }

@@ -10,6 +10,8 @@ export type NotificationKind =
   | "application.review_submitted"
   | "application.comment_replied"
   | "application.awaiting_review"
+  | "application.appeal_submitted"
+  | "application.appeal_rejected"
   | "project.invited"
   | "pr.blocked"
   | "cla.ccla_signed"
@@ -29,6 +31,8 @@ export const KIND_LABELS: Record<string, string> = {
   "application.revoked": "Approval revoked",
   "application.note_added": "Note added",
   "application.awaiting_review": "Application awaiting review",
+  "application.appeal_submitted": "Appeal submitted",
+  "application.appeal_rejected": "Appeal declined",
   "project.invited": "Invited to a project",
   "pr.blocked": "PR blocked",
   "cla.ccla_signed": "Corporate CLA signed",
@@ -61,7 +65,12 @@ export function notificationHref(
   const projectSlug = str("projectSlug");
   const applicationId = str("applicationId");
 
-  if (kind === "application.submitted" && projectId && applicationId) {
+  if (
+    (kind === "application.submitted" ||
+      kind === "application.appeal_submitted") &&
+    projectId &&
+    applicationId
+  ) {
     return `/dashboard/projects/${projectId}/applications/${applicationId}`;
   }
   if (kind === "project.invited" && projectId) {

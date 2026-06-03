@@ -114,6 +114,23 @@ export default async function ProjectSettings({
                 disables the gate.
               </p>
             </div>
+            <label className="flex items-start gap-3 text-sm">
+              <input
+                type="checkbox"
+                name="allowAppeals"
+                value="1"
+                defaultChecked={project.allowAppeals}
+                className="mt-0.5 h-4 w-4 rounded border-border"
+              />
+              <span>
+                <span className="font-medium">Allow appeals on denied applications</span>
+                <span className="block text-xs text-muted-foreground">
+                  Lets a denied applicant file one appeal (a message plus revised
+                  answers). Reviewers grant, allow resubmit, or reject it from the
+                  application detail page.
+                </span>
+              </span>
+            </label>
             <SubmitButton>Save</SubmitButton>
           </form>
         </CardContent>

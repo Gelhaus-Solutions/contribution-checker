@@ -87,6 +87,7 @@ model User {
   decidedManual   ManualDecision[]   @relation("ManualDecisionDecidedBy")
   appNotes        ApplicationNote[]
   appReviews      ApplicationReview[]
+  resolvedAppeals ApplicationAppeal[] @relation("AppealResolvedBy")
   auditedEvents   AuditEvent[]
   formTemplates   FormTemplate[]
   webhookDeliveries WebhookDelivery[]
@@ -155,6 +156,12 @@ model Project {
   // quality scoring still apply. Existing DENIED applications still block.
   applicationRequired Boolean @default(true)
 
+  // When true, an applicant whose application was DENIED may file a single
+  // appeal (free-text message plus revised answers) on /p/<slug>. Reviewers
+  // resolve appeals (grant / allow-resubmit / reject) from the application
+  // detail page. Independent of allowResubmit/cooldown: an alternate channel.
+  allowAppeals Boolean @default(false)
+
   // ----- CLA (Contributor License Agreement) -----
   claEnabled             Boolean @default(false)
   // Gate (block PRs / approval until signed) vs record-only.
@@ -213,6 +220,7 @@ model Project {
   members      ProjectMember[]
   repos        Repo[]
   applications Application[]
+  appeals      ApplicationAppeal[]
   audits       AuditEvent[]
   webhookDeliveries WebhookDelivery[]
   webhookEndpoints  ProjectWebhook[]
@@ -345,10 +353,53 @@ model Application {
   decidedBy User?               @relation("ApplicationDecidedBy", fields: [decidedById], references: [id], onDelete: SetNull)
   notes     ApplicationNote[]
   reviews   ApplicationReview[]
+  appeal    ApplicationAppeal?
   claSignatures ClaSignature[]
 
   @@index([projectId, status])
   @@index([userId])
+}
+
+/**
+ * A contributor's appeal of a DENIED application. Available only when the
+ * project has allowAppeals=true. Exactly one appeal per application (enforced
+ * by the unique applicationId). Carries a free-text message plus revised
+ * answers (JSON-stringified { fieldId: value }, validated against the
+ * project's current formSchema at submit time via buildAnswersSchema).
+ *
+ * Lifecycle: created PENDING by submitAppeal (src/lib/applications/lifecycle.ts).
+ * Resolved by resolveAppeal (src/lib/applications/decide.ts) to one of:
+ *   GRANTED          (application approved; answers replaced with the revised
+ *                     ones, then approveApplication runs and reopens PRs)
+ *   RESUBMIT_ALLOWED (allowApplicationResubmit ran; application stays DENIED)
+ *   REJECTED         (appeal closed; application stays DENIED)
+ * resolvedById/resolvedAt/resolutionNote are set on any resolution.
+ */
+model ApplicationAppeal {
+  id            String   @id @default(cuid())
+  applicationId String   @unique
+  projectId     String
+  status        String   @default("PENDING") // "PENDING" | "GRANTED" | "RESUBMIT_ALLOWED" | "REJECTED"
+
+  // Free-text appeal message from the applicant.
+  message String
+
+  // JSON-stringified { fieldId: value }: revised answers validated against the
+  // project's current formSchema at submit time. Same encoding as Application.answers.
+  answers String @default("{}")
+
+  resolvedById   String?
+  resolvedAt     DateTime?
+  resolutionNote String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  project     Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  resolvedBy  User?       @relation("AppealResolvedBy", fields: [resolvedById], references: [id], onDelete: SetNull)
+
+  @@index([projectId, status])
 }
 
 /**

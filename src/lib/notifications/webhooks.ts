@@ -13,6 +13,8 @@ export type OutboundEvent =
   | "application.approved"
   | "application.denied"
   | "application.revoked"
+  | "application.appeal_submitted"
+  | "application.appeal_resolved"
   | "pr.blocked"
   | "cla.ccla_signed"
   | "cla.roster_changed"
@@ -46,6 +48,8 @@ const DISCORD_COLOR: Record<OutboundEvent, number> = {
   "application.approved": 0x22c55e, // green
   "application.denied": 0xef4444, // red
   "application.revoked": 0xf59e0b, // amber
+  "application.appeal_submitted": 0x3b82f6, // blue
+  "application.appeal_resolved": 0x22c55e, // green
   "pr.blocked": 0xef4444, // red
   "cla.ccla_signed": 0x22c55e, // green
   "cla.roster_changed": 0x3b82f6, // blue
@@ -57,6 +61,8 @@ const DISCORD_TITLE: Record<OutboundEvent, string> = {
   "application.approved": "Application approved",
   "application.denied": "Application denied",
   "application.revoked": "Application revoked",
+  "application.appeal_submitted": "Appeal submitted",
+  "application.appeal_resolved": "Appeal resolved",
   "pr.blocked": "Pull request blocked",
   "cla.ccla_signed": "Corporate CLA signed",
   "cla.roster_changed": "CCLA roster changed",

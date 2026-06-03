@@ -18,6 +18,8 @@ const STATUS_OPTIONS = [
   { value: "SUBMITTED", label: "Submitted" },
   { value: "APPROVED", label: "Approved" },
   { value: "DENIED", label: "Denied" },
+  // Synthetic: denied applications with a pending appeal (not an Application.status).
+  { value: "APPEALED", label: "Appealed" },
 ] as const;
 
 const STATUS_VARIANT: Record<
@@ -48,20 +50,28 @@ export default async function ProjectApplications({
       ? status
       : "SUBMITTED";
 
-  const where: Prisma.ApplicationWhereInput = {
-    projectId: id,
-    status: filterStatus,
-    ...(q
+  const searchClause = q
+    ? {
+        user: {
+          OR: [
+            { ghLogin: { contains: q, mode: "insensitive" as const } },
+            { name: { contains: q, mode: "insensitive" as const } },
+          ],
+        },
+      }
+    : {};
+
+  // "Appealed" is a synthetic bucket: denied applications that have a pending
+  // appeal. Every other tab filters straight on Application.status.
+  const where: Prisma.ApplicationWhereInput =
+    filterStatus === "APPEALED"
       ? {
-          user: {
-            OR: [
-              { ghLogin: { contains: q, mode: "insensitive" } },
-              { name: { contains: q, mode: "insensitive" } },
-            ],
-          },
+          projectId: id,
+          status: "DENIED",
+          appeal: { is: { status: "PENDING" } },
+          ...searchClause,
         }
-      : {}),
-  };
+      : { projectId: id, status: filterStatus, ...searchClause };
 
   const [apps, total] = await prisma.$transaction([
     prisma.application.findMany({
