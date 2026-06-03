@@ -116,11 +116,39 @@ const baseOpts = {
   secretServerKey: requireEnv("STACK_SECRET_SERVER_KEY"),
   baseUrl: process.env.STACK_API_URL,
 };
+// Skip the admin-only permission-definition provisioning when there's no
+// super-secret admin key (or SKIP_PROVISION=1). Some Hexclave instances don't
+// expose an admin key; in that case create the definitions once in the
+// dashboard (see the checklist printed at startup) and the rest of the backfill
+// runs on the server key alone (team creation + role grants).
+const SKIP_PROVISION =
+  process.env.SKIP_PROVISION === "1" ||
+  !process.env.STACK_SUPER_SECRET_ADMIN_KEY;
+
 const stackApp = new StackServerApp(baseOpts);
-const adminApp = new StackAdminApp({
-  ...baseOpts,
-  superSecretAdminKey: requireEnv("STACK_SUPER_SECRET_ADMIN_KEY"),
-});
+const adminApp = SKIP_PROVISION
+  ? null
+  : new StackAdminApp({
+      ...baseOpts,
+      superSecretAdminKey: requireEnv("STACK_SUPER_SECRET_ADMIN_KEY"),
+    });
+
+/** Human checklist of the team permission definitions to create in the
+ * dashboard when provisioning is skipped (ids must match PERMISSION_CATALOG). */
+function printDefinitionChecklist(): void {
+  console.log(
+    "Skipping permission-definition provisioning (no admin key / SKIP_PROVISION).",
+  );
+  console.log(
+    "Create these TEAM permissions in the Hexclave dashboard (leaves first, then bundles):",
+  );
+  for (const def of PERMISSION_CATALOG) {
+    const contains = def.containedPermissionIds.length
+      ? ` -> contains: ${def.containedPermissionIds.join(", ")}`
+      : "";
+    console.log(`  - ${def.id}${contains}`);
+  }
+}
 
 function sameSet(a: string[], b: string[]): boolean {
   if (a.length !== b.length) return false;
@@ -130,6 +158,7 @@ function sameSet(a: string[], b: string[]): boolean {
 }
 
 async function provisionDefinitions(): Promise<void> {
+  if (!adminApp) return; // server-key-only mode; definitions created in dashboard
   const existing = new Map<string, { containedPermissionIds: string[]; description?: string }>();
   let cursor: string | undefined;
   do {
@@ -334,7 +363,11 @@ async function backfillProject(
 
 async function main(): Promise<void> {
   console.log("== provisioning team permission definitions ==");
-  await provisionDefinitions();
+  if (SKIP_PROVISION) {
+    printDefinitionChecklist();
+  } else {
+    await provisionDefinitions();
+  }
 
   console.log("== bootstrapping Instance Admin team ==");
   await bootstrapInstanceAdmins();

@@ -1,5 +1,6 @@
 import "server-only";
 import {
+  permissionsForRole,
   PROJECT_ADMIN_PERMISSION,
   PROJECT_LEAF_PERMISSIONS,
   PROJECT_OWNER_PERMISSION,
@@ -205,10 +206,17 @@ export async function readTeamMemberships(teamId: string): Promise<
   const members = team ? await team.listUsers() : [];
   return members.map((m) => {
     const ids = byUser.get(m.id) ?? new Set<string>();
+    const role = highestRole(ids);
+    // Derive leaves from the role preset (local truth) plus any directly-granted
+    // extra leaves, rather than relying on SA recursive expansion. This stays
+    // correct even if the dashboard-created bundle definitions don't have their
+    // containedPermissionIds set.
+    const roleLeaves = role ? permissionsForRole(role) : [];
+    const extraLeaves = [...ids].filter((id) => LEAF_SET.has(id));
     return {
       stackUserId: m.id,
-      role: highestRole(ids),
-      leaves: [...ids].filter((id) => LEAF_SET.has(id)),
+      role,
+      leaves: [...new Set<string>([...roleLeaves, ...extraLeaves])],
     };
   });
 }
