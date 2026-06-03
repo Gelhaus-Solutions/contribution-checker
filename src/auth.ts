@@ -67,7 +67,7 @@ export async function auth(): Promise<Session | null> {
     }
 
     // Resolve org roles live, then keep the local cache columns in sync.
-    const roles = await resolveOrgRoles(stackUser, u.ghLogin);
+    const roles = await resolveOrgRoles(stackUser);
     if (
       roles.isSuperAdmin !== u.isSuperAdmin ||
       roles.canCreateProj !== u.canCreateProj

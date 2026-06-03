@@ -1,6 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
-import { requireProjectRole } from "@/lib/authz";
+import { requireProjectPermission } from "@/lib/authz";
 import {
   Card,
   CardContent,
@@ -22,7 +22,7 @@ export default async function AuditLog({
 }) {
   const { id } = await params;
   const sp = await searchParams;
-  await requireProjectRole(id, "ADMIN");
+  await requireProjectPermission(id, "project_audit_view");
 
   const { page, perPage, skip, take, q } = parsePageParams(sp);
 

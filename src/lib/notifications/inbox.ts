@@ -21,6 +21,96 @@ export type NotificationKind =
   | "cla.pending_change"
   | "cla.signature_required";
 
+/** Human labels for notification kinds (shared by the inbox page + the bell). */
+export const KIND_LABELS: Record<string, string> = {
+  "application.submitted": "New application",
+  "application.approved": "Application approved",
+  "application.denied": "Application denied",
+  "application.revoked": "Approval revoked",
+  "application.note_added": "Note added",
+  "application.awaiting_review": "Application awaiting review",
+  "project.invited": "Invited to a project",
+  "pr.blocked": "PR blocked",
+  "cla.ccla_signed": "Corporate CLA signed",
+  "cla.ccla_approved": "Corporate CLA approved",
+  "cla.ccla_rejected": "Corporate CLA rejected",
+  "cla.roster_changed": "Corporate CLA roster changed",
+  "cla.roster_disputed": "Corporate CLA membership disputed",
+  "cla.signature_required": "Sign the CLA",
+  "cla.resign_required": "Re-sign the CLA",
+};
+
+/** Tolerant parse of a notification's JSON payload (never throws). */
+export function parseNotificationPayload(raw: string): Record<string, unknown> {
+  try {
+    const v = JSON.parse(raw);
+    return v && typeof v === "object" ? (v as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+}
+
+/** Resolve the click-through href for a notification (shared by page + bell). */
+export function notificationHref(
+  kind: string,
+  payload: Record<string, unknown>,
+): string | null {
+  const str = (k: string) =>
+    typeof payload[k] === "string" ? (payload[k] as string) : null;
+  const projectId = str("projectId");
+  const projectSlug = str("projectSlug");
+  const applicationId = str("applicationId");
+
+  if (kind === "application.submitted" && projectId && applicationId) {
+    return `/dashboard/projects/${projectId}/applications/${applicationId}`;
+  }
+  if (kind === "project.invited" && projectId) {
+    return `/dashboard/projects/${projectId}`;
+  }
+  if (
+    (kind === "cla.signature_required" || kind === "cla.resign_required") &&
+    projectSlug
+  ) {
+    return `/p/${projectSlug}/cla`;
+  }
+  return projectSlug ? `/p/${projectSlug}` : null;
+}
+
+export type RecentNotification = {
+  id: string;
+  label: string;
+  href: string | null;
+  createdAt: string;
+  read: boolean;
+};
+
+/**
+ * A small, serializable preview of the latest notifications + the unread count,
+ * for the header notification bell. Read-only (does not mark anything read).
+ */
+export async function getRecentNotifications(
+  userId: string,
+  take = 8,
+): Promise<{ items: RecentNotification[]; unread: number }> {
+  const [{ items }, unread] = await Promise.all([
+    listNotifications(userId, { take }),
+    unreadCount(userId),
+  ]);
+  return {
+    unread,
+    items: items.map((n) => {
+      const payload = parseNotificationPayload(n.payload);
+      return {
+        id: n.id,
+        label: KIND_LABELS[n.kind] ?? n.kind,
+        href: notificationHref(n.kind, payload),
+        createdAt: n.createdAt.toISOString(),
+        read: !!n.readAt,
+      };
+    }),
+  };
+}
+
 export async function notifyUser(args: {
   userId: string;
   kind: NotificationKind;

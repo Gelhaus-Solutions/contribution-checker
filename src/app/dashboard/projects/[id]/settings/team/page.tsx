@@ -1,5 +1,12 @@
 import Image from "next/image";
-import { requireProjectRole } from "@/lib/authz";
+import {
+  LEAF_LABELS,
+  parseLeafPermissions,
+  permissionsForRole,
+  PROJECT_LEAF_PERMISSIONS,
+  type ProjectRoleName,
+} from "@/lib/auth/constants";
+import { requireProjectPermission } from "@/lib/authz";
 import { listMembers } from "@/lib/teams";
 import {
   Card,
@@ -16,6 +23,26 @@ import { SearchInput } from "@/components/ui/search-input";
 import { parsePageParams, type SearchParamRecord } from "@/lib/pagination";
 import { inviteMember, removeMemberAction, changeRoleAction } from "./actions";
 import { RoleSelect } from "./role-select";
+import {
+  PermissionToggles,
+  type ToggleCandidate,
+} from "./permission-toggles";
+
+/** Leaves a member can be explicitly granted beyond their role preset. */
+function extraCandidates(
+  role: string,
+  current: string[],
+): ToggleCandidate[] {
+  const preset = new Set(permissionsForRole(role as ProjectRoleName));
+  const granted = new Set(current);
+  return PROJECT_LEAF_PERMISSIONS.filter((leaf) => !preset.has(leaf)).map(
+    (leaf) => ({
+      id: leaf,
+      label: LEAF_LABELS[leaf],
+      granted: granted.has(leaf),
+    }),
+  );
+}
 
 export default async function ProjectTeam({
   params,
@@ -25,7 +52,7 @@ export default async function ProjectTeam({
   searchParams: Promise<SearchParamRecord>;
 }) {
   const { id } = await params;
-  const { session, role: viewerRole } = await requireProjectRole(id, "ADMIN");
+  const { session, role: viewerRole } = await requireProjectPermission(id, "project_members_manage");
   const { q } = parsePageParams(await searchParams);
   const allMembers = await listMembers(id);
   const needle = q.toLowerCase();
@@ -90,55 +117,68 @@ export default async function ProjectTeam({
             </div>
           ) : (
           <ul className="divide-y divide-border">
-            {members.map((m) => (
-              <li
-                key={m.id}
-                className="flex items-center justify-between gap-3 px-6 py-3"
-              >
-                <div className="flex items-center gap-3">
-                  {m.user.image && (
-                    <Image
-                      src={m.user.image}
-                      alt={m.user.ghLogin ?? ""}
-                      width={28}
-                      height={28}
-                      className="rounded-full"
-                    />
-                  )}
-                  <div>
-                    <div className="text-sm font-medium">
-                      {m.user.ghLogin ?? "(no login)"}
+            {members.map((m) => {
+              const editable =
+                m.role !== "OWNER" && m.userId !== session.user.id;
+              return (
+                <li key={m.id} className="px-6 py-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      {m.user.image && (
+                        <Image
+                          src={m.user.image}
+                          alt={m.user.ghLogin ?? ""}
+                          width={28}
+                          height={28}
+                          className="rounded-full"
+                        />
+                      )}
+                      <div>
+                        <div className="text-sm font-medium">
+                          {m.user.ghLogin ?? "(no login)"}
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          {m.user.name}
+                        </div>
+                      </div>
                     </div>
-                    <div className="text-xs text-muted-foreground">
-                      {m.user.name}
+                    <div className="flex items-center gap-2">
+                      <Badge variant="outline">{m.role}</Badge>
+                      {editable && (
+                        <>
+                          <form action={changeRoleAction}>
+                            <input type="hidden" name="projectId" value={id} />
+                            <input type="hidden" name="memberId" value={m.id} />
+                            <RoleSelect defaultValue={m.role} />
+                          </form>
+                          <form action={removeMemberAction}>
+                            <input type="hidden" name="projectId" value={id} />
+                            <input type="hidden" name="memberId" value={m.id} />
+                            <SubmitButton
+                              size="sm"
+                              variant="ghost"
+                              className="text-destructive hover:bg-destructive/10"
+                            >
+                              Remove
+                            </SubmitButton>
+                          </form>
+                        </>
+                      )}
                     </div>
                   </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Badge variant="outline">{m.role}</Badge>
-                  {m.role !== "OWNER" && m.userId !== session.user.id && (
-                    <>
-                      <form action={changeRoleAction}>
-                        <input type="hidden" name="projectId" value={id} />
-                        <input type="hidden" name="memberId" value={m.id} />
-                        <RoleSelect defaultValue={m.role} />
-                      </form>
-                      <form action={removeMemberAction}>
-                        <input type="hidden" name="projectId" value={id} />
-                        <input type="hidden" name="memberId" value={m.id} />
-                        <SubmitButton
-                          size="sm"
-                          variant="ghost"
-                          className="text-destructive hover:bg-destructive/10"
-                        >
-                          Remove
-                        </SubmitButton>
-                      </form>
-                    </>
+                  {editable && (
+                    <PermissionToggles
+                      projectId={id}
+                      memberId={m.id}
+                      candidates={extraCandidates(
+                        m.role,
+                        parseLeafPermissions(m.permissions),
+                      )}
+                    />
                   )}
-                </div>
-              </li>
-            ))}
+                </li>
+              );
+            })}
           </ul>
           )}
         </CardContent>

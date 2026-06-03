@@ -53,7 +53,17 @@ export type AuditKind =
   | "cla.signatures_exported"
   | "cla.notify_unsigned_started"
   | "cla.notify_unsigned_completed"
+  // Stack Auth (Hexclave) teams/permissions migration
+  | "team.provisioned"
+  | "team.provision_failed"
+  | "team.reconciled"
+  | "member.permission_granted"
+  | "member.permission_revoked"
   // App-level (projectId may be null)
+  | "stack.permissions_provisioned"
+  | "instance_admins_seeded"
+  | "user.superadmin_granted"
+  | "user.superadmin_revoked"
   | "vault.resolution_failed"
   | "vault.cache_invalidated";
 

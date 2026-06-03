@@ -1,8 +1,7 @@
 import "server-only";
 import * as Sentry from "@sentry/nextjs";
-import type { ServerTeam, ServerUser } from "@hexclave/next";
+import type { ServerUser } from "@hexclave/next";
 import { prisma } from "@/lib/db";
-import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
 import {
   CREATE_PROJECT_PERMISSION,
@@ -11,6 +10,7 @@ import {
   getStackServerApp,
   SUPER_ADMIN_PERMISSION,
 } from "@/lib/stack";
+import { isInstanceAdminTeam } from "@/lib/stack-provisioning";
 import { isValidCountryCode } from "@/lib/countries";
 
 type GithubUser = {
@@ -129,48 +129,28 @@ export async function syncGitHubIdentity(
 export type OrgRoles = { isSuperAdmin: boolean; canCreateProj: boolean };
 
 /**
- * A team confers org roles via its metadata (client-read-only or server
- * metadata, merged with server winning):
- *   - `grantedRoles: string[]`  -> every member of the team gets these roles.
- *   - `roleWhitelist: true`     -> team permissions named super_admin /
- *                                  create_project held WITHIN this team count
- *                                  toward those roles (team permissions only
- *                                  apply for whitelisted teams).
- */
-function teamRoleMeta(team: ServerTeam): {
-  grantedRoles: string[];
-  roleWhitelist: boolean;
-} {
-  const merged = {
-    ...((team.clientReadOnlyMetadata as Record<string, unknown> | null) ?? {}),
-    ...((team.serverMetadata as Record<string, unknown> | null) ?? {}),
-  };
-  const grantedRoles = Array.isArray(merged.grantedRoles)
-    ? merged.grantedRoles.map(String)
-    : [];
-  return { grantedRoles, roleWhitelist: merged.roleWhitelist === true };
-}
-
-/**
- * Resolve a user's org roles (super-admin / can-create-project). A user has a
- * role if ANY of:
- *   1. the SUPER_ADMINS / PROJECT_CREATORS env CSV lists their GitHub login,
- *   2. they hold the matching PROJECT (global) permission,
- *   3. they're a member of a team whose metadata `grantedRoles` includes it, or
- *   4. they hold the matching TEAM permission in a team whose metadata sets
- *      `roleWhitelist: true`.
- * Pure: reads only, no writes. Hexclave is the source of truth; the local
- * columns are a cache that auth() keeps in sync.
+ * Resolve a user's org roles (super-admin / can-create-project). Stack Auth is
+ * the source of truth and the live authority is:
+ *   - SUPER-ADMIN: membership in the Instance Admin team (server-trusted by the
+ *     `instanceAdmin` serverMetadata marker or the STACK_INSTANCE_ADMIN_TEAM_ID
+ *     env pin; see isInstanceAdminTeam), with the global `super_admin` project
+ *     permission kept only as an explicit break-glass fallback.
+ *   - CAN-CREATE-PROJECT: the global `create_project` permission, or implied by
+ *     super-admin.
+ *
+ * The SUPER_ADMINS / PROJECT_CREATORS env CSVs are NO LONGER a live grant: they
+ * only seed the Instance Admin team once (see bootstrapInstanceAdmins). The
+ * previous client-settable team-metadata `grantedRoles` path is removed (it was
+ * a privilege-escalation hole). Pure: reads only, no writes. auth() keeps the
+ * local cache columns in sync from this.
  */
 export async function resolveOrgRoles(
   stackUser: ServerUser,
-  ghLogin: string | null,
 ): Promise<OrgRoles> {
-  const lower = (ghLogin ?? "").toLowerCase();
-  let isSuperAdmin = !!lower && env.superAdmins.includes(lower);
-  let canCreateProj = !!lower && env.projectCreators.includes(lower);
+  let isSuperAdmin = false;
+  let canCreateProj = false;
 
-  // 2. Direct project (global) permissions.
+  // Global project (break-glass) permissions.
   try {
     if (await stackUser.getPermission(SUPER_ADMIN_PERMISSION)) isSuperAdmin = true;
     if (await stackUser.getPermission(CREATE_PROJECT_PERMISSION))
@@ -182,24 +162,14 @@ export async function resolveOrgRoles(
     );
   }
 
-  // 3/4. Team metadata grants + whitelisted-team team permissions.
+  // Instance Admin team membership = super-admin (the primary live authority).
   try {
     const teams = await stackUser.listTeams();
-    for (const team of teams) {
-      const { grantedRoles, roleWhitelist } = teamRoleMeta(team);
-      if (grantedRoles.includes(SUPER_ADMIN_PERMISSION)) isSuperAdmin = true;
-      if (grantedRoles.includes(CREATE_PROJECT_PERMISSION)) canCreateProj = true;
-      if (roleWhitelist) {
-        if (await stackUser.getPermission(team, SUPER_ADMIN_PERMISSION))
-          isSuperAdmin = true;
-        if (await stackUser.getPermission(team, CREATE_PROJECT_PERMISSION))
-          canCreateProj = true;
-      }
-    }
+    if (teams.some((team) => isInstanceAdminTeam(team))) isSuperAdmin = true;
   } catch (e) {
     logger.warn(
       { err: e, "stack.user_id": stackUser.id },
-      "auth: reading team roles failed",
+      "auth: reading team memberships failed",
     );
   }
 
@@ -215,10 +185,9 @@ export async function resolveOrgRoles(
  */
 export async function reconcileOrgPermissions(
   stackUser: ServerUser,
-  ghLogin: string | null,
   localUserId: string,
 ): Promise<void> {
-  const roles = await resolveOrgRoles(stackUser, ghLogin);
+  const roles = await resolveOrgRoles(stackUser);
   await prisma.user.update({
     where: { id: localUserId },
     data: { isSuperAdmin: roles.isSuperAdmin, canCreateProj: roles.canCreateProj },

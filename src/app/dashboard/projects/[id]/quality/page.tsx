@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/db";
-import { requireProjectRole, roleAtLeast } from "@/lib/authz";
+import { requireProjectPermission, roleAtLeast } from "@/lib/authz";
 import {
   Card,
   CardContent,
@@ -39,7 +39,7 @@ export default async function ProjectQualityPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const { role } = await requireProjectRole(id, "REVIEWER");
+  const { role } = await requireProjectPermission(id, "project_quality_view");
   const canEdit = roleAtLeast(role, "ADMIN");
 
   const project = await prisma.project.findUnique({

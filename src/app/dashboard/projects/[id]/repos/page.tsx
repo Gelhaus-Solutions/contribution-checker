@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/db";
-import { requireProjectRole } from "@/lib/authz";
+import { requireProjectPermission } from "@/lib/authz";
 import { env } from "@/lib/env";
 import { getAppSlug } from "@/lib/github/app";
 import { notFound } from "next/navigation";
@@ -193,7 +193,7 @@ export default async function ProjectRepos({
 }) {
   const { id } = await params;
   const { q } = parsePageParams(await searchParams);
-  await requireProjectRole(id, "ADMIN");
+  await requireProjectPermission(id, "project_repos_manage");
 
   const project = await prisma.project.findUnique({
     where: { id },

@@ -2,7 +2,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db";
-import { requireProjectRole, getProjectMembership, roleAtLeast, type Role } from "@/lib/authz";
+import { requireProjectPermission, getProjectMembership, roleAtLeast, type Role } from "@/lib/authz";
 import { parseFormSchema } from "@/lib/applications/schema";
 import {
   Card,
@@ -40,7 +40,7 @@ export default async function ApplicationDetail({
   params: Promise<{ id: string; appId: string }>;
 }) {
   const { id, appId } = await params;
-  const { session } = await requireProjectRole(id, "REVIEWER");
+  const { session } = await requireProjectPermission(id, "project_applications_review");
 
   const app = await prisma.application.findFirst({
     where: { id: appId, projectId: id },

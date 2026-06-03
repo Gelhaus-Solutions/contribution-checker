@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { SiteHeader } from "@/components/site-header";
-import { requireSession } from "@/lib/authz";
+import { getProjectPermissions, requireSession } from "@/lib/authz";
+import { prisma } from "@/lib/db";
 import { getProjectForViewer } from "@/lib/projects";
 import { ProjectNav } from "./nav";
 
@@ -14,8 +15,29 @@ export default async function ProjectLayout({
 }) {
   const { id } = await params;
   const session = await requireSession();
+  const isSuperAdmin = session.user.isSuperAdmin;
   const data = await getProjectForViewer(id, session.user.id);
-  if (!data) notFound();
+
+  // Members see their project. Super-admins can view any project even without a
+  // membership row (synthesized as OWNER).
+  let project: { name: string; slug: string };
+  let role: string;
+  if (data) {
+    project = { name: data.project.name, slug: data.project.slug };
+    role = data.role;
+  } else if (isSuperAdmin) {
+    const p = await prisma.project.findUnique({
+      where: { id },
+      select: { name: true, slug: true },
+    });
+    if (!p) notFound();
+    project = p;
+    role = "OWNER";
+  } else {
+    notFound();
+  }
+
+  const perms = await getProjectPermissions(id, session.user.id, isSuperAdmin);
 
   return (
     <>
@@ -27,9 +49,9 @@ export default async function ProjectLayout({
               <Link href="/dashboard" className="text-xs text-muted-foreground hover:underline">
                 ← All projects
               </Link>
-              <h1 className="text-xl font-semibold">{data.project.name}</h1>
+              <h1 className="text-xl font-semibold">{project.name}</h1>
               <p className="text-xs text-muted-foreground">
-                /p/{data.project.slug} · role: {data.role}
+                /p/{project.slug} · role: {role}
               </p>
             </div>
           </div>
@@ -37,7 +59,7 @@ export default async function ProjectLayout({
       </div>
       <div className="mx-auto max-w-6xl px-4 py-6">
         <div className="grid gap-6 md:grid-cols-[180px_1fr]">
-          <ProjectNav id={id} role={data.role} />
+          <ProjectNav id={id} perms={perms} />
           <div>{children}</div>
         </div>
       </div>

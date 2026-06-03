@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/db";
-import { requireProjectRole, roleAtLeast } from "@/lib/authz";
+import { requireProjectPermission, roleAtLeast } from "@/lib/authz";
 import {
   Card,
   CardContent,
@@ -19,7 +19,7 @@ export default async function ProjectPeople({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const { role } = await requireProjectRole(id, "REVIEWER");
+  const { role } = await requireProjectPermission(id, "project_people_view");
   const canEdit = roleAtLeast(role, "ADMIN");
 
   const [manual, applications] = await Promise.all([

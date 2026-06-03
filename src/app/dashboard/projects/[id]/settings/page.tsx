@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { prisma } from "@/lib/db";
-import { requireProjectRole } from "@/lib/authz";
+import { requireProjectPermission } from "@/lib/authz";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -25,7 +25,7 @@ export default async function ProjectSettings({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  await requireProjectRole(id, "ADMIN");
+  await requireProjectPermission(id, "project_settings_manage");
 
   const project = await prisma.project.findUnique({ where: { id } });
   if (!project) return null;

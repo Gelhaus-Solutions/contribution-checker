@@ -45,6 +45,13 @@ export const KNOWN_SECRET_NAMES = [
   "SMTP_USER",
   "SMTP_PASS",
   "SMTP_FROM",
+  // Hexclave (Stack Auth). The publishable client key and project id are public
+  // and read directly from process.env; the secret/admin keys and the webhook
+  // signing secret may live in Vault, so they're listed here to pre-warm and to
+  // surface on the /admin/vault status page.
+  "STACK_SECRET_SERVER_KEY",
+  "STACK_SUPER_SECRET_ADMIN_KEY",
+  "STACK_WEBHOOK_SECRET",
 ] as const;
 
 export type SecretName = (typeof KNOWN_SECRET_NAMES)[number] | string;

@@ -3,30 +3,33 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/cn";
-import type { Role } from "@/lib/authz";
+import { NAV_PERMISSION } from "@/lib/auth/constants";
 
-const items: { href: string; label: string; minRole: Role }[] = [
-  { href: "", label: "Overview", minRole: "REVIEWER" },
-  { href: "/applications", label: "Applications", minRole: "REVIEWER" },
-  { href: "/people", label: "People", minRole: "REVIEWER" },
-  { href: "/prs", label: "PRs", minRole: "REVIEWER" },
-  { href: "/repos", label: "Repos", minRole: "ADMIN" },
-  { href: "/form", label: "Form", minRole: "REVIEWER" },
-  { href: "/quality", label: "Quality", minRole: "REVIEWER" },
-  { href: "/cla", label: "CLA", minRole: "ADMIN" },
-  { href: "/settings", label: "Settings", minRole: "ADMIN" },
-  { href: "/audit", label: "Audit log", minRole: "ADMIN" },
+// Each surface is gated by the leaf permission in NAV_PERMISSION (the single
+// contract in constants.ts). Filtering by the viewer's effective leaf set
+// reproduces today's role-rank visibility while letting an explicit extra-access
+// grant reveal an individual surface.
+const items: { href: string; label: string }[] = [
+  { href: "", label: "Overview" },
+  { href: "/applications", label: "Applications" },
+  { href: "/people", label: "People" },
+  { href: "/prs", label: "PRs" },
+  { href: "/repos", label: "Repos" },
+  { href: "/form", label: "Form" },
+  { href: "/quality", label: "Quality" },
+  { href: "/cla", label: "CLA" },
+  { href: "/settings", label: "Settings" },
+  { href: "/audit", label: "Audit log" },
 ];
 
-const RANK = { REVIEWER: 1, ADMIN: 2, OWNER: 3 } as const;
-
-export function ProjectNav({ id, role }: { id: string; role: Role }) {
+export function ProjectNav({ id, perms }: { id: string; perms: string[] }) {
   const pathname = usePathname();
   const base = `/dashboard/projects/${id}`;
+  const granted = new Set(perms);
   return (
     <nav className="flex flex-col gap-1 text-sm">
       {items
-        .filter((i) => RANK[role] >= RANK[i.minRole])
+        .filter((i) => granted.has(NAV_PERMISSION[i.href]))
         .map((i) => {
           const href = `${base}${i.href}`;
           const active =

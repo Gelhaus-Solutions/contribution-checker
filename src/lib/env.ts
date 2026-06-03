@@ -57,6 +57,13 @@ const schema = z.object({
   STACK_API_URL: z.string().url().optional(),
   // Svix signing secret for verifying Hexclave webhooks (user.created, etc.).
   STACK_WEBHOOK_SECRET: z.string().optional(),
+  // Super-secret admin key for the StackAdminApp. Required only for managing
+  // permission DEFINITIONS (the project permission hierarchy) and the Instance
+  // Admin team; the normal request path never needs it. May live in Vault.
+  STACK_SUPER_SECRET_ADMIN_KEY: z.string().optional(),
+  // Optional pin for the Instance Admin team. When unset, the team is discovered
+  // by its server-only `instanceAdmin` metadata marker (see stack-provisioning).
+  STACK_INSTANCE_ADMIN_TEAM_ID: z.string().optional(),
 
   SMTP_HOST: z.string().optional(),
   SMTP_PORT: z.coerce.number().int().positive().default(587),
@@ -147,6 +154,14 @@ export const env = {
     !!raw.STACK_PROJECT_ID &&
     !!raw.STACK_PUBLISHABLE_CLIENT_KEY &&
     presentInEnvOrVault("STACK_SECRET_SERVER_KEY"),
+  // Admin-app capable: the StackAdminApp can be built (permission-definition
+  // provisioning + Instance Admin team management). The hot path never needs
+  // this; provisioning/bootstrap short-circuits with a log when it's false.
+  stackAdminConfigured:
+    !!raw.STACK_PROJECT_ID &&
+    !!raw.STACK_PUBLISHABLE_CLIENT_KEY &&
+    presentInEnvOrVault("STACK_SECRET_SERVER_KEY") &&
+    presentInEnvOrVault("STACK_SUPER_SECRET_ADMIN_KEY"),
   githubAppConfigured:
     presentInEnvOrVault("GITHUB_APP_ID") &&
     presentInEnvOrVault("GITHUB_APP_PRIVATE_KEY") &&
