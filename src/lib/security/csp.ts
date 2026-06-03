@@ -16,6 +16,23 @@ function originOf(url: string | undefined): string | null {
   }
 }
 
+/**
+ * Operator-configurable EXTRA domains, appended to the existing CSP's
+ * resource directives. One env var, `CSP_EXTRA_DOMAINS`, space- or
+ * comma-separated; supports wildcard hosts (e.g. `https://*.example.com`),
+ * plain domains, and scheme tokens (`data:`, `blob:`). Read from process.env
+ * directly so this stays edge-safe (middleware runs on the edge runtime and
+ * can't import the Node env module).
+ */
+function extraDomains(): string[] {
+  const raw = process.env.CSP_EXTRA_DOMAINS;
+  if (!raw) return [];
+  return raw
+    .split(/[\s,]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
 /** Sentry CSP report ingest URL (Settings -> Security Headers), if configured. */
 export function cspReportEndpoint(): string | null {
   const raw = process.env.SENTRY_CSP_ENDPOINT;
@@ -33,33 +50,62 @@ export function buildCsp(): string {
   // also bundles Stripe (Hexclave billing), which loads js.stripe.com and talks
   // to api.stripe.com / renders Stripe iframes, so those hosts are allowed too.
   const stackOrigin = originOf(process.env.STACK_API_URL);
-  const connectSrc = [
-    "'self'",
-    "https://*.sentry.io",
-    "https://*.ingest.sentry.io",
-    "https://*.ingest.us.sentry.io",
-    "https://*.ingest.de.sentry.io",
-    "https://api.stripe.com",
-    stackOrigin,
-  ]
-    .filter(Boolean)
-    .join(" ");
+
+  // Operator-added domains, appended to the resource directives so an allowed
+  // domain works wherever the page needs it (connect/img/script/style/font/
+  // frame/media/worker). `data:`/`blob:` are in connect-src because the Hexclave
+  // SDK fetch()es data:/blob: URLs (e.g. avatar images on the account-settings
+  // page); a Fetch is governed by connect-src, not img-src.
+  const extra = extraDomains();
 
   const directives = [
-    "default-src 'self'",
-    "img-src 'self' https://avatars.githubusercontent.com data: blob:",
-    "media-src 'self' blob:",
-    "script-src 'self' 'unsafe-inline' 'unsafe-eval' blob: https://js.stripe.com",
-    "worker-src 'self' blob:",
-    "style-src 'self' 'unsafe-inline'",
-    "font-src 'self' data:",
-    `connect-src ${connectSrc}`,
-    "frame-src 'self' https://js.stripe.com https://hooks.stripe.com",
-    "frame-ancestors 'none'",
-    "base-uri 'self'",
-    "form-action 'self'",
-    "object-src 'none'",
-  ];
+    ["default-src", "'self'", ...extra],
+    [
+      "img-src",
+      "'self'",
+      "https://avatars.githubusercontent.com",
+      "data:",
+      "blob:",
+      ...extra,
+    ],
+    ["media-src", "'self'", "blob:", ...extra],
+    [
+      "script-src",
+      "'self'",
+      "'unsafe-inline'",
+      "'unsafe-eval'",
+      "blob:",
+      "https://js.stripe.com",
+      ...extra,
+    ],
+    ["worker-src", "'self'", "blob:", ...extra],
+    ["style-src", "'self'", "'unsafe-inline'", ...extra],
+    ["font-src", "'self'", "data:", ...extra],
+    [
+      "connect-src",
+      "'self'",
+      "data:",
+      "blob:",
+      "https://*.sentry.io",
+      "https://*.ingest.sentry.io",
+      "https://*.ingest.us.sentry.io",
+      "https://*.ingest.de.sentry.io",
+      "https://api.stripe.com",
+      stackOrigin,
+      ...extra,
+    ],
+    [
+      "frame-src",
+      "'self'",
+      "https://js.stripe.com",
+      "https://hooks.stripe.com",
+      ...extra,
+    ],
+    ["frame-ancestors", "'none'"],
+    ["base-uri", "'self'"],
+    ["form-action", "'self'"],
+    ["object-src", "'none'"],
+  ].map((parts) => parts.filter(Boolean).join(" "));
 
   const report = cspReportEndpoint();
   if (report) {
