@@ -3,10 +3,23 @@ import { buildCsp, reportToHeader } from "@/lib/security/csp";
 
 const origStack = process.env.STACK_API_URL;
 const origReport = process.env.SENTRY_CSP_ENDPOINT;
+const CSP_ENV_VARS = [
+  "CSP_CONNECT_SRC",
+  "CSP_IMG_SRC",
+  "CSP_SCRIPT_SRC",
+  "CSP_FRAME_SRC",
+] as const;
+const origExtra = Object.fromEntries(
+  CSP_ENV_VARS.map((k) => [k, process.env[k]]),
+);
 
 afterEach(() => {
   process.env.STACK_API_URL = origStack;
   process.env.SENTRY_CSP_ENDPOINT = origReport;
+  for (const k of CSP_ENV_VARS) {
+    if (origExtra[k] === undefined) delete process.env[k];
+    else process.env[k] = origExtra[k];
+  }
 });
 
 describe("buildCsp", () => {
@@ -29,6 +42,28 @@ describe("buildCsp", () => {
   it("ignores an invalid STACK_API_URL", () => {
     process.env.STACK_API_URL = "not a url";
     expect(buildCsp()).toContain("connect-src 'self'");
+  });
+
+  it("allows data:/blob: in connect-src (Hexclave fetch()es data: avatars)", () => {
+    const csp = buildCsp();
+    const connect = csp
+      .split("; ")
+      .find((d) => d.startsWith("connect-src "))!;
+    expect(connect).toContain(" data:");
+    expect(connect).toContain(" blob:");
+  });
+
+  it("appends operator-configured extra origins per directive", () => {
+    process.env.CSP_CONNECT_SRC = "https://*.mycdn.com https://api.foo.com";
+    process.env.CSP_IMG_SRC = "https://images.foo.com";
+    const csp = buildCsp();
+    expect(csp).toContain("https://*.mycdn.com");
+    expect(csp).toContain("https://api.foo.com");
+    const img = csp.split("; ").find((d) => d.startsWith("img-src "))!;
+    expect(img).toContain("https://images.foo.com");
+    // extras land in their own directive, not leaked into connect-src
+    const connect = csp.split("; ").find((d) => d.startsWith("connect-src "))!;
+    expect(connect).not.toContain("https://images.foo.com");
   });
 
   it("adds report-uri/report-to only when the Sentry CSP endpoint is set", () => {
