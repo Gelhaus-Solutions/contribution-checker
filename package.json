@@ -18,6 +18,7 @@
     "db:verify:counts": "tsx prisma/verify-counts.ts",
     "db:backfill:stack": "tsx prisma/backfill-stack-users.ts",
     "db:backfill:stack-teams": "tsx prisma/backfill-stack-teams.ts",
+    "db:reconcile:github": "tsx prisma/reconcile-github-identity.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",

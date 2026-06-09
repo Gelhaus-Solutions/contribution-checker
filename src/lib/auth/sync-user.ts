@@ -5,7 +5,6 @@ import { prisma } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import {
   CREATE_PROJECT_PERMISSION,
-  GITHUB_OAUTH_SCOPES,
   GITHUB_PROVIDER_CONFIG_ID,
   getStackServerApp,
   SUPER_ADMIN_PERMISSION,
@@ -21,18 +20,27 @@ type GithubUser = {
   avatar_url: string | null;
 };
 
-/** Fetch the authenticated GitHub user via a connected-account access token.
- * This is how ghId/ghLogin are guaranteed regardless of what Hexclave surfaces. */
-async function fetchGithubUser(token: string): Promise<GithubUser> {
-  const res = await fetch("https://api.github.com/user", {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Accept: "application/vnd.github+json",
-      "User-Agent": "contribution-checker",
-    },
-  });
+/**
+ * Fetch a GitHub account's PUBLIC profile by numeric id. Unlike `/user` (which
+ * needs an authenticated token), `GET /user/{id}` resolves login/name/avatar for
+ * any account with no auth. We use it so onboarding never depends on a
+ * connected-account access token, which is unavailable when Hexclave's GitHub
+ * provider runs on shared OAuth keys (the token call fails and onboarding would
+ * otherwise throw before persisting ghId, gating the user out forever).
+ *
+ * A server token (GITHUB_TOKEN) is attached when present only to lift the 60/hr
+ * unauthenticated rate limit; it is not required.
+ */
+async function fetchGithubUserById(id: number): Promise<GithubUser> {
+  const headers: Record<string, string> = {
+    Accept: "application/vnd.github+json",
+    "User-Agent": "contribution-checker",
+  };
+  const token = process.env.GITHUB_TOKEN;
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const res = await fetch(`https://api.github.com/user/${id}`, { headers });
   if (!res.ok) {
-    throw new Error(`GitHub /user fetch failed: ${res.status}`);
+    throw new Error(`GitHub /user/${id} fetch failed: ${res.status}`);
   }
   return (await res.json()) as GithubUser;
 }
@@ -56,18 +64,41 @@ export function isGithubConnected(stackUser: ServerUser): boolean {
 export async function syncGitHubIdentity(
   stackUser: ServerUser,
   localUserId: string,
-): Promise<{ userId: string; ghId: number; ghLogin: string }> {
-  const conn = await stackUser.getOrLinkConnectedAccount(
-    GITHUB_PROVIDER_CONFIG_ID,
-    { scopes: GITHUB_OAUTH_SCOPES },
-  );
-  const tokenRes = await conn.getAccessToken({ scopes: GITHUB_OAUTH_SCOPES });
-  if (tokenRes.status !== "ok") {
-    throw new Error("Could not obtain a GitHub access token for the user");
+): Promise<{ userId: string; ghId: number; ghLogin: string | null }> {
+  // The GitHub numeric id comes straight from Stack's stored OAuth provider
+  // link (its `accountId`). This is authoritative and needs no connected-account
+  // access token, so it works even when Hexclave's GitHub provider runs on
+  // shared OAuth keys (where getAccessToken is never available).
+  const provider = await stackUser.getOAuthProvider(GITHUB_PROVIDER_CONFIG_ID);
+  const accountId = provider?.accountId?.trim();
+  if (!accountId) {
+    throw new Error(
+      "GitHub OAuth provider is not linked to the Hexclave user (no accountId)",
+    );
   }
-  const gh = await fetchGithubUser(tokenRes.data.accessToken);
-  const ghId = gh.id;
-  const ghLogin = gh.login;
+  const ghId = Number(accountId);
+  if (!Number.isInteger(ghId) || ghId <= 0) {
+    throw new Error(`GitHub accountId is not a numeric id: ${accountId}`);
+  }
+
+  // The login + profile are public and resolved by numeric id (no token). This
+  // is best-effort: if GitHub is unreachable/rate-limited we still persist ghId
+  // below so the onboarding gate is satisfied, and ghLogin backfills on a later
+  // sign-in (the gate keys on ghId only).
+  let ghLogin: string | null = null;
+  let ghName: string | null = null;
+  let ghAvatar: string | null = null;
+  try {
+    const gh = await fetchGithubUserById(ghId);
+    ghLogin = gh.login || null;
+    ghName = gh.name;
+    ghAvatar = gh.avatar_url;
+  } catch (e) {
+    logger.warn(
+      { err: e, "stack.user_id": stackUser.id, "github.id": ghId },
+      "auth: could not fetch GitHub profile by id; persisting ghId only",
+    );
+  }
 
   const owner = await prisma.user.findUnique({ where: { ghId } });
   if (owner && owner.id !== localUserId) {
@@ -82,9 +113,9 @@ export async function syncGitHubIdentity(
         where: { id: owner.id },
         data: {
           stackUserId: stackUser.id,
-          ghLogin,
-          name: owner.name ?? gh.name,
-          image: owner.image ?? gh.avatar_url,
+          ...(ghLogin ? { ghLogin } : {}),
+          name: owner.name ?? ghName,
+          image: owner.image ?? ghAvatar,
         },
       });
       await tx.user.delete({ where: { id: localUserId } }).catch(() => {
@@ -100,28 +131,33 @@ export async function syncGitHubIdentity(
       },
       "auth: merged fresh session row into existing GitHub-identified user",
     );
-    return { userId: owner.id, ghId, ghLogin };
+    return { userId: owner.id, ghId, ghLogin: owner.ghLogin ?? ghLogin };
   }
 
-  // Normal path: write the GitHub identity onto the current row.
+  // Normal path: write the GitHub identity onto the current row. ghId is the
+  // gating field and must persist; ghLogin is unique, so if it collides with a
+  // row we did not match by ghId (e.g. a since-renamed GitHub account), fall
+  // back to writing ghId alone rather than blocking the user out of the app.
   try {
     await prisma.user.update({
       where: { id: localUserId },
       data: {
         ghId,
-        ghLogin,
-        name: gh.name ?? undefined,
-        image: gh.avatar_url ?? undefined,
+        ...(ghLogin ? { ghLogin } : {}),
+        ...(ghName ? { name: ghName } : {}),
+        ...(ghAvatar ? { image: ghAvatar } : {}),
       },
     });
   } catch (e) {
-    // P2002 on ghId/ghLogin: the GitHub identity is attached elsewhere. Surface
-    // it (matches the old NextAuth signIn-event handling) but don't crash.
-    logger.error(
+    logger.warn(
       { err: e, "stack.user_id": stackUser.id, "github.id": ghId },
-      "auth: failed to persist GitHub identity",
+      "auth: persisting full GitHub identity failed; retrying with ghId only",
     );
-    throw e;
+    await prisma.user.update({
+      where: { id: localUserId },
+      data: { ghId },
+    });
+    return { userId: localUserId, ghId, ghLogin: null };
   }
   return { userId: localUserId, ghId, ghLogin };
 }
