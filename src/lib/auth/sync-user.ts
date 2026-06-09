@@ -69,7 +69,14 @@ export async function syncGitHubIdentity(
   // link (its `accountId`). This is authoritative and needs no connected-account
   // access token, so it works even when Hexclave's GitHub provider runs on
   // shared OAuth keys (where getAccessToken is never available).
-  const provider = await stackUser.getOAuthProvider(GITHUB_PROVIDER_CONFIG_ID);
+  //
+  // Match on the provider `type` ("github"): the SDK's `getOAuthProvider(id)`
+  // keys on the per-connection instance id, NOT the provider type, so it never
+  // finds "github". listOAuthProviders() exposes `{ type, accountId }`.
+  const providers = await stackUser.listOAuthProviders();
+  const provider = providers.find(
+    (p) => p.type === GITHUB_PROVIDER_CONFIG_ID && p.accountId,
+  );
   const accountId = provider?.accountId?.trim();
   if (!accountId) {
     throw new Error(

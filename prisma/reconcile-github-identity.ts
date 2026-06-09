@@ -98,7 +98,12 @@ async function reconcileOne(user: LocalUser, counts: Counts): Promise<void> {
     return;
   }
 
-  const provider = await stackUser.getOAuthProvider(GITHUB_PROVIDER_CONFIG_ID);
+  // Match on provider `type` ("github"). getOAuthProvider(id) keys on the
+  // per-connection instance id, not the provider type, so it never finds it.
+  const providers = await stackUser.listOAuthProviders();
+  const provider = providers.find(
+    (p) => p.type === GITHUB_PROVIDER_CONFIG_ID && p.accountId,
+  );
   const accountId = provider?.accountId?.trim();
   if (!accountId) {
     console.warn(`skip ${label}: no GitHub provider linked in Hexclave`);
