@@ -6,7 +6,8 @@ WORKDIR /app
 
 # --- build stage ---
 FROM base AS build
-COPY package.json pnpm-lock.yaml ./
+# .npmrc routes the @hexclave scope to the self-hosted registry (reads are public, no token)
+COPY package.json pnpm-lock.yaml .npmrc ./
 RUN pnpm install --frozen-lockfile
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
