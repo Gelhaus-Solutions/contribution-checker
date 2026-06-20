@@ -26,7 +26,7 @@
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.7.4",
-    "@hexclave/next": "1.0.1",
+    "@hexclave/next": "1.0.24",
     "@octokit/app": "^15.1.4",
     "@octokit/auth-app": "^7.2.1",
     "@octokit/webhooks": "^13.4.4",
