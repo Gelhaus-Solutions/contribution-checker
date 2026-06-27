@@ -509,10 +509,17 @@ export async function handlePullRequestEvent(payload: WebhookPayload) {
   if (decision.repoId && shouldTrackPr) {
     const prior = await prisma.prCheck.findUnique({
       where: { repoId_prNumber: { repoId: decision.repoId, prNumber } },
-      select: { status: true, gateReason: true },
+      select: { status: true, gateReason: true, headSha: true },
     });
     alreadyGated =
       prior?.status === "CHECK_REQUIRED" && prior.gateReason === gateReason;
+    // New commits (synchronize) advance the head SHA. The stored check-run ids
+    // belong to the previous SHA and can't be moved (GitHub's check-run update
+    // ignores head_sha), so clear them: both publishers must create fresh runs
+    // on the new SHA. Without this they'd PATCH the old runs and leave the
+    // required contexts "Expected — Waiting for status to be reported".
+    const shaAdvanced =
+      !!headSha && prior?.headSha != null && prior.headSha !== headSha;
     const prCheck = await prisma.prCheck.upsert({
       where: { repoId_prNumber: { repoId: decision.repoId, prNumber } },
       update: {
@@ -522,6 +529,7 @@ export async function handlePullRequestEvent(payload: WebhookPayload) {
         status: prCheckStatus,
         gateReason,
         ...(headSha ? { headSha } : {}),
+        ...(shaAdvanced ? { checkRunId: null, claCheckRunId: null } : {}),
       },
       create: {
         repoId: decision.repoId,
