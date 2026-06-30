@@ -28,6 +28,7 @@ import {
   onClaCoverageRevoked,
 } from "@/lib/cla/post-sign";
 import { sweepUnsignedApplicants } from "@/lib/cla/notify";
+import { reGateProjectPrs } from "@/lib/temporal/start";
 
 function revalidateCla(projectId: string) {
   revalidatePath(`/dashboard/projects/${projectId}/cla`);
@@ -223,6 +224,20 @@ export async function updateClaSettings(formData: FormData) {
     await sweepUnsignedApplicants({
       projectId: parsed.projectId,
       actorId: session.user.id,
+    }).catch(() => undefined);
+  }
+
+  // The CLA/DCO gate inputs (claEnabled/claRequired/dcoEnabled) feed
+  // decideForRepo: when any flips, auto-re-gate the project's open PRs so a
+  // newly-gated PR fails its check and a newly-ungated PR passes immediately.
+  const gateToggled =
+    before.claEnabled !== after.claEnabled ||
+    before.claRequired !== after.claRequired ||
+    before.dcoEnabled !== after.dcoEnabled;
+  if (gateToggled) {
+    await reGateProjectPrs({
+      projectId: parsed.projectId,
+      reason: "cla_settings_changed",
     }).catch(() => undefined);
   }
 

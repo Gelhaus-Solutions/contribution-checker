@@ -6,7 +6,10 @@ import { prisma } from "@/lib/db";
 import { requireProjectRole } from "@/lib/authz";
 import { recordAudit } from "@/lib/audit";
 import { notifyUser } from "@/lib/notifications/inbox";
-import { onClaCoverageChanged } from "@/lib/cla/post-sign";
+import {
+  onClaCoverageChanged,
+  onClaCoverageRevoked,
+} from "@/lib/cla/post-sign";
 import {
   revokeRosterMember as revokeRosterMemberMutation,
   approveCorporateCla as approveCorporateClaMutation,
@@ -215,6 +218,13 @@ export async function revokeCorporateCla(formData: FormData) {
     throw new Error("Corporate CLA is already revoked");
   }
 
+  // Capture the roster members covered by this corporate BEFORE the revoke, so
+  // we can re-gate their open PRs once their coverage is gone.
+  const activeMembers = await prisma.cclaRosterMember.findMany({
+    where: { corporateId: parsed.corporateId, status: "ACTIVE", ghId: { not: null } },
+    select: { ghId: true },
+  });
+
   await prisma.corporateCla.update({
     where: { id: parsed.corporateId },
     data: {
@@ -234,6 +244,15 @@ export async function revokeCorporateCla(formData: FormData) {
       action: "corporate_revoked",
     },
   });
+
+  // Coverage just turned off for the roster: re-gate each member's currently-
+  // approved, CLA-gated PRs (and send resign notices). Previously a no-op gap.
+  const ghIds = activeMembers
+    .map((m) => m.ghId)
+    .filter((g): g is number => g != null);
+  if (ghIds.length > 0) {
+    await onClaCoverageRevoked({ projectId: parsed.projectId, ghIds });
+  }
 
   revalidatePath(`/dashboard/projects/${parsed.projectId}/cla/corporate`);
 }

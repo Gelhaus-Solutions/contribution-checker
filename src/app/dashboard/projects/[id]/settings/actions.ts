@@ -7,6 +7,7 @@ import { requireProjectRole } from "@/lib/authz";
 import { recordAudit } from "@/lib/audit";
 import { slugSchema } from "@/lib/slug";
 import { enqueueProjectWebhook } from "@/lib/notifications/webhooks";
+import { reGateProjectPrs } from "@/lib/temporal/start";
 import {
   assertSafeOutboundUrl,
   UnsafeOutboundUrlError,
@@ -144,6 +145,13 @@ export async function updateBypassSettings(formData: FormData) {
     actorId: session.user.id,
     kind: "settings.updated",
     payload: { section: "bypass", count: handles.length, bypassCollabs: !!parsed.bypassCollabs },
+  });
+
+  // Bypass handles/collaborators are decideForRepo inputs: auto-re-gate the
+  // project's open PRs so the change takes effect without a manual re-evaluate.
+  await reGateProjectPrs({
+    projectId: parsed.projectId,
+    reason: "bypass_settings_changed",
   });
 
   revalidatePath(`/dashboard/projects/${parsed.projectId}/settings`);
@@ -401,6 +409,20 @@ export async function updateGatingSettings(formData: FormData) {
       ),
     },
   });
+
+  // checkerEnabled / applicationRequired are decideForRepo inputs and
+  // checksEnabled changes check publishing: auto-re-gate the project's open PRs
+  // when any of them changed so the toggle takes effect immediately.
+  const gateAffecting =
+    before.checkerEnabled !== after.checkerEnabled ||
+    before.applicationRequired !== after.applicationRequired ||
+    before.checksEnabled !== after.checksEnabled;
+  if (gateAffecting) {
+    await reGateProjectPrs({
+      projectId: parsed.projectId,
+      reason: "gating_settings_changed",
+    });
+  }
 
   revalidatePath(`/dashboard/projects/${parsed.projectId}/settings`);
 }
