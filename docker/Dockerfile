@@ -40,10 +40,11 @@ RUN pnpm exec prisma generate
 
 # --- runner stage ---
 FROM base AS runner
-# openssl + ca-certificates for Prisma (and outbound TLS). Debian useradd/groupadd
-# replace the busybox addgroup/adduser flags.
+# openssl + ca-certificates for Prisma (and outbound TLS); procps so
+# `concurrently -k` can `ps` the process tree on shutdown (node:slim omits it).
+# Debian useradd/groupadd replace the busybox addgroup/adduser flags.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends openssl ca-certificates \
+    && apt-get install -y --no-install-recommends openssl ca-certificates procps \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd -g 1001 app \
     && useradd -u 1001 -g app -m -s /usr/sbin/nologin app
