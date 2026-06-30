@@ -12,6 +12,7 @@ export type NotificationKind =
   | "application.awaiting_review"
   | "application.appeal_submitted"
   | "application.appeal_rejected"
+  | "application.resubmit_allowed"
   | "project.invited"
   | "pr.blocked"
   | "cla.ccla_signed"

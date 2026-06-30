@@ -90,7 +90,6 @@ model User {
   resolvedAppeals ApplicationAppeal[] @relation("AppealResolvedBy")
   auditedEvents   AuditEvent[]
   formTemplates   FormTemplate[]
-  webhookDeliveries WebhookDelivery[]
   claSignatures   ClaSignature[]
 }
 
@@ -222,7 +221,6 @@ model Project {
   applications Application[]
   appeals      ApplicationAppeal[]
   audits       AuditEvent[]
-  webhookDeliveries WebhookDelivery[]
   webhookEndpoints  ProjectWebhook[]
   manualDecisions  ManualDecision[]
   template     FormTemplate?    @relation(fields: [templateId], references: [id], onDelete: SetNull)
@@ -255,7 +253,6 @@ model ProjectWebhook {
   updatedAt DateTime @updatedAt
 
   project    Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  deliveries WebhookDelivery[]
 
   @@index([projectId])
 }
@@ -582,34 +579,6 @@ model RateLimitBucket {
   windowEnd DateTime
 }
 
-model WebhookDelivery {
-  id            String   @id @default(cuid())
-  projectId     String
-  endpointId    String?
-  event         String
-  // Endpoint kind at the time of enqueue ("generic" | "discord"). Denormalized
-  // so historic deliveries are interpretable even if the endpoint is deleted.
-  kind          String   @default("generic")
-  // JSON-stringified payload, pre-formatted for the endpoint kind.
-  payload       String
-  url           String
-  status        String   @default("PENDING") // "PENDING" | "DELIVERED" | "FAILED"
-  responseCode  Int?
-  responseBody  String?
-  attempts      Int      @default(0)
-  lastAttemptAt DateTime?
-  nextAttemptAt DateTime?
-  createdAt     DateTime @default(now())
-  triggeredById String?
-
-  project     Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  endpoint    ProjectWebhook? @relation(fields: [endpointId], references: [id], onDelete: SetNull)
-  triggeredBy User?           @relation(fields: [triggeredById], references: [id], onDelete: SetNull)
-
-  @@index([projectId, createdAt])
-  @@index([status, nextAttemptAt])
-}
-
 // Idempotency record for GitHub webhook deliveries. Keyed on the GitHub
 // `x-github-delivery` UUID. Inserted on first receipt; the unique-constraint
 // violation on retry short-circuits the handler so side effects (audit rows,
@@ -622,22 +591,6 @@ model ProcessedWebhookDelivery {
   createdAt DateTime @default(now())
 
   @@index([createdAt])
-}
-
-// In-process job queue persisted to DB (PR close/reopen/comment/label)
-model JobQueue {
-  id            String   @id @default(cuid())
-  kind          String   // "pr.close" | "pr.reopen" | "pr.comment" | "pr.label.set" | "webhook.deliver"
-  // JSON-stringified
-  payload       String
-  status        String   @default("PENDING") // "PENDING" | "RUNNING" | "DONE" | "FAILED"
-  attempts      Int      @default(0)
-  lastError     String?
-  nextAttemptAt DateTime @default(now())
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-
-  @@index([status, nextAttemptAt])
 }
 
 // ===== CLA (Contributor License Agreement) =====

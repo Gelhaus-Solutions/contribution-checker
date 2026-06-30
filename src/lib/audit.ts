@@ -68,7 +68,10 @@ export type AuditKind =
   | "user.superadmin_granted"
   | "user.superadmin_revoked"
   | "vault.resolution_failed"
-  | "vault.cache_invalidated";
+  | "vault.cache_invalidated"
+  // Temporal durable execution
+  | "application.cooldown_elapsed"
+  | "workflow.failed";
 
 export async function recordAudit(args: {
   // Null = app-level event not tied to a project (e.g. Vault failures).

@@ -13,11 +13,7 @@ import {
   ApprovalGateError,
   ClaGateError,
 } from "@/lib/applications/decide";
-import {
-  onApplicationApproved,
-  onApplicationDenied,
-  onApplicationRevokedWithClose,
-} from "@/lib/github/post-decision";
+import { dispatchApplicationDecision } from "@/lib/temporal/start";
 import { recordAudit } from "@/lib/audit";
 import { notifyProjectReviewers, notifyUser } from "@/lib/notifications/inbox";
 import {
@@ -85,7 +81,7 @@ export async function approveAction(formData: FormData) {
     throw e;
   }
 
-  await onApplicationApproved({ applicationId: parsed.appId });
+  await dispatchApplicationDecision("approved", parsed.appId);
 
   revalidatePath(`/dashboard/projects/${parsed.projectId}/applications`);
   revalidatePath(`/dashboard/projects/${parsed.projectId}/applications/${parsed.appId}`);
@@ -122,7 +118,7 @@ export async function denyAction(formData: FormData) {
     allowResubmit,
   });
 
-  await onApplicationDenied({ applicationId: parsed.appId });
+  await dispatchApplicationDecision("denied", parsed.appId);
 
   revalidatePath(`/dashboard/projects/${parsed.projectId}/applications`);
   revalidatePath(`/dashboard/projects/${parsed.projectId}/applications/${parsed.appId}`);
@@ -179,8 +175,7 @@ export async function revokeAction(formData: FormData) {
     target: parsed.target,
   });
 
-  await onApplicationRevokedWithClose({
-    applicationId: parsed.appId,
+  await dispatchApplicationDecision("revoked", parsed.appId, {
     reason: parsed.reason,
   });
 
@@ -232,7 +227,7 @@ export async function resolveAppealAction(formData: FormData) {
   }
 
   if (parsed.resolution === "GRANT") {
-    await onApplicationApproved({ applicationId: parsed.appId });
+    await dispatchApplicationDecision("approved", parsed.appId);
   }
 
   revalidatePath(`/dashboard/projects/${parsed.projectId}/applications`);

@@ -52,6 +52,13 @@ export const KNOWN_SECRET_NAMES = [
   "STACK_SECRET_SERVER_KEY",
   "STACK_SUPER_SECRET_ADMIN_KEY",
   "STACK_WEBHOOK_SECRET",
+  // Temporal mTLS material. The client certificate, its private key, and the
+  // (optional) CA bundle used to verify the Temporal frontend. Resolved once at
+  // worker/client startup; PEM strings are passed straight to the SDK's TLS
+  // options, never written to disk.
+  "TEMPORAL_TLS_CERT",
+  "TEMPORAL_TLS_KEY",
+  "TEMPORAL_TLS_CA",
 ] as const;
 
 export type SecretName = (typeof KNOWN_SECRET_NAMES)[number] | string;

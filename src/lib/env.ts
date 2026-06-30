@@ -102,6 +102,24 @@ const schema = z.object({
   VAULT_MAX_RETRIES: z.coerce.number().int().min(0).optional(),
   VAULT_BREAKER_THRESHOLD: z.coerce.number().int().positive().optional(),
   VAULT_BREAKER_COOLDOWN_MS: z.coerce.number().int().positive().optional(),
+
+  // Temporal: durable execution backend. The worker and the Next.js client both
+  // connect to TEMPORAL_HOST:TEMPORAL_PORT. In production the connection is
+  // mTLS-secured; the client cert/key/CA are resolved from Vault at startup
+  // (TEMPORAL_TLS_CERT / TEMPORAL_TLS_KEY / TEMPORAL_TLS_CA secret names), so
+  // they are not in this typed object. Local dev points at `temporal
+  // server start-dev` with TLS disabled.
+  TEMPORAL_HOST: z.string().default("localhost"),
+  TEMPORAL_PORT: z.coerce.number().int().positive().default(7233),
+  TEMPORAL_NAMESPACE: z.string().default("default"),
+  TEMPORAL_TASK_QUEUE: z.string().default("contribution-checker"),
+  TEMPORAL_TLS_ENABLED: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((v) => v === "true"),
+  // Optional SNI / server name override for mTLS verification (when the cert CN
+  // differs from TEMPORAL_HOST, e.g. behind a load balancer).
+  TEMPORAL_TLS_SERVER_NAME: z.string().optional(),
 });
 
 // During `next build`, Next.js executes server modules to collect page data
@@ -169,6 +187,15 @@ export const env = {
   smtpConfigured:
     presentInEnvOrVault("SMTP_HOST") && presentInEnvOrVault("SMTP_FROM"),
   vaultEnabled: !!raw.VAULT_ADDR,
+  // Temporal is "configured" when a host is set. mTLS material is checked
+  // separately at connect time (see src/lib/temporal/connection.ts): when
+  // TEMPORAL_TLS_ENABLED is true the cert/key are required, resolved from env
+  // or Vault.
+  temporalConfigured: !!raw.TEMPORAL_HOST,
+  temporalTlsConfigured:
+    !raw.TEMPORAL_TLS_ENABLED ||
+    (presentInEnvOrVault("TEMPORAL_TLS_CERT") &&
+      presentInEnvOrVault("TEMPORAL_TLS_KEY")),
 };
 
 export type Env = typeof env;

@@ -9,10 +9,31 @@ services:
       - ../.env
     environment:
       - DATABASE_URL=file:/app/data/contribution-checker.db
+      # Point the app + worker at the local Temporal dev server below. mTLS is
+      # off for local dev; production sets TEMPORAL_TLS_ENABLED=true and supplies
+      # the client cert/key via Vault.
+      - TEMPORAL_HOST=temporal
+      - TEMPORAL_PORT=7233
+      - TEMPORAL_NAMESPACE=default
+      - TEMPORAL_TASK_QUEUE=contribution-checker
+      - TEMPORAL_TLS_ENABLED=false
     volumes:
       - data:/app/data
     ports:
       - ${PORT}:3000
+    depends_on:
+      temporal:
+        condition: service_started
+
+  # Local Temporal dev server (in-memory). Frontend gRPC on 7233, Web UI on 8233.
+  # Production uses a real self-hosted cluster reached over mTLS instead.
+  temporal:
+    image: temporalio/temporal:latest
+    command: server start-dev --ip 0.0.0.0 --log-level warn
+    restart: unless-stopped
+    ports:
+      - "7233:7233"
+      - "8233:8233"
 
 volumes:
   data:

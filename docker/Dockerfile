@@ -28,10 +28,18 @@ COPY --from=build --chown=app:app /app/.next ./.next
 COPY --from=build --chown=app:app /app/prisma ./prisma
 COPY --from=build --chown=app:app /app/package.json ./package.json
 COPY --from=build --chown=app:app /app/next.config.ts ./next.config.ts
+# The Temporal worker runs from source via tsx (see the "worker" npm script),
+# so the runner needs src/ and tsconfig.json + the path alias config.
+COPY --from=build --chown=app:app /app/src ./src
+COPY --from=build --chown=app:app /app/tsconfig.json ./tsconfig.json
 
 RUN mkdir -p /app/data && chown app:app /app/data
 
 USER app
 EXPOSE 3000
 
-CMD ["sh", "-c", "pnpm exec prisma migrate deploy && pnpm exec next start -H 0.0.0.0 -p 3000"]
+# Run migrations, then the web server AND the Temporal worker side by side.
+# `concurrently -k` ties their lifecycles: if either exits the container exits,
+# so the orchestrator restarts the whole unit (a dead worker must never leave
+# the gate silently down).
+CMD ["sh", "-c", "pnpm exec prisma migrate deploy && pnpm exec concurrently -k -n web,worker \"pnpm exec next start -H 0.0.0.0 -p 3000\" \"pnpm run worker\""]

@@ -1,19 +1,17 @@
 import { NextResponse } from "next/server";
 import * as Sentry from "@sentry/nextjs";
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { env } from "@/lib/env";
 import { getSecret } from "@/lib/vault/resolver";
 import { logger } from "@/lib/logger";
 import { withSentryScope } from "@/lib/observability/with-sentry-scope";
 import {
-  handleInstallationEvent,
-  handleInstallationReposEvent,
-  handleMergeGroupEvent,
-  handlePullRequestEvent,
-  handlePushEvent,
-} from "@/lib/github/webhook";
+  dispatchInstallationEvent,
+  dispatchMergeGroupEvent,
+  dispatchPullRequestEvent,
+  dispatchPushEvent,
+} from "@/lib/temporal/start";
 import {
   BodyTooLargeError,
   readLimitedBody,
@@ -23,39 +21,27 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const MAX_WEBHOOK_BODY_BYTES = 1_048_576;
-const DELIVERY_RETENTION_MS = 24 * 60 * 60 * 1000;
-let lastDeliveryPruneAt = 0;
 
-async function claimDelivery(deliveryId: string, eventName: string): Promise<boolean> {
-  if (!deliveryId) return true;
-  try {
-    await prisma.processedWebhookDelivery.create({
-      data: { id: deliveryId, eventName },
-    });
-    void pruneStaleDeliveries();
-    return true;
-  } catch (e) {
-    if (
-      e instanceof Prisma.PrismaClientKnownRequestError &&
-      e.code === "P2002"
-    ) {
-      return false;
-    }
-    throw e;
-  }
+/** Fast-path dedup of GitHub redeliveries. Workflow ids are already
+ * deterministic (so a double-dispatch is harmless), but this avoids even
+ * touching Temporal for an obvious duplicate. The row is written only AFTER a
+ * successful dispatch, so a dispatch failure (→ 500) lets GitHub retry without
+ * the delivery being marked done. Stale rows are pruned by the
+ * pruneProcessedDeliveries Schedule. */
+async function alreadyProcessed(deliveryId: string): Promise<boolean> {
+  if (!deliveryId) return false;
+  const existing = await prisma.processedWebhookDelivery.findUnique({
+    where: { id: deliveryId },
+    select: { id: true },
+  });
+  return !!existing;
 }
 
-async function pruneStaleDeliveries(): Promise<void> {
-  const now = Date.now();
-  if (now - lastDeliveryPruneAt < 60 * 60 * 1000) return;
-  lastDeliveryPruneAt = now;
-  try {
-    await prisma.processedWebhookDelivery.deleteMany({
-      where: { createdAt: { lt: new Date(now - DELIVERY_RETENTION_MS) } },
-    });
-  } catch (e) {
-    logger.warn({ err: e }, "processed-delivery prune failed");
-  }
+async function markProcessed(deliveryId: string, eventName: string): Promise<void> {
+  if (!deliveryId) return;
+  await prisma.processedWebhookDelivery
+    .create({ data: { id: deliveryId, eventName } })
+    .catch(() => undefined); // P2002 on concurrent duplicate is fine
 }
 
 async function verifySignature(
@@ -98,7 +84,6 @@ export async function POST(req: Request) {
   try {
     signatureOk = await verifySignature(rawBody, signature);
   } catch (e) {
-    // Vault unreachable or webhook secret can't be resolved → fail closed.
     Sentry.captureException(e, { tags: { "github.event": eventName } });
     logger.error({ err: e, deliveryId, eventName }, "webhook secret resolve failed");
     return NextResponse.json({ error: "Secret resolve failed" }, { status: 500 });
@@ -108,11 +93,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
   }
 
-  // Idempotency: GitHub retries deliveries whenever it doesn't see a 2xx
-  // quickly enough. Without this guard, every retry replays the full pipeline
-  // (PrCheck upsert, label calls, decision comment, outbound webhook fanout).
-  const claimed = await claimDelivery(deliveryId, eventName);
-  if (!claimed) {
+  if (await alreadyProcessed(deliveryId)) {
     logger.info({ deliveryId, eventName }, "duplicate webhook delivery; skipping");
     return NextResponse.json({ ok: true, duplicate: true });
   }
@@ -126,9 +107,12 @@ export async function POST(req: Request) {
 
   const p = payload as {
     action?: string;
+    after?: string;
+    ref?: string;
     repository?: { full_name?: string; id?: number };
     installation?: { id?: number };
     pull_request?: { number?: number; user?: { login?: string } };
+    merge_group?: { head_sha?: string };
   };
 
   return withSentryScope(
@@ -143,26 +127,54 @@ export async function POST(req: Request) {
       "github.pr_author": p.pull_request?.user?.login,
     },
     async () => {
-      // Dispatch by event. Each handler is wrapped so a single failing event
-      // never stalls the GitHub webhook delivery (which would back off and retry).
+      // Dispatch the event into Temporal (signalWithStart / start). The webhook
+      // returns immediately; the durable workflow runs the side effects with
+      // retries. A dispatch failure returns 500 so GitHub retries — safe because
+      // every workflow id is deterministic, so a retried dispatch is idempotent.
       const t0 = Date.now();
+      const envelope = { eventName, deliveryId, payload };
       try {
         switch (eventName) {
-          case "pull_request":
-            await handlePullRequestEvent(payload as never);
+          case "pull_request": {
+            const repoId = String(p.repository?.id ?? "");
+            const prNumber = p.pull_request?.number;
+            if (repoId && prNumber) {
+              await dispatchPullRequestEvent(repoId, prNumber, envelope);
+            }
             break;
-          case "merge_group":
-            await handleMergeGroupEvent(payload as never);
+          }
+          case "merge_group": {
+            const repoId = String(p.repository?.id ?? "");
+            const headSha = p.merge_group?.head_sha ?? deliveryId;
+            await dispatchMergeGroupEvent(repoId, headSha, payload);
             break;
+          }
           case "installation":
-            await handleInstallationEvent(payload as never);
+            await dispatchInstallationEvent(
+              p.installation?.id ?? 0,
+              deliveryId,
+              "installation",
+              payload
+            );
             break;
           case "installation_repositories":
-            await handleInstallationReposEvent(payload as never);
+            await dispatchInstallationEvent(
+              p.installation?.id ?? 0,
+              deliveryId,
+              "installation_repositories",
+              payload
+            );
             break;
-          case "push":
-            await handlePushEvent(payload as never);
+          case "push": {
+            const repoId = String(p.repository?.id ?? "");
+            await dispatchPushEvent(
+              repoId,
+              p.ref ?? "",
+              p.after ?? deliveryId,
+              payload
+            );
             break;
+          }
           case "ping":
             return NextResponse.json({ pong: true });
           default:
@@ -172,25 +184,24 @@ export async function POST(req: Request) {
         Sentry.captureException(e, {
           tags: { "github.event": eventName, "github.delivery_id": deliveryId },
         });
-        logger.error(
-          { err: e, eventName, deliveryId },
-          "webhook handler threw"
-        );
+        logger.error({ err: e, eventName, deliveryId }, "webhook dispatch failed");
         Sentry.metrics.count("github.webhook.event", 1, {
           attributes: {
             "github.event": eventName,
             "github.action": p.action ?? "",
-            outcome: "error",
+            outcome: "dispatch_error",
           },
         });
-        return NextResponse.json({ error: "Handler error" }, { status: 500 });
+        return NextResponse.json({ error: "Dispatch error" }, { status: 500 });
       }
+
+      await markProcessed(deliveryId, eventName);
 
       Sentry.metrics.count("github.webhook.event", 1, {
         attributes: {
           "github.event": eventName,
           "github.action": p.action ?? "",
-          outcome: "ok",
+          outcome: "dispatched",
         },
       });
       Sentry.metrics.distribution("github.webhook.duration", Date.now() - t0, {

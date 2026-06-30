@@ -1,13 +1,13 @@
 "use server";
 
 import { z } from "zod";
+import { randomUUID } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
 import { requireProjectRole } from "@/lib/authz";
 import { recordAudit } from "@/lib/audit";
 import { ALL_HEURISTICS } from "@/lib/quality/registry";
-import { runQualityForPrCheck } from "@/lib/quality/run";
-import { logger } from "@/lib/logger";
+import { startQualityBackfill } from "@/lib/temporal/start";
 
 const enabledSchema = z.object({
   projectId: z.string().min(1),
@@ -105,9 +105,11 @@ export async function updateQualityHeuristics(formData: FormData) {
 const backfillSchema = z.object({ projectId: z.string().min(1) });
 
 /**
- * Re-score every PrCheck row in the project. Synchronous-ish: runs in a
- * background-ish loop with concurrency 1 so we don't slam the GitHub API.
- * Caps at 200 PrChecks per run to stay under reasonable request budgets.
+ * Re-score the project's PrChecks. Now durable: starts a `qualityBackfill`
+ * Temporal workflow that fans out one retried activity per PR (bounded
+ * concurrency) instead of looping synchronously inside this request (which
+ * timed out on large projects). The start/completed audit events are written by
+ * the workflow. Caps at 200 PrChecks per run, as before.
  */
 export async function backfillQuality(formData: FormData) {
   const { projectId } = backfillSchema.parse({
@@ -117,66 +119,17 @@ export async function backfillQuality(formData: FormData) {
 
   const project = await prisma.project.findUnique({
     where: { id: projectId },
-    select: {
-      id: true,
-      qualityEnabled: true,
-      qualityConfig: true,
-      qualityCommentMin: true,
-      prTemplateHoneypots: true,
-      qualityTemplateMatchPct: true,
-      checkerEnabled: true,
-      trackWhenDisabled: true,
-    },
+    select: { id: true, qualityEnabled: true },
   });
   if (!project) throw new Error("Project not found");
   if (!project.qualityEnabled) {
     throw new Error("Enable PR Quality scoring before backfilling.");
   }
 
-  const checks = await prisma.prCheck.findMany({
-    where: { repo: { projectId } },
-    select: {
-      id: true,
-      prNumber: true,
-      repo: {
-        select: { fullName: true, installationId: true },
-      },
-    },
-    orderBy: { updatedAt: "desc" },
-    take: 200,
-  });
-
-  await recordAudit({
-    projectId,
-    actorId: session.user.id,
-    kind: "quality.backfill_started",
-    payload: { count: checks.length },
-  });
-
-  let scored = 0;
-  for (const c of checks) {
-    if (!c.repo.installationId) continue;
-    try {
-      const res = await runQualityForPrCheck({
-        prCheckId: c.id,
-        installationId: c.repo.installationId,
-        repoFullName: c.repo.fullName,
-        prNumber: c.prNumber,
-        project,
-        skipComment: true,
-      });
-      if (res) scored += 1;
-    } catch (e) {
-      logger.warn({ err: e, prCheckId: c.id }, "backfill: scoring failed");
-    }
-  }
-
-  await recordAudit({
-    projectId,
-    actorId: session.user.id,
-    kind: "quality.backfill_completed",
-    payload: { scored, total: checks.length },
-  });
+  await startQualityBackfill(
+    { projectId, triggeredById: session.user.id, limit: 200 },
+    randomUUID()
+  );
 
   revalidatePath(`/dashboard/projects/${projectId}/quality`);
 }

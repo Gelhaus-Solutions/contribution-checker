@@ -5,11 +5,7 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
 import { requireProjectRole } from "@/lib/authz";
 import { recordAudit } from "@/lib/audit";
-import {
-  onApplicationApproved,
-  onApplicationDenied,
-  onApplicationRevokedWithClose,
-} from "@/lib/github/post-decision";
+import { dispatchApplicationDecision } from "@/lib/temporal/start";
 import {
   approveApplication,
   denyApplication,
@@ -108,7 +104,7 @@ export async function addManualDecision(formData: FormData) {
           reason: parsed.reason,
         },
       });
-      await onApplicationApproved({ applicationId: pendingApp.id });
+      await dispatchApplicationDecision("approved", pendingApp.id);
     }
   }
 
@@ -217,21 +213,21 @@ export async function setApplicationStatus(args: {
       }
       throw e;
     }
-    await onApplicationApproved({ applicationId: app.id });
+    await dispatchApplicationDecision("approved", app.id);
   } else if (wasApproved) {
     await revokeApplication({
       applicationId: app.id,
       decidedById: session.user.id,
       target: parsed.target,
     });
-    await onApplicationRevokedWithClose({ applicationId: app.id });
+    await dispatchApplicationDecision("revoked", app.id);
   } else if (parsed.target === "DENIED") {
     await denyApplication({
       applicationId: app.id,
       decidedById: session.user.id,
       allowResubmit: true,
     });
-    await onApplicationDenied({ applicationId: app.id });
+    await dispatchApplicationDecision("denied", app.id);
   } else {
     const now = new Date();
     if (parsed.target === "SUBMITTED") {

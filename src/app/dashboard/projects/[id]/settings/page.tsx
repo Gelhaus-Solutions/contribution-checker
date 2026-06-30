@@ -30,17 +30,13 @@ export default async function ProjectSettings({
   const project = await prisma.project.findUnique({ where: { id } });
   if (!project) return null;
 
-  const [recentDeliveries, webhookEndpoints] = await Promise.all([
-    prisma.webhookDelivery.findMany({
-      where: { projectId: id },
-      orderBy: { createdAt: "desc" },
-      take: 5,
-    }),
-    prisma.projectWebhook.findMany({
-      where: { projectId: id },
-      orderBy: { createdAt: "asc" },
-    }),
-  ]);
+  // Outbound delivery status now lives in Temporal (each delivery is a durable
+  // `outboundWebhookDelivery` workflow). The per-row history table was dropped;
+  // operators inspect deliveries in the Temporal UI.
+  const webhookEndpoints = await prisma.projectWebhook.findMany({
+    where: { projectId: id },
+    orderBy: { createdAt: "asc" },
+  });
 
   const bypassHandles = (() => {
     try {
@@ -503,46 +499,12 @@ export default async function ProjectSettings({
             </div>
           </form>
 
-          {recentDeliveries.length > 0 && (
-            <div className="space-y-2">
-              <h4 className="text-xs font-medium text-muted-foreground">
-                Recent deliveries
-              </h4>
-              <ul className="divide-y divide-border rounded-md border border-border">
-                {recentDeliveries.map((d) => (
-                  <li
-                    key={d.id}
-                    className="flex items-center justify-between gap-3 px-3 py-2 text-xs"
-                  >
-                    <div className="flex items-center gap-2">
-                      <Badge
-                        variant={
-                          d.status === "DELIVERED"
-                            ? "success"
-                            : d.status === "FAILED"
-                              ? "destructive"
-                              : "warning"
-                        }
-                      >
-                        {d.status}
-                      </Badge>
-                      <span className="font-mono">{d.event}</span>
-                      <span className="text-muted-foreground">
-                        ({d.kind})
-                      </span>
-                      {d.responseCode != null && (
-                        <span className="text-muted-foreground">
-                          → {d.responseCode}
-                        </span>
-                      )}
-                    </div>
-                    <span className="text-muted-foreground">
-                      {d.createdAt.toISOString().replace("T", " ").slice(0, 16)}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </div>
+          {webhookEndpoints.length > 0 && (
+            <p className="text-xs text-muted-foreground">
+              Delivery attempts and retries are tracked in Temporal (one durable
+              workflow per delivery). Inspect status and history in the Temporal
+              UI.
+            </p>
           )}
         </CardContent>
       </Card>
