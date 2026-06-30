@@ -1,6 +1,9 @@
 # syntax=docker/dockerfile:1.7
 
-FROM node:24-alpine AS base
+# Debian (glibc), NOT alpine: Temporal's native core-bridge ships a glibc
+# prebuild (x86_64-unknown-linux-gnu) that needs ld-linux-x86-64.so.2, which
+# musl/alpine lacks. glibc is also Temporal's officially supported target.
+FROM node:24-slim AS base
 # pnpm keeps its content-addressable store under $PNPM_HOME/store. Pointing it
 # at a stable path lets the BuildKit cache mounts below persist downloaded
 # packages (incl. the large @temporalio native core-bridge) across builds, so a
@@ -34,8 +37,13 @@ RUN pnpm exec prisma generate
 
 # --- runner stage ---
 FROM base AS runner
-RUN apk add --no-cache openssl
-RUN addgroup -g 1001 -S app && adduser -S app -u 1001
+# openssl + ca-certificates for Prisma (and outbound TLS). Debian useradd/groupadd
+# replace the busybox addgroup/adduser flags.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends openssl ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd -g 1001 app \
+    && useradd -u 1001 -g app -m -s /usr/sbin/nologin app
 
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
