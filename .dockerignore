@@ -6,8 +6,10 @@ node_modules
 .next
 dist
 .turbo
-.git
 .gitignore
+# NOTE: .git is intentionally NOT ignored — the build stage reads it to derive
+# the Worker Deployment Build ID (6-char commit sha). It's not copied into the
+# final image.
 
 # Local data + secrets must never be baked into the image (env is supplied at
 # runtime via docker-compose env_file/environment).

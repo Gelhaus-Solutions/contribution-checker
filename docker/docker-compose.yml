@@ -3,10 +3,9 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile
-      args:
-        # Bakes TEMPORAL_BUILD_ID into the image. Set BUILD_ID in your env/CI to
-        # the git short sha: `BUILD_ID=$(git rev-parse --short HEAD) docker compose build`.
-        BUILD_ID: ${BUILD_ID:-dev}
+      # BUILD_ID auto-derives from the git checkout (6-char commit sha) inside the
+      # build — nothing to pass. Override only if you want a custom value:
+      #   args: { BUILD_ID: "v1.2.3" }
     image: contribution-checker:latest
     restart: unless-stopped
     env_file:
@@ -21,11 +20,12 @@ services:
       - TEMPORAL_NAMESPACE=default
       - TEMPORAL_TASK_QUEUE=contribution-checker
       - TEMPORAL_TLS_ENABLED=false
-      # Worker Deployments + heartbeats. TEMPORAL_BUILD_ID is baked from the
-      # BUILD_ID build-arg above (do NOT override it here at runtime — it must
-      # match the code in the image).
+      # Worker Deployments + heartbeats. TEMPORAL_BUILD_ID is derived from the
+      # git sha at build time and exported by the container entrypoint — do NOT
+      # set it here. The worker auto-promotes its Build ID to Current on startup.
       - TEMPORAL_VERSIONING_ENABLED=true
       - TEMPORAL_DEPLOYMENT_NAME=contribution-checker
+      - TEMPORAL_SET_CURRENT_ON_START=true
     volumes:
       - data:/app/data
     ports:

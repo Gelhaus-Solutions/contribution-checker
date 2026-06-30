@@ -15,10 +15,21 @@ WORKDIR /app
 
 # --- build stage: full deps, compiles Next + Prisma client ---
 FROM base AS build
+# git is used only to derive the Worker Deployment Build ID from the checkout.
+# Installed before the source COPY so this layer stays cached across commits.
+RUN apt-get update && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/*
 COPY package.json pnpm-lock.yaml .npmrc ./
 RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
     pnpm install --frozen-lockfile
 COPY . .
+# Derive the Build ID: the 6-char commit sha, automatically. Override by passing
+# --build-arg BUILD_ID=<value> (e.g. a version tag); falls back to "dev" if no
+# git checkout is present in the build context.
+ARG BUILD_ID=""
+RUN git config --global --add safe.directory /app \
+    && printf '%s' "${BUILD_ID:-$(git rev-parse --short=6 HEAD 2>/dev/null || echo dev)}" > /app/.build-id \
+    && echo "Worker Build ID: $(cat /app/.build-id)"
 ENV NEXT_TELEMETRY_DISABLED=1
 # Persist Next.js's webpack cache across builds for much faster rebuilds.
 # build:worker bundles the Temporal worker to dist/worker.mjs (esbuild) — a
@@ -54,14 +65,6 @@ ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
 
-# Temporal Worker Deployment Build ID, baked at build time. Pass the git short
-# sha (or version tag) you already tag the image with:
-#   docker build --build-arg BUILD_ID=$(git rev-parse --short HEAD) ...
-# It must be fixed per code version — the image content digest isn't known until
-# after the build, so the git sha is the right, build-time-available value.
-ARG BUILD_ID=dev
-ENV TEMPORAL_BUILD_ID=${BUILD_ID}
-
 # Slim runtime node_modules (prod-only) + the Next build output from the build
 # stage. This drops dev-only packages (and @temporalio/testing's test-server
 # binary) from the image, cutting its size and push/pull time.
@@ -76,14 +79,16 @@ COPY --from=build --chown=app:app /app/next.config.ts ./next.config.ts
 COPY --from=build --chown=app:app /app/dist ./dist
 COPY --from=build --chown=app:app /app/src ./src
 COPY --from=build --chown=app:app /app/tsconfig.json ./tsconfig.json
+# The derived Build ID (6-char commit sha). Read into TEMPORAL_BUILD_ID at start.
+COPY --from=build --chown=app:app /app/.build-id ./.build-id
 
 RUN mkdir -p /app/data && chown app:app /app/data
 
 USER app
 EXPOSE 3000
 
-# Run migrations, then the web server AND the Temporal worker side by side.
-# `concurrently -k` ties their lifecycles: if either exits the container exits,
-# so the orchestrator restarts the whole unit (a dead worker must never leave
-# the gate silently down).
-CMD ["sh", "-c", "pnpm exec prisma migrate deploy && pnpm exec concurrently -k -n web,worker \"pnpm exec next start -H 0.0.0.0 -p 3000\" \"pnpm run worker\""]
+# Export the baked Build ID, run migrations, then the web server AND the Temporal
+# worker side by side. `concurrently -k` ties their lifecycles: if either exits
+# the container exits, so the orchestrator restarts the whole unit (a dead worker
+# must never leave the gate silently down).
+CMD ["sh", "-c", "export TEMPORAL_BUILD_ID=\"$(cat /app/.build-id 2>/dev/null || echo dev)\" && pnpm exec prisma migrate deploy && pnpm exec concurrently -k -n web,worker \"pnpm exec next start -H 0.0.0.0 -p 3000\" \"pnpm run worker\""]

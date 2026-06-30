@@ -142,6 +142,13 @@ const schema = z.object({
   TEMPORAL_DEFAULT_VERSIONING_BEHAVIOR: z
     .enum(["AUTO_UPGRADE", "PINNED"])
     .default("AUTO_UPGRADE"),
+  // Auto-promote this Build ID to the deployment's Current version once the
+  // worker has registered. Removes the manual "Set Current" step — fine for a
+  // single-worker setup; disable if you want to verify before shifting traffic.
+  TEMPORAL_SET_CURRENT_ON_START: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((v) => v === "true"),
 });
 
 // During `next build`, Next.js executes server modules to collect page data
