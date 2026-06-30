@@ -14,12 +14,8 @@ import type {
   DecisionChangedPayload,
 } from "./contracts";
 import type {
-  ApplicationDecisionInput,
-  ApplicationDecisionResult,
   CiCheckPrInput,
   CiReconcileInput,
-  CooldownTimerInput,
-  ClaStalenessTimerInput,
   GithubEventEnvelope,
   OutboundWebhookInput,
   QualityBackfillInput,
@@ -300,68 +296,6 @@ export async function runCiReconcileWorkflow(
       WorkflowIdReusePolicy.WORKFLOW_ID_REUSE_POLICY_ALLOW_DUPLICATE,
   });
   return handle.result() as Promise<CiCoreResult>;
-}
-
-/** Admin decision: start + await so the dashboard shows the final outcome. The
- * nonce makes each click a fresh execution (decisions are not idempotent across
- * distinct admin actions). */
-export async function runApplicationDecisionWorkflow(
-  input: ApplicationDecisionInput,
-  nonce: string
-): Promise<ApplicationDecisionResult> {
-  const client = await getTemporalClient();
-  const handle = await client.workflow.start(WF.applicationDecision, {
-    workflowId: workflowIds.applicationDecision(
-      input.applicationId,
-      input.kind,
-      nonce
-    ),
-    taskQueue: TASK_QUEUE,
-    args: [input],
-  });
-  return handle.result() as Promise<ApplicationDecisionResult>;
-}
-
-/** Convenience: start + await an application-decision fan-out with a fresh
- * nonce. Drop-in replacement for the old inline onApplication* calls in the
- * admin server actions. */
-export async function dispatchApplicationDecision(
-  kind: ApplicationDecisionInput["kind"],
-  applicationId: string,
-  args: Record<string, unknown> = {}
-): Promise<ApplicationDecisionResult> {
-  return runApplicationDecisionWorkflow(
-    { kind, applicationId, args },
-    randomUUID()
-  );
-}
-
-/** Durable cooldown timer: one per application; replacing an existing one (new
- * denial) terminates the prior and starts fresh. */
-export async function startCooldownTimer(
-  input: CooldownTimerInput
-): Promise<void> {
-  const client = await getTemporalClient();
-  await client.workflow.start(WF.applicationCooldownTimer, {
-    workflowId: workflowIds.applicationCooldown(input.applicationId),
-    taskQueue: TASK_QUEUE,
-    args: [input],
-    workflowIdReusePolicy:
-      WorkflowIdReusePolicy.WORKFLOW_ID_REUSE_POLICY_TERMINATE_IF_RUNNING,
-  });
-}
-
-export async function startClaStalenessTimer(
-  input: ClaStalenessTimerInput
-): Promise<void> {
-  const client = await getTemporalClient();
-  await client.workflow.start(WF.claStalenessTimer, {
-    workflowId: workflowIds.claStaleness(input.projectId, input.ghId),
-    taskQueue: TASK_QUEUE,
-    args: [input],
-    workflowIdReusePolicy:
-      WorkflowIdReusePolicy.WORKFLOW_ID_REUSE_POLICY_TERMINATE_IF_RUNNING,
-  });
 }
 
 /** Outbound webhook delivery: one durable workflow per (endpoint, event,

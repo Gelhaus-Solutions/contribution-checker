@@ -28,12 +28,6 @@ export const workflowIds = {
     `ci-check:${projectSlug}:${prNumber}:${headSha}`,
   ciReconcile: (projectSlug: string, repoFullName: string) =>
     `ci-reconcile:${projectSlug}:${repoFullName}`,
-  applicationDecision: (applicationId: string, kind: string, nonce: string) =>
-    `app-decision:${applicationId}:${kind}:${nonce}`,
-  applicationCooldown: (applicationId: string) =>
-    `cooldown:${applicationId}`,
-  claStaleness: (projectId: string, ghId: string) =>
-    `cla-staleness:${projectId}:${ghId}`,
   outboundWebhook: (deliveryKey: string) => `whdeliver:${deliveryKey}`,
   qualityBackfill: (projectId: string, nonce: string) =>
     `quality-backfill:${projectId}:${nonce}`,

@@ -16,15 +16,11 @@
 export const WF = {
   prGate: "prGate",
   contributorGate: "contributorGate",
-  processPullRequest: "processPullRequest",
   processMergeGroup: "processMergeGroup",
   processPush: "processPush",
   processInstallation: "processInstallation",
   ciCheckPr: "ciCheckPr",
   ciReconcile: "ciReconcile",
-  applicationDecision: "applicationDecision",
-  applicationCooldownTimer: "applicationCooldownTimer",
-  claStalenessTimer: "claStalenessTimer",
   outboundWebhookDelivery: "outboundWebhookDelivery",
   qualityBackfill: "qualityBackfill",
   reconcileSweep: "reconcileSweep",
@@ -84,16 +80,6 @@ export type GithubEventEnvelope = {
   payload: unknown;
 };
 
-export type ProcessPullRequestInput = {
-  repoId: string;
-  prNumber: number;
-  /** The event that triggered this run (the signalWithStart start arg). */
-  first: GithubEventEnvelope;
-  /** Events carried over from a prior run via Continue-As-New. Absent on the
-   * initial signalWithStart. */
-  pending?: GithubEventEnvelope[];
-};
-
 /** Per-PR entity workflow input. `repoId` is the GitHub repo id (as a string,
  * matching the `pr:{repoId}:{prNumber}` workflow id and decideForPR's ghRepoId).
  * On a fresh signalWithStart the triggering event arrives via the `githubEvent`
@@ -151,19 +137,6 @@ export type ApplicationDecisionInput = {
 
 export type ApplicationDecisionResult = {
   affectedPrs: number;
-};
-
-export type CooldownTimerInput = {
-  applicationId: string;
-  /** ISO timestamp the cooldown elapses. */
-  cooldownUntilIso: string;
-};
-
-export type ClaStalenessTimerInput = {
-  projectId: string;
-  ghId: string;
-  /** ISO timestamp to re-check at. */
-  recheckAtIso: string;
 };
 
 export type OutboundWebhookInput = {

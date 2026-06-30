@@ -7,7 +7,6 @@
 export * from "./pr-gate";
 export * from "./contributor-gate";
 export * from "./github";
-export * from "./applications";
 export * from "./webhook-delivery";
 export * from "./quality";
 export * from "./sweeps";

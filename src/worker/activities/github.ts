@@ -18,12 +18,6 @@ import type { GithubEventEnvelope } from "@/lib/temporal/contracts";
  * (PrCheck upsert, label set, comment dedup), which is exactly what activity
  * retries require.
  */
-export async function processPullRequestEvent(
-  env: GithubEventEnvelope
-): Promise<void> {
-  await handlePullRequestEvent(env.payload as never);
-}
-
 /**
  * prGate's converge for a GitHub event: runs the per-PR handler and surfaces
  * whether the PR reached a terminal state (merge / human close) so the entity
