@@ -1,0 +1,109 @@
+import {
+  condition,
+  continueAsNew,
+  defineSignal,
+  setHandler,
+} from "@temporalio/workflow";
+import { acts } from "./proxies";
+import { SIG } from "../../lib/temporal/contracts";
+import type {
+  GithubEventEnvelope,
+  PrGateInput,
+  ReGatePayload,
+} from "../../lib/temporal/contracts";
+
+const githubEvent = defineSignal<[GithubEventEnvelope]>(SIG.githubEvent);
+const reGate = defineSignal<[ReGatePayload]>(SIG.reGate);
+
+/** Continue-As-New once a busy PR has processed this many events so a PR that
+ * sees many `synchronize`/re-gate events over its lifetime never approaches the
+ * history-event ceiling. */
+const EVENTS_BEFORE_CONTINUE = 500;
+
+/** How long to wait for the next event once the queue is drained before the
+ * workflow COMPLETES. A later event simply signalWithStarts a fresh run. Keeps a
+ * window open to coalesce rapid bursts without leaving a workflow Running forever
+ * per open PR. */
+const IDLE_TIMEOUT = "1 minute";
+
+/**
+ * Per-PR entity workflow (one per repo+PR), the leaf of the
+ * project → contributor → pr tree. It lives while the PR is open.
+ *
+ * Two signals drive it: `githubEvent` (a raw webhook envelope, including
+ * `closed`/merged) and `reGate` (a parent gate says "re-evaluate"). Both lead to
+ * a single converge: GitHub events run the existing per-PR handler (which
+ * carries authoritative state); a `reGate` re-fetches current state and
+ * converges. Converges are idempotent, so duplicate signals are no-ops and a
+ * re-gate nonce already applied is skipped (coalescing the fast and completeness
+ * fan-out paths).
+ *
+ * It COMPLETES on a terminal close (merge or human close, surfaced by the event
+ * handler) or after IDLE_TIMEOUT of silence. A `closedByApp` pending/denied
+ * close is NOT terminal: the PR must stay reopenable, so the entity keeps living.
+ * A busy PR Continue-As-News at EVENTS_BEFORE_CONTINUE to bound history.
+ */
+export async function prGate(input: PrGateInput): Promise<void> {
+  const queue: GithubEventEnvelope[] = [...(input.pending ?? [])];
+  let pendingReGate: ReGatePayload | null = input.pendingReGate ?? null;
+  let lastNonce: string | null = input.lastNonce ?? null;
+  let terminal = false;
+
+  setHandler(githubEvent, (env) => {
+    queue.push(env);
+  });
+  setHandler(reGate, (payload) => {
+    // Keep only the latest pending re-gate; the converge always reads current
+    // state, so an older un-applied request is subsumed by a newer one.
+    pendingReGate = payload;
+  });
+
+  let processed = 0;
+  while (processed < EVENTS_BEFORE_CONTINUE) {
+    const hasWork = await condition(
+      () => queue.length > 0 || pendingReGate !== null,
+      IDLE_TIMEOUT,
+    );
+    if (!hasWork) return; // idle → complete; a later signal starts a fresh run
+
+    // Drain GitHub events first: they carry authoritative state and can be
+    // terminal. Keep the event in the queue until the activity succeeds so a
+    // Continue-As-New (or crash) never drops it.
+    if (queue.length > 0) {
+      const res = await acts.convergePrEvent(queue[0]);
+      queue.shift();
+      processed += 1;
+      if (res.terminal) {
+        terminal = true;
+        break;
+      }
+      continue;
+    }
+
+    // A re-gate request (no payload): re-evaluate by fetching current state.
+    const req = pendingReGate as ReGatePayload;
+    pendingReGate = null;
+    // Coalesce: a repeat re-gate with a nonce we already applied is a no-op.
+    if (req.nonce && req.nonce === lastNonce) continue;
+    await acts.convergePrReGate({
+      repoId: input.repoId,
+      prNumber: input.prNumber,
+      reason: req.reason,
+    });
+    if (req.nonce) lastNonce = req.nonce;
+    processed += 1;
+  }
+
+  if (terminal) return; // PR merged/human-closed → entity completes
+
+  // Hit the history cap with work still pending: roll it into a fresh run.
+  if (queue.length > 0 || pendingReGate !== null) {
+    await continueAsNew<typeof prGate>({
+      repoId: input.repoId,
+      prNumber: input.prNumber,
+      pending: queue,
+      pendingReGate,
+      lastNonce,
+    });
+  }
+}

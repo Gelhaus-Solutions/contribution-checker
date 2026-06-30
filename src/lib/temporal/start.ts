@@ -18,6 +18,7 @@ import type {
   OutboundWebhookInput,
   QualityBackfillInput,
   QualityBackfillResult,
+  ReGatePayload,
 } from "./contracts";
 import { logger } from "@/lib/logger";
 
@@ -32,20 +33,40 @@ async function startIdempotent(fn: () => Promise<unknown>): Promise<void> {
   }
 }
 
-/** Per-PR entity workflow: signal it if running, else start it. The workflow id
- * is stable per (repo, PR) so every event for a PR lands on one execution. */
+/** Per-PR entity workflow (prGate): signal it if running, else start it. The
+ * workflow id is stable per (repo, PR) so every event for a PR lands on one
+ * execution. On a fresh start the triggering event arrives via the signal, so
+ * the start args carry only the PR identity. */
 export async function dispatchPullRequestEvent(
   repoId: string,
   prNumber: number,
   env: GithubEventEnvelope
 ): Promise<void> {
   const client = await getTemporalClient();
-  await client.workflow.signalWithStart(WF.processPullRequest, {
+  await client.workflow.signalWithStart(WF.prGate, {
     workflowId: workflowIds.pullRequest(repoId, prNumber),
     taskQueue: TASK_QUEUE,
     signal: SIG.githubEvent,
     signalArgs: [env],
-    args: [{ repoId, prNumber, first: env }],
+    args: [{ repoId, prNumber }],
+  });
+}
+
+/** Tell the per-PR gate to re-evaluate itself (no payload — the gate re-fetches
+ * current state). signalWithStart so a PR with no live gate (e.g. between an
+ * idle-completion and the next event) still re-converges. */
+export async function signalPrReGate(
+  repoId: string,
+  prNumber: number,
+  payload: ReGatePayload
+): Promise<void> {
+  const client = await getTemporalClient();
+  await client.workflow.signalWithStart(WF.prGate, {
+    workflowId: workflowIds.pullRequest(repoId, prNumber),
+    taskQueue: TASK_QUEUE,
+    signal: SIG.reGate,
+    signalArgs: [payload],
+    args: [{ repoId, prNumber }],
   });
 }
 

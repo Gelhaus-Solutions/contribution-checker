@@ -4,6 +4,7 @@
  * @temporalio/workflow, the activity *types*, and the import-light
  * src/lib/temporal/contracts. No prisma/Octokit/Node built-ins.
  */
+export * from "./pr-gate";
 export * from "./github";
 export * from "./applications";
 export * from "./webhook-delivery";

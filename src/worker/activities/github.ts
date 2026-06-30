@@ -4,6 +4,8 @@ import {
   handleMergeGroupEvent,
   handlePullRequestEvent,
   handlePushEvent,
+  reGatePr,
+  type PrEventResult,
 } from "@/lib/github/webhook";
 import type { GithubEventEnvelope } from "@/lib/temporal/contracts";
 
@@ -20,6 +22,29 @@ export async function processPullRequestEvent(
   env: GithubEventEnvelope
 ): Promise<void> {
   await handlePullRequestEvent(env.payload as never);
+}
+
+/**
+ * prGate's converge for a GitHub event: runs the per-PR handler and surfaces
+ * whether the PR reached a terminal state (merge / human close) so the entity
+ * workflow can complete.
+ */
+export async function convergePrEvent(
+  env: GithubEventEnvelope
+): Promise<PrEventResult> {
+  return handlePullRequestEvent(env.payload as never);
+}
+
+/**
+ * prGate's converge for a `reGate` request (no webhook payload): re-fetch the
+ * PR's current state and converge with re-evaluation semantics.
+ */
+export async function convergePrReGate(args: {
+  repoId: string;
+  prNumber: number;
+  reason?: string;
+}): Promise<void> {
+  await reGatePr({ ghRepoId: Number(args.repoId), prNumber: args.prNumber });
 }
 
 export async function processMergeGroupEvent(payload: unknown): Promise<void> {

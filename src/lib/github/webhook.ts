@@ -351,7 +351,16 @@ async function ensureProjectLabels(args: {
   );
 }
 
-export async function handlePullRequestEvent(payload: WebhookPayload) {
+/** Result surfaced to the per-PR entity workflow (prGate): `terminal` is true
+ * only when the PR has reached an end state (merged or human-closed) and the
+ * workflow should complete. Every non-close event returns `terminal: false`. */
+export type PrEventResult = { terminal: boolean };
+
+const NOT_TERMINAL: PrEventResult = { terminal: false };
+
+export async function handlePullRequestEvent(
+  payload: WebhookPayload,
+): Promise<PrEventResult> {
   const action = payload.action ?? "";
   const isReEvalLabel = action === "labeled";
   if (
@@ -368,7 +377,7 @@ export async function handlePullRequestEvent(payload: WebhookPayload) {
       ].includes(action) || isReEvalLabel
     )
   ) {
-    return;
+    return NOT_TERMINAL;
   }
 
   const ghRepoId = payload.repository.id;
@@ -380,7 +389,7 @@ export async function handlePullRequestEvent(payload: WebhookPayload) {
   // before we touch the DB or run the decision pipeline.
   if (isReEvalLabel) {
     const labelName = payload.label?.name;
-    if (!labelName) return;
+    if (!labelName) return NOT_TERMINAL;
     const repoForLabelGate = await prisma.repo.findUnique({
       where: { ghRepoId },
       select: { project: { select: { labelEvaluate: true } } },
@@ -389,7 +398,7 @@ export async function handlePullRequestEvent(payload: WebhookPayload) {
       !repoForLabelGate ||
       repoForLabelGate.project.labelEvaluate !== labelName
     ) {
-      return;
+      return NOT_TERMINAL;
     }
   }
 
@@ -400,12 +409,11 @@ export async function handlePullRequestEvent(payload: WebhookPayload) {
   // complete. Here we just avoid running the decision pipeline against a closed
   // PR.
   if (action === "closed") {
-    await handlePrClosed({
+    return await handlePrClosed({
       ghRepoId,
       prNumber,
       merged: payload.pull_request.merged ?? false,
     });
-    return;
   }
 
   await convergePr({
@@ -420,34 +428,89 @@ export async function handlePullRequestEvent(payload: WebhookPayload) {
     prIsClosed: payload.pull_request.state === "closed",
     isReEval: isReEvalLabel,
   });
+  return NOT_TERMINAL;
 }
 
 /**
  * Distinguish a terminal PR close (human close or merge) from the bot's own
- * pending/denied close (`closedByApp`, which must stay reopenable). Terminal is
- * the signal prGate uses to complete; for now we only log, since the legacy
- * processPullRequest path has no per-PR lifecycle to end.
+ * pending/denied close (`closedByApp`, which must stay reopenable). A terminal
+ * close lets prGate complete; the bot's own close keeps the entity alive so the
+ * PR can be reopened on a later approval/re-gate.
  */
 async function handlePrClosed(args: {
   ghRepoId: number;
   prNumber: number;
   merged: boolean;
-}): Promise<void> {
+}): Promise<PrEventResult> {
   const repo = await prisma.repo.findUnique({
     where: { ghRepoId: args.ghRepoId },
     select: { id: true },
   });
-  if (!repo) return;
+  if (!repo) return NOT_TERMINAL;
   const prCheck = await prisma.prCheck.findUnique({
     where: { repoId_prNumber: { repoId: repo.id, prNumber: args.prNumber } },
     select: { closedByApp: true },
   });
   // Our own gate-close: not terminal, keep it reopenable.
-  if (prCheck?.closedByApp) return;
+  if (prCheck?.closedByApp) return NOT_TERMINAL;
   logger.debug(
     { ghRepoId: args.ghRepoId, prNumber: args.prNumber, merged: args.merged },
     "PR terminally closed",
   );
+  return { terminal: true };
+}
+
+/**
+ * Re-evaluate a single open PR on demand (no webhook payload): fetch its current
+ * state from GitHub, then converge with re-evaluation semantics (reopen a
+ * now-passing closedByApp PR). This is the `reGate` apply path the per-PR entity
+ * workflow (prGate) runs when a parent gate signals "re-evaluate". Best-effort:
+ * a fetch failure logs and no-ops so a transient API error never wedges the gate.
+ */
+export async function reGatePr(args: {
+  ghRepoId: number;
+  prNumber: number;
+}): Promise<void> {
+  const repo = await prisma.repo.findUnique({
+    where: { ghRepoId: args.ghRepoId },
+    select: { fullName: true, installationId: true },
+  });
+  if (!repo || repo.installationId == null) return;
+  const [owner, name] = repo.fullName.split("/");
+  if (!owner || !name) return;
+  let pr: {
+    node_id: string;
+    state: string;
+    user: { login: string; id: number } | null;
+    head?: { sha: string };
+  };
+  try {
+    const octokit = await getInstallationOctokit(repo.installationId);
+    const res = await octokit.request(
+      "GET /repos/{owner}/{repo}/pulls/{pull_number}",
+      { owner, repo: name, pull_number: args.prNumber },
+    );
+    pr = res.data as typeof pr;
+  } catch (e) {
+    logger.warn(
+      { err: e, ghRepoId: args.ghRepoId, prNumber: args.prNumber },
+      "reGatePr: PR fetch failed",
+    );
+    return;
+  }
+  if (!pr.user) return;
+  await convergePr({
+    ghRepoId: args.ghRepoId,
+    repoFullName: repo.fullName,
+    installationId: repo.installationId,
+    prNumber: args.prNumber,
+    prNodeId: pr.node_id,
+    authorGhLogin: pr.user.login,
+    authorGhId: pr.user.id,
+    headSha: pr.head?.sha ?? null,
+    prIsClosed: pr.state === "closed",
+    isReEval: true,
+  });
 }
 
 /**

@@ -14,6 +14,7 @@
  * strings so workflow implementation modules never have to be bundled into the
  * Next.js server. Each must match an exported function in src/worker/workflows. */
 export const WF = {
+  prGate: "prGate",
   processPullRequest: "processPullRequest",
   processMergeGroup: "processMergeGroup",
   processPush: "processPush",
@@ -30,11 +31,18 @@ export const WF = {
   pruneProcessedDeliveries: "pruneProcessedDeliveries",
 } as const;
 
-/** Signal sent to the long-lived per-PR entity workflow when a new GitHub event
- * arrives for that PR. */
+/** Signals delivered to entity workflows. `githubEvent` carries a raw GitHub
+ * webhook envelope to the per-PR gate; `reGate` is a parent gate telling a child
+ * PR to re-evaluate itself (no payload — the gate re-fetches current state). */
 export const SIG = {
   githubEvent: "githubEvent",
+  reGate: "reGate",
 } as const;
+
+/** Payload for the `reGate` signal. `reason` is for observability; `nonce`
+ * coalesces a fan-out so a PR re-converges once per distinct re-gate even if the
+ * fast (parent-signal) and completeness (projectReGate) paths both reach it. */
+export type ReGatePayload = { reason?: string; nonce?: string };
 
 // --- payloads --------------------------------------------------------------
 
@@ -56,6 +64,22 @@ export type ProcessPullRequestInput = {
   /** Events carried over from a prior run via Continue-As-New. Absent on the
    * initial signalWithStart. */
   pending?: GithubEventEnvelope[];
+};
+
+/** Per-PR entity workflow input. `repoId` is the GitHub repo id (as a string,
+ * matching the `pr:{repoId}:{prNumber}` workflow id and decideForPR's ghRepoId).
+ * On a fresh signalWithStart the triggering event arrives via the `githubEvent`
+ * signal, so `pending` is empty; Continue-As-New carries any unprocessed events
+ * and a not-yet-applied re-gate forward. */
+export type PrGateInput = {
+  repoId: string;
+  prNumber: number;
+  /** GitHub events carried over from a prior run via Continue-As-New. */
+  pending?: GithubEventEnvelope[];
+  /** A re-gate request carried over (received but not yet applied) at CAN. */
+  pendingReGate?: ReGatePayload | null;
+  /** Last applied re-gate nonce, carried across CAN to coalesce duplicates. */
+  lastNonce?: string | null;
 };
 
 export type ProcessMergeGroupInput = { payload: unknown };
