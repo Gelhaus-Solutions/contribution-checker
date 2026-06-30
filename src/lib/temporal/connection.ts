@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import { env } from "@/lib/env";
 import { getSecret } from "@/lib/vault/resolver";
 import { logger } from "@/lib/logger";
@@ -16,10 +17,24 @@ export type ResolvedTls = {
 };
 
 /**
+ * A TLS env/Vault value may be EITHER an absolute filesystem path to a PEM file
+ * (when certs are mounted into the container) OR the PEM text itself (when
+ * stored in Vault or inlined in env). We detect a path by a leading "/" without
+ * a PEM header, read the file, and otherwise treat the value as PEM bytes.
+ */
+async function resolvePem(value: string): Promise<Buffer> {
+  const looksLikePem = value.includes("-----BEGIN");
+  if (!looksLikePem && value.startsWith("/")) {
+    return readFile(value.trim());
+  }
+  return Buffer.from(value);
+}
+
+/**
  * Resolve the mTLS material when TEMPORAL_TLS_ENABLED is true, else null.
- * Cert/key/CA come from Vault (or env fallback) via getSecret, consistent with
- * the GitHub App key and SMTP creds. PEM strings are kept in memory and handed
- * to the SDK; nothing is written to disk.
+ * Cert/key/CA come from Vault or env via getSecret, consistent with the GitHub
+ * App key and SMTP creds. Each value may be a mounted PEM file path or inline
+ * PEM text (see resolvePem). Resolved bytes are kept in memory.
  *
  * Throws when TLS is enabled but the client cert or key is missing — failing
  * closed is correct: a worker that silently connects without mTLS to a cluster
@@ -41,10 +56,16 @@ export async function resolveTemporalTls(): Promise<ResolvedTls | null> {
     );
   }
 
+  const [crt, keyBuf, caBuf] = await Promise.all([
+    resolvePem(cert),
+    resolvePem(key),
+    ca ? resolvePem(ca) : Promise.resolve(undefined),
+  ]);
+
   return {
-    clientCertPair: { crt: Buffer.from(cert), key: Buffer.from(key) },
-    serverRootCACertificate: ca ? Buffer.from(ca) : undefined,
-    serverNameOverride: env.TEMPORAL_TLS_SERVER_NAME,
+    clientCertPair: { crt, key: keyBuf },
+    serverRootCACertificate: caBuf,
+    serverNameOverride: env.TEMPORAL_TLS_SERVER_NAME || undefined,
   };
 }
 
