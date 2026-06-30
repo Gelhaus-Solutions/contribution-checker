@@ -60,12 +60,15 @@
     "nodemailer": "^6.9.16",
     "pino": "^9.5.0",
     "pino-pretty": "^13.0.0",
+    "prisma": "^6.1.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-markdown": "^10.1.0",
     "rehype-sanitize": "^6.0.0",
     "remark-gfm": "^4.0.1",
     "tailwind-merge": "^2.6.0",
+    "tsconfig-paths": "^4.2.0",
+    "tsx": "^4.19.2",
     "zod": "^3.24.1"
   },
   "devDependencies": {
@@ -80,10 +83,7 @@
     "eslint-config-next": "15.1.4",
     "prettier": "^3.4.2",
     "prettier-plugin-tailwindcss": "^0.6.9",
-    "prisma": "^6.1.0",
     "tailwindcss": "^4.0.0",
-    "tsconfig-paths": "^4.2.0",
-    "tsx": "^4.19.2",
     "typescript": "^5.7.3",
     "vitest": "^2.1.8"
   },

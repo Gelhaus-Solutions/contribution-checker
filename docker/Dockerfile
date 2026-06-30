@@ -2,7 +2,7 @@
 
 FROM node:24-alpine AS base
 # pnpm keeps its content-addressable store under $PNPM_HOME/store. Pointing it
-# at a stable path lets the BuildKit cache mount below persist downloaded
+# at a stable path lets the BuildKit cache mounts below persist downloaded
 # packages (incl. the large @temporalio native core-bridge) across builds, so a
 # webhook-triggered rebuild no longer re-downloads the whole dependency tree.
 ENV PNPM_HOME="/pnpm"
@@ -10,21 +10,27 @@ ENV PATH="$PNPM_HOME:$PATH"
 RUN corepack enable
 WORKDIR /app
 
-# --- build stage ---
+# --- build stage: full deps, compiles Next + Prisma client ---
 FROM base AS build
-# Install with only the manifest + lockfile in context, so this layer (and the
-# cached store) is reused whenever dependencies are unchanged. .npmrc routes the
-# @hexclave scope to the self-hosted registry (reads are public, no token).
 COPY package.json pnpm-lock.yaml .npmrc ./
 RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
     pnpm install --frozen-lockfile
-# Source comes in after install. .dockerignore keeps node_modules/.next/.git out
-# of the context so this COPY stays small and never clobbers the clean install.
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
-# Persist Next.js's build cache across builds for much faster incremental rebuilds.
+# Persist Next.js's webpack cache across builds for much faster rebuilds.
 RUN --mount=type=cache,id=next-cache,target=/app/.next/cache \
     pnpm exec prisma generate && pnpm run build
+
+# --- prod-deps stage: runtime-only node_modules (no vitest/playwright/eslint/
+#     typescript/@temporalio/testing), keeping the image small. prisma + tsx +
+#     tsconfig-paths are now runtime deps (migrations + the worker), so they're
+#     included. The Prisma client is generated here so the runner has it. ---
+FROM base AS prod-deps
+COPY package.json pnpm-lock.yaml .npmrc ./
+RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
+    pnpm install --prod --frozen-lockfile
+COPY prisma ./prisma
+RUN pnpm exec prisma generate
 
 # --- runner stage ---
 FROM base AS runner
@@ -36,7 +42,10 @@ ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
 
-COPY --from=build --chown=app:app /app/node_modules ./node_modules
+# Slim runtime node_modules (prod-only) + the Next build output from the build
+# stage. This drops dev-only packages (and @temporalio/testing's test-server
+# binary) from the image, cutting its size and push/pull time.
+COPY --from=prod-deps --chown=app:app /app/node_modules ./node_modules
 COPY --from=build --chown=app:app /app/.next ./.next
 COPY --from=build --chown=app:app /app/prisma ./prisma
 COPY --from=build --chown=app:app /app/package.json ./package.json
