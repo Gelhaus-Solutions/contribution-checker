@@ -1,51 +1,83 @@
-import { condition, continueAsNew, defineSignal, setHandler } from "@temporalio/workflow";
+import {
+  condition,
+  continueAsNew,
+  defineSignal,
+  getExternalWorkflowHandle,
+  ParentClosePolicy,
+  setHandler,
+  startChild,
+} from "@temporalio/workflow";
 import { acts } from "./proxies";
-import { SIG } from "../../lib/temporal/contracts";
+import { SIG, WF } from "../../lib/temporal/contracts";
 import type {
   ClaCoverageChangedPayload,
   ClaStalenessArmedPayload,
   ContributorGateInput,
+  ContributorPrEvent,
   ContributorTask,
   CooldownRefreshPayload,
   DecisionChangedPayload,
+  PrChildCompletedPayload,
+  PrGateInput,
 } from "../../lib/temporal/contracts";
 
+const prEvent = defineSignal<[ContributorPrEvent]>(SIG.prEvent);
+const prChildCompleted = defineSignal<[PrChildCompletedPayload]>(SIG.prChildCompleted);
 const decisionChanged = defineSignal<[DecisionChangedPayload]>(SIG.decisionChanged);
 const claCoverageChanged = defineSignal<[ClaCoverageChangedPayload]>(SIG.claCoverageChanged);
 const cooldownRefresh = defineSignal<[CooldownRefreshPayload]>(SIG.cooldownRefresh);
 const claStalenessArmed = defineSignal<[ClaStalenessArmedPayload]>(SIG.claStalenessArmed);
 
 /** Continue-As-New after this many drained tasks so a busy contributor never
- * approaches the history ceiling. Timers + queue are carried forward. */
+ * approaches the history ceiling. Timers + queue + live children are carried. */
 const TASKS_BEFORE_CONTINUE = 1000;
 
-/** Idle window with no armed timer and no work before the entity completes. A
- * later signal simply signalWithStarts a fresh run. */
+/** Idle window with no armed timer, no work, and no live children before the
+ * entity completes. A later signal simply signalWithStarts a fresh run. */
 const IDLE_TIMEOUT_MS = 60_000;
+
+/** The prGate child workflow id, matching workflowIds.pullRequest. Built inline
+ * (not via the task-queue helper) so this module stays import-light for the
+ * deterministic workflow bundle. */
+function prChildId(ghRepoId: string, prNumber: number): string {
+  return `pr:${ghRepoId}:${prNumber}`;
+}
 
 /**
  * Per-contributor entity workflow (one per project+author), the middle tier of
- * the project → contributor → pr tree. It owns the contributor's durable
- * cooldown + CLA-staleness timers and runs the application/CLA GitHub fan-out,
- * consolidating what used to be three short workflows (applicationDecision +
- * applicationCooldownTimer + claStalenessTimer).
+ * the project → contributor → pr tree. It:
+ *  - routes the contributor's GitHub PR events to per-PR prGate CHILDREN
+ *    (startChild with ParentClosePolicy ABANDON, so the Relationships tab shows
+ *    contributor → pr and a child outlives the parent);
+ *  - owns the contributor's durable cooldown + CLA-staleness timers; and
+ *  - runs the application/CLA GitHub fan-out (consolidating the old
+ *    applicationDecision + applicationCooldownTimer + claStalenessTimer).
  *
  * Timers are plain workflow variables checked against a single
- * condition-with-deadline; re-arming is an assignment (no terminate race), and
- * both deadlines are carried across Continue-As-New so a months-long cooldown
- * survives. The elapse activities are idempotent and self-checking, and
- * decideForRepo keeps its own `cooldownUntil > now` check as the final net.
- *
- * Completes when there is no pending work and no armed timer for IDLE_TIMEOUT_MS.
+ * condition-with-deadline; re-arming is an assignment (no terminate race) and
+ * deadlines are carried across Continue-As-New so a months-long cooldown
+ * survives. Children are signaled via external handles (works across CAN); a
+ * child reports `prChildCompleted` when it ends so the parent drops it. The gate
+ * stays alive while any child is live and completes only once all report done
+ * (an ABANDON child is therefore never orphaned by the parent idling out).
  */
 export async function contributorGate(input: ContributorGateInput): Promise<void> {
   const tasks: ContributorTask[] = [...(input.pendingTasks ?? [])];
+  const liveChildren = new Set<string>(input.liveChildren ?? []);
   let cooldown = input.cooldown ?? null;
   let staleness = input.staleness ?? null;
   // Bumped by every signal so the wait condition re-evaluates (recomputing the
-  // next deadline) instead of sleeping through a freshly-armed timer.
+  // next deadline / noticing a completed child) instead of sleeping through it.
   let seq = 0;
 
+  setHandler(prEvent, (p) => {
+    tasks.push({ type: "prEvent", ghRepoId: p.ghRepoId, prNumber: p.prNumber, envelope: p.envelope });
+    seq++;
+  });
+  setHandler(prChildCompleted, (p) => {
+    liveChildren.delete(p.childWorkflowId);
+    seq++;
+  });
   setHandler(decisionChanged, (p) => {
     tasks.push({ type: "decision", kind: p.kind, applicationId: p.applicationId, args: p.args });
     seq++;
@@ -77,9 +109,9 @@ export async function contributorGate(input: ContributorGateInput): Promise<void
       staleness = null;
     }
 
-    // Drain one fan-out task.
+    // Drain one task.
     if (tasks.length > 0) {
-      const armed = await runTask(input, tasks[0]);
+      const armed = await runTask(input, tasks[0], liveChildren);
       // A decision/refresh re-reads the application's cooldown; (re)arm or clear.
       if (armed !== undefined) cooldown = armed;
       tasks.shift();
@@ -87,17 +119,23 @@ export async function contributorGate(input: ContributorGateInput): Promise<void
       continue;
     }
 
-    // Nothing to do now: wait until the nearest armed deadline, or the idle
-    // window if nothing is armed (→ complete).
+    // Nothing queued: wait until the nearest armed deadline; or, if a child is
+    // still live, indefinitely for it to report (or new work); else the idle
+    // window (→ complete).
     const deadlines = [cooldown?.deadlineMs, staleness?.deadlineMs].filter(
       (d): d is number => typeof d === "number",
     );
     const nextWake = deadlines.length ? Math.min(...deadlines) : null;
-    const waitMs = nextWake !== null ? Math.max(0, nextWake - Date.now()) : IDLE_TIMEOUT_MS;
     const observed = seq;
-    const woke = await condition(() => seq !== observed || tasks.length > 0, waitMs);
-    // Idle timeout with nothing armed and nothing queued → complete.
-    if (!woke && nextWake === null) return;
+    const pred = () => seq !== observed || tasks.length > 0;
+    if (nextWake !== null) {
+      await condition(pred, Math.max(0, nextWake - Date.now()));
+    } else if (liveChildren.size > 0) {
+      await condition(pred); // stay alive for the children; no idle completion
+    } else {
+      const woke = await condition(pred, IDLE_TIMEOUT_MS);
+      if (!woke) return; // idle, nothing armed, no children → complete
+    }
   }
 
   await continueAsNew<typeof contributorGate>({
@@ -106,19 +144,24 @@ export async function contributorGate(input: ContributorGateInput): Promise<void
     pendingTasks: tasks,
     cooldown,
     staleness,
+    liveChildren: [...liveChildren],
   });
 }
 
 /**
- * Run a single fan-out task. Returns the (re)computed cooldown arm for a
+ * Run a single task. Returns the (re)computed cooldown arm for a
  * decision/refresh task (or null to clear); returns undefined for tasks that
  * don't touch the cooldown, leaving the current arm in place.
  */
 async function runTask(
   input: ContributorGateInput,
   task: ContributorTask,
+  liveChildren: Set<string>,
 ): Promise<{ applicationId: string; deadlineMs: number } | null | undefined> {
   switch (task.type) {
+    case "prEvent":
+      await deliverPrEvent(task, liveChildren);
+      return undefined;
     case "decision": {
       await acts.runApplicationPostDecision({
         kind: task.kind,
@@ -136,6 +179,52 @@ async function runTask(
         direction: task.direction,
       });
       return undefined;
+  }
+}
+
+/**
+ * Deliver a PR event to its prGate child: signal the live child, else start it
+ * as a child (establishing the tree). Robust to the child having just completed
+ * (re-create) or already running top-level / from a race (adopt + external
+ * signal).
+ */
+async function deliverPrEvent(
+  task: Extract<ContributorTask, { type: "prEvent" }>,
+  liveChildren: Set<string>,
+): Promise<void> {
+  const childId = prChildId(task.ghRepoId, task.prNumber);
+
+  if (liveChildren.has(childId)) {
+    try {
+      await getExternalWorkflowHandle(childId).signal(SIG.githubEvent, task.envelope);
+      return;
+    } catch {
+      // Child already completed; drop and re-create below.
+      liveChildren.delete(childId);
+    }
+  }
+
+  const args: PrGateInput = {
+    repoId: task.ghRepoId,
+    prNumber: task.prNumber,
+    first: task.envelope,
+  };
+  try {
+    await startChild(WF.prGate, {
+      workflowId: childId,
+      parentClosePolicy: ParentClosePolicy.ABANDON,
+      args: [args],
+    });
+    liveChildren.add(childId);
+  } catch {
+    // Already running (started top-level by a re-gate, or a concurrent start):
+    // adopt it logically and deliver the event via an external signal.
+    liveChildren.add(childId);
+    try {
+      await getExternalWorkflowHandle(childId).signal(SIG.githubEvent, task.envelope);
+    } catch {
+      // Best-effort; a later event or the reconcile sweep will re-converge.
+    }
   }
 }
 

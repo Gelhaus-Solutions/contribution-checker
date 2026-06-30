@@ -35,11 +35,27 @@ export const SIG = {
   githubEvent: "githubEvent",
   reGate: "reGate",
   // contributorGate signals:
+  prEvent: "prEvent",
+  prChildCompleted: "prChildCompleted",
   decisionChanged: "decisionChanged",
   claCoverageChanged: "claCoverageChanged",
   cooldownRefresh: "cooldownRefresh",
   claStalenessArmed: "claStalenessArmed",
 } as const;
+
+/** A GitHub PR event routed to the contributor entity, which forwards it to (or
+ * starts) the right prGate CHILD. Carrying the routing fields structurally keeps
+ * the workflow from inspecting the opaque webhook payload. */
+export type ContributorPrEvent = {
+  /** GitHub repo id (string), the prGate child's `pr:{ghRepoId}:{prNumber}` id. */
+  ghRepoId: string;
+  prNumber: number;
+  envelope: GithubEventEnvelope;
+};
+
+/** A prGate child telling its contributor parent it has completed (terminal
+ * close or idle), so the parent drops it from its live-children set. */
+export type PrChildCompletedPayload = { childWorkflowId: string };
 
 /** Payload for the `reGate` signal. `reason` is for observability; `nonce`
  * coalesces a fan-out so a PR re-converges once per distinct re-gate even if the
@@ -88,6 +104,10 @@ export type GithubEventEnvelope = {
 export type PrGateInput = {
   repoId: string;
   prNumber: number;
+  /** The triggering event when started as a contributorGate CHILD (startChild
+   * passes args, not a signal). Absent when started top-level by signalWithStart
+   * (the event then arrives via the `githubEvent` signal). */
+  first?: GithubEventEnvelope;
   /** GitHub events carried over from a prior run via Continue-As-New. */
   pending?: GithubEventEnvelope[];
   /** A re-gate request carried over (received but not yet applied) at CAN. */
@@ -99,6 +119,7 @@ export type PrGateInput = {
 /** A queued unit of fan-out work the contributorGate drains. Mirrors the
  * state-change signals; kept structural so it survives Continue-As-New. */
 export type ContributorTask =
+  | { type: "prEvent"; ghRepoId: string; prNumber: number; envelope: GithubEventEnvelope }
   | { type: "decision"; kind: ApplicationDecisionKind; applicationId: string; args: Record<string, unknown> }
   | { type: "cla"; direction: "gain" | "loss" }
   | { type: "cooldownRefresh"; applicationId: string };
@@ -115,6 +136,10 @@ export type ContributorGateInput = {
   cooldown?: { applicationId: string; deadlineMs: number } | null;
   /** Armed CLA-staleness re-check at `deadlineMs` (project-scoped). */
   staleness?: { deadlineMs: number } | null;
+  /** Live prGate child workflow ids, carried across Continue-As-New. The gate
+   * stays alive while any child is live and completes only once all report done
+   * (so an ABANDON child is never orphaned by the parent idling out). */
+  liveChildren?: string[];
 };
 
 export type ProcessMergeGroupInput = { payload: unknown };

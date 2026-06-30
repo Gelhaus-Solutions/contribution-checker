@@ -35,16 +35,42 @@ async function startIdempotent(fn: () => Promise<unknown>): Promise<void> {
   }
 }
 
-/** Per-PR entity workflow (prGate): signal it if running, else start it. The
- * workflow id is stable per (repo, PR) so every event for a PR lands on one
- * execution. On a fresh start the triggering event arrives via the signal, so
- * the start args carry only the PR identity. */
+/** Route a PR event into the entity tree: signal the author's contributorGate,
+ * which starts/forwards to the per-PR prGate CHILD (so the Relationships tab
+ * shows contributor → pr). Resolves the project from the repo and the author
+ * from the webhook payload; for an unmanaged repo or an author we can't identify
+ * we fall back to a top-level prGate so the event is still processed (and
+ * IGNORED by decideForPR as before). */
 export async function dispatchPullRequestEvent(
   repoId: string,
   prNumber: number,
   env: GithubEventEnvelope
 ): Promise<void> {
   const client = await getTemporalClient();
+  const ghRepoId = Number(repoId);
+  const authorGhId = (
+    env.payload as { pull_request?: { user?: { id?: number } } } | null
+  )?.pull_request?.user?.id;
+  const repo = Number.isFinite(ghRepoId)
+    ? await prisma.repo.findUnique({
+        where: { ghRepoId },
+        select: { projectId: true },
+      })
+    : null;
+
+  if (repo && authorGhId != null) {
+    await client.workflow.signalWithStart(WF.contributorGate, {
+      workflowId: workflowIds.contributor(repo.projectId, authorGhId),
+      taskQueue: TASK_QUEUE,
+      signal: SIG.prEvent,
+      signalArgs: [{ ghRepoId: repoId, prNumber, envelope: env }],
+      args: [{ projectId: repo.projectId, authorGhId }],
+    });
+    return;
+  }
+
+  // Fallback: top-level prGate (no contributor parent). The triggering event
+  // arrives via the signal, so the start args carry only the PR identity.
   await client.workflow.signalWithStart(WF.prGate, {
     workflowId: workflowIds.pullRequest(repoId, prNumber),
     taskQueue: TASK_QUEUE,

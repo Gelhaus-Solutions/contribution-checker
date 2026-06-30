@@ -2,18 +2,40 @@ import {
   condition,
   continueAsNew,
   defineSignal,
+  getExternalWorkflowHandle,
   setHandler,
+  workflowInfo,
 } from "@temporalio/workflow";
 import { acts } from "./proxies";
 import { SIG } from "../../lib/temporal/contracts";
 import type {
   GithubEventEnvelope,
+  PrChildCompletedPayload,
   PrGateInput,
   ReGatePayload,
 } from "../../lib/temporal/contracts";
 
 const githubEvent = defineSignal<[GithubEventEnvelope]>(SIG.githubEvent);
 const reGate = defineSignal<[ReGatePayload]>(SIG.reGate);
+
+/**
+ * Tell the contributor parent this PR child has completed so it can drop us from
+ * its live-children set. Only when started as a child (workflowInfo().parent is
+ * set); a top-level prGate (a re-gate orphan) has no parent. Best-effort: if the
+ * parent already completed the signal fails harmlessly.
+ */
+async function notifyParentCompleted(): Promise<void> {
+  const parent = workflowInfo().parent;
+  if (!parent) return;
+  try {
+    await getExternalWorkflowHandle(parent.workflowId).signal(
+      SIG.prChildCompleted,
+      { childWorkflowId: workflowInfo().workflowId } satisfies PrChildCompletedPayload,
+    );
+  } catch {
+    // Parent already gone; nothing to clean up.
+  }
+}
 
 /** Continue-As-New once a busy PR has processed this many events so a PR that
  * sees many `synchronize`/re-gate events over its lifetime never approaches the
@@ -44,7 +66,10 @@ const IDLE_TIMEOUT = "1 minute";
  * A busy PR Continue-As-News at EVENTS_BEFORE_CONTINUE to bound history.
  */
 export async function prGate(input: PrGateInput): Promise<void> {
-  const queue: GithubEventEnvelope[] = [...(input.pending ?? [])];
+  const queue: GithubEventEnvelope[] = [
+    ...(input.first ? [input.first] : []),
+    ...(input.pending ?? []),
+  ];
   let pendingReGate: ReGatePayload | null = input.pendingReGate ?? null;
   let lastNonce: string | null = input.lastNonce ?? null;
   let terminal = false;
@@ -64,7 +89,11 @@ export async function prGate(input: PrGateInput): Promise<void> {
       () => queue.length > 0 || pendingReGate !== null,
       IDLE_TIMEOUT,
     );
-    if (!hasWork) return; // idle → complete; a later signal starts a fresh run
+    if (!hasWork) {
+      // Idle → complete; a later signal starts a fresh run.
+      await notifyParentCompleted();
+      return;
+    }
 
     // Drain GitHub events first: they carry authoritative state and can be
     // terminal. Keep the event in the queue until the activity succeeds so a
@@ -94,9 +123,14 @@ export async function prGate(input: PrGateInput): Promise<void> {
     processed += 1;
   }
 
-  if (terminal) return; // PR merged/human-closed → entity completes
+  if (terminal) {
+    // PR merged/human-closed → entity completes.
+    await notifyParentCompleted();
+    return;
+  }
 
-  // Hit the history cap with work still pending: roll it into a fresh run.
+  // Hit the history cap with work still pending: roll it into a fresh run (the
+  // workflow id and parent link are preserved across Continue-As-New).
   if (queue.length > 0 || pendingReGate !== null) {
     await continueAsNew<typeof prGate>({
       repoId: input.repoId,
