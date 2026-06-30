@@ -1,17 +1,30 @@
 # syntax=docker/dockerfile:1.7
 
 FROM node:24-alpine AS base
+# pnpm keeps its content-addressable store under $PNPM_HOME/store. Pointing it
+# at a stable path lets the BuildKit cache mount below persist downloaded
+# packages (incl. the large @temporalio native core-bridge) across builds, so a
+# webhook-triggered rebuild no longer re-downloads the whole dependency tree.
+ENV PNPM_HOME="/pnpm"
+ENV PATH="$PNPM_HOME:$PATH"
 RUN corepack enable
 WORKDIR /app
 
 # --- build stage ---
 FROM base AS build
-# .npmrc routes the @hexclave scope to the self-hosted registry (reads are public, no token)
+# Install with only the manifest + lockfile in context, so this layer (and the
+# cached store) is reused whenever dependencies are unchanged. .npmrc routes the
+# @hexclave scope to the self-hosted registry (reads are public, no token).
 COPY package.json pnpm-lock.yaml .npmrc ./
-RUN pnpm install --frozen-lockfile
+RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
+    pnpm install --frozen-lockfile
+# Source comes in after install. .dockerignore keeps node_modules/.next/.git out
+# of the context so this COPY stays small and never clobbers the clean install.
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
-RUN pnpm exec prisma generate && pnpm run build
+# Persist Next.js's build cache across builds for much faster incremental rebuilds.
+RUN --mount=type=cache,id=next-cache,target=/app/.next/cache \
+    pnpm exec prisma generate && pnpm run build
 
 # --- runner stage ---
 FROM base AS runner

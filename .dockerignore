@@ -1,0 +1,33 @@
+# Keep the build context small and avoid clobbering the clean `pnpm install`.
+# Without this, `COPY . .` ships the host's node_modules/.next/.git into the
+# image (slow upload + stale deps).
+node_modules
+**/node_modules
+.next
+.turbo
+.git
+.gitignore
+
+# Local data + secrets must never be baked into the image (env is supplied at
+# runtime via docker-compose env_file/environment).
+data
+*.db
+*.db-journal
+.env
+.env.*
+!.env.example
+
+# Tests / tooling not needed to build or run the server + worker.
+tests/e2e
+playwright-report
+test-results
+coverage
+.vscode
+.idea
+*.log
+npm-debug.log*
+
+# Docker + CI files (not needed inside the image)
+docker
+.dockerignore
+Dockerfile*
