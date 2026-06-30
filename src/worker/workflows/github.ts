@@ -3,7 +3,6 @@ import {
   continueAsNew,
   defineSignal,
   setHandler,
-  workflowInfo,
 } from "@temporalio/workflow";
 import { acts } from "./proxies";
 import { SIG } from "../../lib/temporal/contracts";
@@ -22,12 +21,18 @@ const githubEvent = defineSignal<[GithubEventEnvelope]>(SIG.githubEvent);
  * history-event ceiling. */
 const EVENTS_BEFORE_CONTINUE = 500;
 
+/** How long to wait for the next event once the queue is drained before the
+ * workflow COMPLETES. A later event simply signalWithStarts a fresh run. Keeps
+ * a window open to batch rapid `synchronize` bursts without leaving a workflow
+ * Running forever per PR. */
+const IDLE_TIMEOUT = "1 minute";
+
 /**
- * Long-lived entity workflow, one per (repo, PR). Every GitHub event for the PR
+ * Short-lived entity workflow, one per (repo, PR). Every GitHub event for the PR
  * is delivered as a `githubEvent` signal (signalWithStart). Events are drained
  * in order and each runs the existing handler inside a durably-retried activity.
- * When enough events have been processed, Continue-As-New resets history,
- * carrying any not-yet-drained signals forward.
+ * Once the PR goes quiet for IDLE_TIMEOUT the workflow completes; a busy PR
+ * Continue-As-News at EVENTS_BEFORE_CONTINUE to bound history.
  */
 export async function processPullRequest(
   input: ProcessPullRequestInput
@@ -37,20 +42,13 @@ export async function processPullRequest(
     queue.push(env);
   });
 
-  const rollOver = async (): Promise<never> => {
-    await continueAsNew<typeof processPullRequest>({
-      repoId: input.repoId,
-      prNumber: input.prNumber,
-      first: queue[0],
-      pending: queue.slice(1),
-    });
-    // continueAsNew throws to end the run; this is unreachable.
-    throw new Error("unreachable");
-  };
-
   let processed = 0;
   while (processed < EVENTS_BEFORE_CONTINUE) {
-    await condition(() => queue.length > 0);
+    // Wait for work; if none arrives within the idle window, the PR is quiet —
+    // complete the run. (A signal arriving during the wait flips the condition
+    // true and we keep processing.)
+    const hasWork = await condition(() => queue.length > 0, IDLE_TIMEOUT);
+    if (!hasWork) return;
     // Run the existing handler in a durably-retried activity. Keep the event in
     // the queue until it succeeds so a Continue-As-New (or crash) never drops it.
     await acts.processPullRequestEvent(queue[0]);
@@ -58,12 +56,17 @@ export async function processPullRequest(
     processed += 1;
   }
 
-  // Hit the history-bound cap. If more work is queued, roll it forward; else do
-  // a short final wait to avoid a lost-signal race, then complete (a new event
-  // later will signalWithStart a fresh execution).
-  if (queue.length > 0) await rollOver();
-  if (await condition(() => queue.length > 0, "1 second")) await rollOver();
-  void workflowInfo();
+  // Hit the history-bound cap. Roll any remaining queued events into a fresh run
+  // so history stays bounded; if the queue drained exactly at the cap, just
+  // complete (a later event signalWithStarts a new run).
+  if (queue.length > 0) {
+    await continueAsNew<typeof processPullRequest>({
+      repoId: input.repoId,
+      prNumber: input.prNumber,
+      first: queue[0],
+      pending: queue.slice(1),
+    });
+  }
 }
 
 export async function processMergeGroup(
