@@ -120,6 +120,28 @@ const schema = z.object({
   // Optional SNI / server name override for mTLS verification (when the cert CN
   // differs from TEMPORAL_HOST, e.g. behind a load balancer).
   TEMPORAL_TLS_SERVER_NAME: z.string().optional(),
+
+  // Worker Deployments / Worker Versioning (https://docs.temporal.io/worker-deployments).
+  // Opt-in: when enabled, the worker registers under a Deployment with a Build
+  // ID, which powers safe rolling deploys + the worker/version heartbeats the
+  // server tracks (needs `frontend.workerHeartbeatsEnabled: true` server-side).
+  TEMPORAL_VERSIONING_ENABLED: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((v) => v === "true"),
+  // Logical deployment name (stable across releases), e.g. "contribution-checker".
+  TEMPORAL_DEPLOYMENT_NAME: z.string().default("contribution-checker"),
+  // Build ID — unique per worker code version. Wire to the image tag / git sha
+  // (e.g. the CI version "0.0.99" or commit). Required when versioning is on.
+  TEMPORAL_BUILD_ID: z.string().optional(),
+  // How in-flight workflows behave when a new Build ID is deployed:
+  //  - AUTO_UPGRADE: migrate to the latest version on next task (good for the
+  //    long-lived cooldown/entity workflows so old workers needn't linger).
+  //  - PINNED: stay on the starting version until completion (old worker must
+  //    keep running until they finish).
+  TEMPORAL_DEFAULT_VERSIONING_BEHAVIOR: z
+    .enum(["AUTO_UPGRADE", "PINNED"])
+    .default("AUTO_UPGRADE"),
 });
 
 // During `next build`, Next.js executes server modules to collect page data

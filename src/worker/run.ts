@@ -1,9 +1,37 @@
 import path from "node:path";
 import { NativeConnection, Worker } from "@temporalio/worker";
+import type { WorkerDeploymentOptions } from "@temporalio/worker";
 import { Client } from "@temporalio/client";
 import * as activities from "./activities";
 import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
+
+/** Build Worker Deployment options from env, or null when versioning is off. */
+function buildDeploymentOptions(): WorkerDeploymentOptions | null {
+  if (!env.TEMPORAL_VERSIONING_ENABLED) return null;
+  if (!env.TEMPORAL_BUILD_ID) {
+    throw new Error(
+      "TEMPORAL_VERSIONING_ENABLED=true requires TEMPORAL_BUILD_ID (set it to " +
+        "the image tag / git sha, unique per worker code version)."
+    );
+  }
+  logger.info(
+    {
+      deploymentName: env.TEMPORAL_DEPLOYMENT_NAME,
+      buildId: env.TEMPORAL_BUILD_ID,
+      defaultVersioningBehavior: env.TEMPORAL_DEFAULT_VERSIONING_BEHAVIOR,
+    },
+    "worker deployments enabled"
+  );
+  return {
+    useWorkerVersioning: true,
+    version: {
+      deploymentName: env.TEMPORAL_DEPLOYMENT_NAME,
+      buildId: env.TEMPORAL_BUILD_ID,
+    },
+    defaultVersioningBehavior: env.TEMPORAL_DEFAULT_VERSIONING_BEHAVIOR,
+  };
+}
 import { TASK_QUEUE } from "@/lib/temporal/task-queue";
 import { resolveTemporalTls, temporalAddress } from "@/lib/temporal/connection";
 import { ensureSchedules } from "@/lib/temporal/schedules";
@@ -44,6 +72,11 @@ async function main(): Promise<void> {
     logger.error({ err: e }, "ensureSchedules failed (continuing)")
   );
 
+  // Worker Deployments / Versioning (opt-in). When enabled the worker joins a
+  // Deployment under a Build ID, enabling safe rolling deploys and the
+  // worker/version heartbeats the server tracks. See docs.temporal.io/worker-deployments.
+  const workerDeploymentOptions = buildDeploymentOptions();
+
   const worker = await Worker.create({
     connection,
     namespace: env.TEMPORAL_NAMESPACE,
@@ -55,6 +88,7 @@ async function main(): Promise<void> {
       process.env.TEMPORAL_WORKFLOWS_PATH ||
       path.resolve(process.cwd(), "src/worker/workflows/index.ts"),
     activities,
+    ...(workerDeploymentOptions ? { workerDeploymentOptions } : {}),
   });
 
   // Graceful shutdown: let in-flight activities finish on SIGTERM/SIGINT.

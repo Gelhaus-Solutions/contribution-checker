@@ -3,6 +3,10 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile
+      args:
+        # Bakes TEMPORAL_BUILD_ID into the image. Set BUILD_ID in your env/CI to
+        # the git short sha: `BUILD_ID=$(git rev-parse --short HEAD) docker compose build`.
+        BUILD_ID: ${BUILD_ID:-dev}
     image: contribution-checker:latest
     restart: unless-stopped
     env_file:
@@ -17,6 +21,11 @@ services:
       - TEMPORAL_NAMESPACE=default
       - TEMPORAL_TASK_QUEUE=contribution-checker
       - TEMPORAL_TLS_ENABLED=false
+      # Worker Deployments + heartbeats. TEMPORAL_BUILD_ID is baked from the
+      # BUILD_ID build-arg above (do NOT override it here at runtime — it must
+      # match the code in the image).
+      - TEMPORAL_VERSIONING_ENABLED=true
+      - TEMPORAL_DEPLOYMENT_NAME=contribution-checker
     volumes:
       - data:/app/data
     ports:
@@ -29,7 +38,12 @@ services:
   # Production uses a real self-hosted cluster reached over mTLS instead.
   temporal:
     image: temporalio/temporal:latest
-    command: server start-dev --ip 0.0.0.0 --log-level warn
+    # frontend.workerHeartbeatsEnabled powers Worker Deployment visibility +
+    # worker/version heartbeats. On a real cluster, set it in the server's
+    # dynamicconfig YAML instead (see below).
+    command: >
+      server start-dev --ip 0.0.0.0 --log-level warn
+      --dynamic-config-value frontend.workerHeartbeatsEnabled=true
     restart: unless-stopped
     ports:
       - "7233:7233"

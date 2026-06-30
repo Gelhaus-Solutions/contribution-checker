@@ -54,6 +54,14 @@ ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
 
+# Temporal Worker Deployment Build ID, baked at build time. Pass the git short
+# sha (or version tag) you already tag the image with:
+#   docker build --build-arg BUILD_ID=$(git rev-parse --short HEAD) ...
+# It must be fixed per code version — the image content digest isn't known until
+# after the build, so the git sha is the right, build-time-available value.
+ARG BUILD_ID=dev
+ENV TEMPORAL_BUILD_ID=${BUILD_ID}
+
 # Slim runtime node_modules (prod-only) + the Next build output from the build
 # stage. This drops dev-only packages (and @temporalio/testing's test-server
 # binary) from the image, cutting its size and push/pull time.
