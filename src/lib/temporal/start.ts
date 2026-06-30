@@ -4,9 +4,15 @@ import {
   WorkflowExecutionAlreadyStartedError,
   WorkflowIdReusePolicy,
 } from "@temporalio/client";
+import { prisma } from "@/lib/db";
 import { getTemporalClient } from "./client";
 import { TASK_QUEUE, workflowIds } from "./task-queue";
 import { WF, SIG } from "./contracts";
+import type {
+  ApplicationDecisionKind,
+  ClaCoverageChangedPayload,
+  DecisionChangedPayload,
+} from "./contracts";
 import type {
   ApplicationDecisionInput,
   ApplicationDecisionResult,
@@ -117,6 +123,147 @@ export async function dispatchInstallationEvent(
       args: [{ kind, payload }],
     })
   );
+}
+
+/** Low-level: signal the contributor entity (start it if not running). Keyed by
+ * (projectId, authorGhId) so every signal for a contributor lands on one
+ * execution that holds their timers. */
+async function signalContributor(
+  projectId: string,
+  authorGhId: number,
+  signal: string,
+  signalArg: unknown
+): Promise<void> {
+  const client = await getTemporalClient();
+  await client.workflow.signalWithStart(WF.contributorGate, {
+    workflowId: workflowIds.contributor(projectId, authorGhId),
+    taskQueue: TASK_QUEUE,
+    signal,
+    signalArgs: [signalArg],
+    args: [{ projectId, authorGhId }],
+  });
+}
+
+/** Resolve an application to its (projectId, applicant ghId). Returns null when
+ * the applicant has no GitHub identity yet (can't key a contributor entity). */
+async function resolveApplicationContributor(
+  applicationId: string
+): Promise<{ projectId: string; ghId: number } | null> {
+  const app = await prisma.application.findUnique({
+    where: { id: applicationId },
+    select: { projectId: true, user: { select: { ghId: true } } },
+  });
+  if (!app || app.user.ghId == null) return null;
+  return { projectId: app.projectId, ghId: app.user.ghId };
+}
+
+/** An application decision (approve/deny/revoke) → run the GitHub fan-out on the
+ * contributor entity and (re)arm its cooldown timer. Replaces the old
+ * dispatchApplicationDecision + startCooldownTimer pair. Fire-and-forget: the
+ * affected-PR count is not surfaced to the admin UI. */
+export async function dispatchContributorDecision(
+  kind: ApplicationDecisionKind,
+  applicationId: string,
+  args: Record<string, unknown> = {}
+): Promise<void> {
+  const who = await resolveApplicationContributor(applicationId);
+  if (!who) return;
+  const payload: DecisionChangedPayload = { kind, applicationId, args };
+  await signalContributor(who.projectId, who.ghId, SIG.decisionChanged, payload);
+}
+
+/** A cooldown-setting action with no GitHub fan-out (allow-resubmit, or a revoke
+ * that only changed the cooldown) → have the contributor entity re-read the
+ * application's cooldown and (re)arm/clear its timer. */
+export async function refreshContributorCooldown(
+  applicationId: string
+): Promise<void> {
+  const who = await resolveApplicationContributor(applicationId);
+  if (!who) return;
+  await signalContributor(who.projectId, who.ghId, SIG.cooldownRefresh, {
+    applicationId,
+  });
+}
+
+/** A CLA-coverage change for one contributor → re-pass (gain) or re-gate (loss)
+ * their CLA-gated PRs via the contributor entity. */
+export async function dispatchClaCoverageChange(
+  projectId: string,
+  ghId: number,
+  direction: "gain" | "loss",
+  recheckAtIso?: string
+): Promise<void> {
+  const payload: ClaCoverageChangedPayload = { direction, recheckAtIso };
+  await signalContributor(projectId, ghId, SIG.claCoverageChanged, payload);
+}
+
+/** DB-backed re-gate fan-out: signal `reGate` to every tracked PR by an author
+ * in a project (by ghId and/or ghLogin), so each prGate re-evaluates itself.
+ * signalWithStart means even a PR with no live gate (idle-completed) re-converges.
+ * This replaces the label-spray and powers the manual-decision and corporate-CLA
+ * re-gate fixes. A shared nonce coalesces duplicates at each prGate. */
+export async function reGateAuthorPrs(args: {
+  projectId: string;
+  ghId?: number | null;
+  ghLogin?: string | null;
+  reason: string;
+}): Promise<{ signaled: number }> {
+  const authorOr: Array<{ authorGhId?: number; authorGhLogin?: string }> = [];
+  if (args.ghId != null) authorOr.push({ authorGhId: args.ghId });
+  if (args.ghLogin) authorOr.push({ authorGhLogin: args.ghLogin });
+  if (authorOr.length === 0) return { signaled: 0 };
+
+  const checks = await prisma.prCheck.findMany({
+    where: {
+      OR: authorOr,
+      repo: {
+        projectId: args.projectId,
+        active: true,
+        installationId: { not: null },
+      },
+    },
+    select: { prNumber: true, repo: { select: { ghRepoId: true } } },
+  });
+  const nonce = randomUUID();
+  let signaled = 0;
+  for (const c of checks) {
+    if (c.repo.ghRepoId == null) continue;
+    await signalPrReGate(String(c.repo.ghRepoId), c.prNumber, {
+      reason: args.reason,
+      nonce,
+    });
+    signaled += 1;
+  }
+  return { signaled };
+}
+
+/** Re-gate every tracked PR in a project (used by config changes that affect all
+ * authors, and the "re-evaluate all" admin action). */
+export async function reGateProjectPrs(args: {
+  projectId: string;
+  reason: string;
+}): Promise<{ signaled: number }> {
+  const checks = await prisma.prCheck.findMany({
+    where: {
+      repo: {
+        projectId: args.projectId,
+        active: true,
+        installationId: { not: null },
+      },
+    },
+    select: { prNumber: true, repo: { select: { ghRepoId: true } } },
+  });
+  const nonce = randomUUID();
+  let signaled = 0;
+  for (const c of checks) {
+    if (c.repo.ghRepoId == null) continue;
+    await signalPrReGate(String(c.repo.ghRepoId), c.prNumber, {
+      reason: args.reason,
+      nonce,
+    });
+    signaled += 1;
+  }
+  return { signaled };
 }
 
 export type CiCoreResult = { status: number; json: unknown };

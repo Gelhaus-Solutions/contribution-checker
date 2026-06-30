@@ -15,6 +15,7 @@
  * Next.js server. Each must match an exported function in src/worker/workflows. */
 export const WF = {
   prGate: "prGate",
+  contributorGate: "contributorGate",
   processPullRequest: "processPullRequest",
   processMergeGroup: "processMergeGroup",
   processPush: "processPush",
@@ -37,12 +38,39 @@ export const WF = {
 export const SIG = {
   githubEvent: "githubEvent",
   reGate: "reGate",
+  // contributorGate signals:
+  decisionChanged: "decisionChanged",
+  claCoverageChanged: "claCoverageChanged",
+  cooldownRefresh: "cooldownRefresh",
+  claStalenessArmed: "claStalenessArmed",
 } as const;
 
 /** Payload for the `reGate` signal. `reason` is for observability; `nonce`
  * coalesces a fan-out so a PR re-converges once per distinct re-gate even if the
  * fast (parent-signal) and completeness (projectReGate) paths both reach it. */
 export type ReGatePayload = { reason?: string; nonce?: string };
+
+/** An application decision (approve/deny/revoke) reached the contributor: run the
+ * GitHub fan-out, then re-read the application's cooldown to (re)arm the timer. */
+export type DecisionChangedPayload = {
+  kind: ApplicationDecisionKind;
+  applicationId: string;
+  args: Record<string, unknown>;
+};
+
+/** CLA coverage for the contributor changed: gained (signed/waived/roster-added)
+ * → re-pass gated PRs; lost (revoked/version-bump) → re-gate approved PRs. */
+export type ClaCoverageChangedPayload = {
+  direction: "gain" | "loss";
+  /** Set on a version bump that requires re-signing, so the timer can re-arm. */
+  recheckAtIso?: string;
+};
+
+/** A cooldown-setting action (deny/revoke/allow-resubmit) ran with no GitHub
+ * fan-out of its own; the gate just re-reads the application's cooldown. */
+export type CooldownRefreshPayload = { applicationId: string };
+
+export type ClaStalenessArmedPayload = { atIso: string };
 
 // --- payloads --------------------------------------------------------------
 
@@ -80,6 +108,27 @@ export type PrGateInput = {
   pendingReGate?: ReGatePayload | null;
   /** Last applied re-gate nonce, carried across CAN to coalesce duplicates. */
   lastNonce?: string | null;
+};
+
+/** A queued unit of fan-out work the contributorGate drains. Mirrors the
+ * state-change signals; kept structural so it survives Continue-As-New. */
+export type ContributorTask =
+  | { type: "decision"; kind: ApplicationDecisionKind; applicationId: string; args: Record<string, unknown> }
+  | { type: "cla"; direction: "gain" | "loss" }
+  | { type: "cooldownRefresh"; applicationId: string };
+
+/** Per-contributor entity workflow input, keyed by (projectId, authorGhId). Holds
+ * the contributor's durable cooldown + CLA-staleness timers and runs the
+ * application/CLA fan-out. `pending*` / `cooldown` / `staleness` are carried
+ * across Continue-As-New so timers and unprocessed work are never lost. */
+export type ContributorGateInput = {
+  projectId: string;
+  authorGhId: number;
+  pendingTasks?: ContributorTask[];
+  /** Armed cooldown: the application whose cooldown elapses at `deadlineMs`. */
+  cooldown?: { applicationId: string; deadlineMs: number } | null;
+  /** Armed CLA-staleness re-check at `deadlineMs` (project-scoped). */
+  staleness?: { deadlineMs: number } | null;
 };
 
 export type ProcessMergeGroupInput = { payload: unknown };

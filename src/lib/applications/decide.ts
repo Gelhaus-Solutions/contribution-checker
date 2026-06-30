@@ -4,7 +4,6 @@ import { recordAudit } from "@/lib/audit";
 import { notifyProjectReviewers, notifyUser } from "@/lib/notifications/inbox";
 import { applyUrl, dashboardUrl, sendEmail } from "@/lib/notifications/email";
 import { enqueueProjectWebhook } from "@/lib/notifications/webhooks";
-import { startCooldownTimer } from "@/lib/temporal/start";
 import { isClaSatisfied } from "@/lib/cla/status";
 
 function recordApplicationDecisionMetric(
@@ -279,21 +278,10 @@ export async function denyApplication(args: {
     triggeredById: args.decidedById,
   });
 
-  // Durable cooldown timer: when the denial set a cooldown, a workflow sleeps
-  // until it elapses and then proactively re-enables resubmission + notifies the
-  // applicant (replacing on-read cooldown derivation). decideForRepo keeps its
-  // own date check as a safety net.
-  if (cooldownUntil) {
-    await startCooldownTimer({
-      applicationId: app.id,
-      cooldownUntilIso: cooldownUntil.toISOString(),
-    }).catch((e) =>
-      // Don't fail the denial if Temporal is briefly unreachable; the date-based
-      // safety net in decideForRepo still applies.
-      Sentry.captureException(e, { tags: { component: "cooldown-timer" } })
-    );
-  }
-
+  // The durable cooldown timer now lives on the contributor entity: denyAction
+  // dispatches the decision to the contributorGate, which re-reads this
+  // application's cooldown and arms its timer (so a re-arm never races a
+  // standalone timer). decideForRepo keeps its own date check as a safety net.
   return updated;
 }
 

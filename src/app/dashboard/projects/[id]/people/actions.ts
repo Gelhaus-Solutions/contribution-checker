@@ -5,7 +5,10 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
 import { requireProjectRole } from "@/lib/authz";
 import { recordAudit } from "@/lib/audit";
-import { dispatchApplicationDecision } from "@/lib/temporal/start";
+import {
+  dispatchContributorDecision,
+  reGateAuthorPrs,
+} from "@/lib/temporal/start";
 import {
   approveApplication,
   denyApplication,
@@ -104,9 +107,18 @@ export async function addManualDecision(formData: FormData) {
           reason: parsed.reason,
         },
       });
-      await dispatchApplicationDecision("approved", pendingApp.id);
+      await dispatchContributorDecision("approved", pendingApp.id);
     }
   }
+
+  // A manual decision changes the gate outcome for any open PRs by this author
+  // (a manual DENY closes them; a manual APPROVE bypasses): re-evaluate them.
+  await reGateAuthorPrs({
+    projectId: parsed.projectId,
+    ghLogin: parsed.ghLogin,
+    ghId: existingUser?.ghId ?? null,
+    reason: "manual_decision_added",
+  });
 
   revalidatePath(`/dashboard/projects/${parsed.projectId}/people`);
   revalidatePath(`/dashboard/projects/${parsed.projectId}`);
@@ -147,6 +159,15 @@ export async function setManualDecisionStatus(args: {
       ghLogin: existing.ghLogin,
       from: existing.status,
     },
+  });
+
+  // Flipping a manual decision changes the gate outcome (decideForRepo reads it):
+  // re-evaluate the author's open PRs. Previously a no-op gap.
+  await reGateAuthorPrs({
+    projectId: parsed.projectId,
+    ghLogin: existing.ghLogin,
+    ghId: existing.ghId,
+    reason: "manual_decision_changed",
   });
 
   revalidatePath(`/dashboard/projects/${parsed.projectId}/people`);
@@ -213,21 +234,21 @@ export async function setApplicationStatus(args: {
       }
       throw e;
     }
-    await dispatchApplicationDecision("approved", app.id);
+    await dispatchContributorDecision("approved", app.id);
   } else if (wasApproved) {
     await revokeApplication({
       applicationId: app.id,
       decidedById: session.user.id,
       target: parsed.target,
     });
-    await dispatchApplicationDecision("revoked", app.id);
+    await dispatchContributorDecision("revoked", app.id);
   } else if (parsed.target === "DENIED") {
     await denyApplication({
       applicationId: app.id,
       decidedById: session.user.id,
       allowResubmit: true,
     });
-    await dispatchApplicationDecision("denied", app.id);
+    await dispatchContributorDecision("denied", app.id);
   } else {
     const now = new Date();
     if (parsed.target === "SUBMITTED") {
@@ -355,6 +376,15 @@ export async function removeManualDecision(formData: FormData) {
         status: existing.status,
       },
     },
+  });
+
+  // Removing a manual decision changes the gate outcome: re-evaluate the
+  // author's open PRs (e.g. a manual DENY that was blocking them is now gone).
+  await reGateAuthorPrs({
+    projectId: parsed.projectId,
+    ghLogin: existing.ghLogin,
+    ghId: existing.ghId,
+    reason: "manual_decision_removed",
   });
 
   revalidatePath(`/dashboard/projects/${parsed.projectId}/people`);

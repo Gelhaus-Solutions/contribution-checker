@@ -13,7 +13,10 @@ import {
   ApprovalGateError,
   ClaGateError,
 } from "@/lib/applications/decide";
-import { dispatchApplicationDecision } from "@/lib/temporal/start";
+import {
+  dispatchContributorDecision,
+  refreshContributorCooldown,
+} from "@/lib/temporal/start";
 import { recordAudit } from "@/lib/audit";
 import { notifyProjectReviewers, notifyUser } from "@/lib/notifications/inbox";
 import {
@@ -81,7 +84,7 @@ export async function approveAction(formData: FormData) {
     throw e;
   }
 
-  await dispatchApplicationDecision("approved", parsed.appId);
+  await dispatchContributorDecision("approved", parsed.appId);
 
   revalidatePath(`/dashboard/projects/${parsed.projectId}/applications`);
   revalidatePath(`/dashboard/projects/${parsed.projectId}/applications/${parsed.appId}`);
@@ -118,7 +121,7 @@ export async function denyAction(formData: FormData) {
     allowResubmit,
   });
 
-  await dispatchApplicationDecision("denied", parsed.appId);
+  await dispatchContributorDecision("denied", parsed.appId);
 
   revalidatePath(`/dashboard/projects/${parsed.projectId}/applications`);
   revalidatePath(`/dashboard/projects/${parsed.projectId}/applications/${parsed.appId}`);
@@ -144,6 +147,10 @@ export async function allowResubmitAction(formData: FormData) {
     applicationId: parsed.appId,
     decidedById: session.user.id,
   });
+
+  // No GitHub fan-out (the app stays DENIED), but the cooldown was (re)set:
+  // have the contributor entity (re)arm its durable timer.
+  await refreshContributorCooldown(parsed.appId);
 
   revalidatePath(`/dashboard/projects/${parsed.projectId}/applications`);
   revalidatePath(`/dashboard/projects/${parsed.projectId}/applications/${parsed.appId}`);
@@ -175,7 +182,7 @@ export async function revokeAction(formData: FormData) {
     target: parsed.target,
   });
 
-  await dispatchApplicationDecision("revoked", parsed.appId, {
+  await dispatchContributorDecision("revoked", parsed.appId, {
     reason: parsed.reason,
   });
 
@@ -227,7 +234,7 @@ export async function resolveAppealAction(formData: FormData) {
   }
 
   if (parsed.resolution === "GRANT") {
-    await dispatchApplicationDecision("approved", parsed.appId);
+    await dispatchContributorDecision("approved", parsed.appId);
   }
 
   revalidatePath(`/dashboard/projects/${parsed.projectId}/applications`);

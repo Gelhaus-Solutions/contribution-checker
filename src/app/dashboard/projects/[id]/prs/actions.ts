@@ -15,7 +15,8 @@ import {
 } from "@/lib/quality/registry";
 import type { HeuristicResult, SignalsRaw } from "@/lib/quality/types";
 import { decideForPR, type PrDecision } from "@/lib/applications/decide-pr";
-import { addLabel, ensureLabel, repoRef } from "@/lib/github/pr-actions";
+import { randomUUID } from "node:crypto";
+import { signalPrReGate } from "@/lib/temporal/start";
 
 export type PrOverviewHeuristic = {
   id: string;
@@ -354,14 +355,13 @@ export type ReevaluateResult = {
 };
 
 /**
- * Trigger re-evaluation of one or more PRs by adding the project's
- * `labelEvaluate` label. The webhook handler picks up the `labeled` event
- * and runs the full decision pipeline (close/reopen/comment/labels +
- * Check Run + quality), then strips the trigger label.
+ * Trigger re-evaluation of one or more PRs by signaling each PR's entity
+ * workflow (prGate) to re-gate itself: it re-fetches the PR's current state and
+ * runs the full decision pipeline (close/reopen/comment/labels + Check Run +
+ * quality). Replaces the old `labelEvaluate` label-spray.
  *
- * Async by design: applies side effects via the existing webhook path so
- * we don't fork the decision logic. CI-mode repos (no installation) are
- * skipped: there's no webhook to fire.
+ * signalWithStart means a PR whose gate has idle-completed still re-converges.
+ * CI-mode repos (no installation) are skipped: entities are App-mode only.
  */
 export async function reEvaluatePrs(args: {
   projectId: string;
@@ -369,12 +369,6 @@ export async function reEvaluatePrs(args: {
 }): Promise<ReevaluateResult> {
   const parsed = reevaluateSchema.parse(args);
   const { session } = await requireProjectRole(parsed.projectId, "ADMIN");
-
-  const project = await prisma.project.findUnique({
-    where: { id: parsed.projectId },
-    select: { labelEvaluate: true },
-  });
-  if (!project) throw new Error("Project not found");
 
   const checks = await prisma.prCheck.findMany({
     where: {
@@ -384,7 +378,7 @@ export async function reEvaluatePrs(args: {
     select: {
       id: true,
       prNumber: true,
-      repo: { select: { fullName: true, installationId: true } },
+      repo: { select: { ghRepoId: true, installationId: true } },
     },
   });
 
@@ -392,25 +386,20 @@ export async function reEvaluatePrs(args: {
   let skipped = 0;
   let failed = 0;
 
+  const nonce = randomUUID();
   for (const c of checks) {
-    if (!c.repo.installationId) {
+    if (!c.repo.installationId || c.repo.ghRepoId == null) {
       skipped += 1;
       continue;
     }
-    const ref = repoRef(c.repo.fullName, c.repo.installationId);
     try {
-      // Ensure the trigger label exists before tagging. First-time use on a
-      // repo that hasn't seen any webhook yet would otherwise 422.
-      await ensureLabel(
-        ref,
-        project.labelEvaluate,
-        "5319e7",
-        "Add to trigger a re-evaluation by the contribution checker"
-      );
-      await addLabel(ref, c.prNumber, project.labelEvaluate);
+      await signalPrReGate(String(c.repo.ghRepoId), c.prNumber, {
+        reason: "admin_reevaluate",
+        nonce,
+      });
       triggered += 1;
     } catch (e) {
-      logger.warn({ err: e, prCheckId: c.id }, "re-evaluate: label add failed");
+      logger.warn({ err: e, prCheckId: c.id }, "re-evaluate: signal failed");
       failed += 1;
     }
   }

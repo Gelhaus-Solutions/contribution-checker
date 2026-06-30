@@ -5,6 +5,7 @@
  * src/lib/temporal/contracts. No prisma/Octokit/Node built-ins.
  */
 export * from "./pr-gate";
+export * from "./contributor-gate";
 export * from "./github";
 export * from "./applications";
 export * from "./webhook-delivery";

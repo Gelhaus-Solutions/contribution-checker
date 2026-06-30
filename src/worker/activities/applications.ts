@@ -3,6 +3,10 @@ import {
   onApplicationDenied,
   onApplicationRevokedWithClose,
 } from "@/lib/github/post-decision";
+import {
+  onClaCoverageChanged,
+  onClaCoverageRevoked,
+} from "@/lib/cla/post-sign";
 import { prisma } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { recordAudit } from "@/lib/audit";
@@ -45,6 +49,39 @@ export async function runApplicationPostDecision(
       return { affectedPrs: closed };
     }
   }
+}
+
+/**
+ * Run the GitHub fan-out for a CLA-coverage change on one contributor. `gain`
+ * (signed / waived / roster-added / corporate-approved) re-passes the
+ * contributor's CLA-gated PRs; `loss` (revoked / version bump) re-gates their
+ * currently-approved PRs. Both reuse the idempotent post-sign loops.
+ */
+export async function applyClaCoverageChange(args: {
+  projectId: string;
+  ghId: number;
+  direction: "gain" | "loss";
+}): Promise<void> {
+  if (args.direction === "gain") {
+    await onClaCoverageChanged({ projectId: args.projectId, ghId: args.ghId });
+  } else {
+    await onClaCoverageRevoked({ projectId: args.projectId, ghIds: [args.ghId] });
+  }
+}
+
+/**
+ * Read an application's current cooldown timestamp (ISO) for the contributorGate
+ * to arm its durable timer, or null when there is no active cooldown.
+ */
+export async function readApplicationCooldown(
+  applicationId: string,
+): Promise<string | null> {
+  const app = await prisma.application.findUnique({
+    where: { id: applicationId },
+    select: { cooldownUntil: true, status: true },
+  });
+  if (!app || app.status !== "DENIED" || !app.cooldownUntil) return null;
+  return app.cooldownUntil.toISOString();
 }
 
 /**

@@ -16,6 +16,8 @@ export const TASK_QUEUE = env.TEMPORAL_TASK_QUEUE;
 export const workflowIds = {
   pullRequest: (repoId: string, prNumber: number) =>
     `pr:${repoId}:${prNumber}`,
+  contributor: (projectId: string, authorGhId: number) =>
+    `contrib:${projectId}:${authorGhId}`,
   mergeGroup: (repoId: string, headSha: string) =>
     `mergegroup:${repoId}:${headSha}`,
   push: (repoId: string, ref: string, after: string) =>
