@@ -30,9 +30,17 @@ await build({
   platform: "node",
   format: "esm",
   target: "node24",
+  // Keep node_modules external (proven to run Temporal's worker-thread spawn;
+  // bundling deps breaks its file-path resolution). Two aliases fix the only
+  // gaps this leaves:
+  //  - server-only: the Next client-bundle guard, meaningless in the worker.
+  //  - @sentry/nextjs: left external in an ESM bundle, its CJS->ESM namespace
+  //    interop drops ALL exports (Sentry.metrics/captureException become
+  //    undefined). The shim re-exports the real package via runtime require.
   packages: "external",
   alias: {
     "server-only": path.join(root, "src/worker/empty.ts"),
+    "@sentry/nextjs": path.join(root, "src/worker/sentry-shim.ts"),
   },
   // esbuild may emit `require`/`__dirname` for CJS-interop of external deps;
   // ESM output has neither, so shim them from import.meta.
