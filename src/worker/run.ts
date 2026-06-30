@@ -1,3 +1,4 @@
+import path from "node:path";
 import { NativeConnection, Worker } from "@temporalio/worker";
 import { Client } from "@temporalio/client";
 import * as activities from "./activities";
@@ -47,7 +48,12 @@ async function main(): Promise<void> {
     connection,
     namespace: env.TEMPORAL_NAMESPACE,
     taskQueue: TASK_QUEUE,
-    workflowsPath: require.resolve("./workflows"),
+    // Temporal compiles the workflow code from source at runtime. The worker
+    // itself is bundled to dist/worker.mjs, so resolve the workflow source from
+    // the shipped tree (cwd = /app in the container) rather than the bundle dir.
+    workflowsPath:
+      process.env.TEMPORAL_WORKFLOWS_PATH ||
+      path.resolve(process.cwd(), "src/worker/workflows/index.ts"),
     activities,
   });
 

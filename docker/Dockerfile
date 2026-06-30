@@ -21,13 +21,16 @@ RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
 # Persist Next.js's webpack cache across builds for much faster rebuilds.
+# build:worker bundles the Temporal worker to dist/worker.mjs (esbuild) — a
+# single self-contained ESM module, so the runtime needs no tsx/path-alias
+# resolution and avoids the Node 24 require(esm) cycle the raw .ts graph hits.
 RUN --mount=type=cache,id=next-cache,target=/app/.next/cache \
-    pnpm exec prisma generate && pnpm run build
+    pnpm exec prisma generate && pnpm run build && pnpm run build:worker
 
 # --- prod-deps stage: runtime-only node_modules (no vitest/playwright/eslint/
-#     typescript/@temporalio/testing), keeping the image small. prisma + tsx +
-#     tsconfig-paths are now runtime deps (migrations + the worker), so they're
-#     included. The Prisma client is generated here so the runner has it. ---
+#     typescript/esbuild/tsx/@temporalio/testing), keeping the image small.
+#     prisma is a runtime dep (migrations); the worker ships pre-bundled so no
+#     tsx is needed at runtime. The Prisma client is generated here. ---
 FROM base AS prod-deps
 COPY package.json pnpm-lock.yaml .npmrc ./
 RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
@@ -58,8 +61,10 @@ COPY --from=build --chown=app:app /app/.next ./.next
 COPY --from=build --chown=app:app /app/prisma ./prisma
 COPY --from=build --chown=app:app /app/package.json ./package.json
 COPY --from=build --chown=app:app /app/next.config.ts ./next.config.ts
-# The Temporal worker runs from source via tsx (see the "worker" npm script),
-# so the runner needs src/ and tsconfig.json + the path alias config.
+# Pre-bundled worker (dist/worker.mjs). The worker itself is self-contained, but
+# Temporal compiles the *workflow* code from source at runtime (workflowsPath),
+# so src/ (worker/workflows + lib/temporal/contracts) and tsconfig.json ship too.
+COPY --from=build --chown=app:app /app/dist ./dist
 COPY --from=build --chown=app:app /app/src ./src
 COPY --from=build --chown=app:app /app/tsconfig.json ./tsconfig.json
 
