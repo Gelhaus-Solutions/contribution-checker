@@ -43,6 +43,7 @@ type WebhookPayload = {
     number: number;
     node_id: string;
     state: string;
+    merged?: boolean;
     user: { login: string; id: number; type: string };
     head?: { sha: string };
     title?: string;
@@ -358,22 +359,21 @@ export async function handlePullRequestEvent(payload: WebhookPayload) {
     !payload.repository ||
     !payload.installation ||
     !(
-      ["opened", "reopened", "ready_for_review", "synchronize"].includes(
-        action,
-      ) || isReEvalLabel
+      [
+        "opened",
+        "reopened",
+        "ready_for_review",
+        "synchronize",
+        "closed",
+      ].includes(action) || isReEvalLabel
     )
   ) {
     return;
   }
 
-  const repoFullName = payload.repository.full_name;
   const ghRepoId = payload.repository.id;
-  const installationId = payload.installation.id;
   const prNumber = payload.pull_request.number;
-  const prNodeId = payload.pull_request.node_id;
   const author = payload.pull_request.user;
-  const headSha = payload.pull_request.head?.sha ?? null;
-  const prIsClosed = payload.pull_request.state === "closed";
 
   // For "labeled" events we only care about the project's evaluate label.
   // Anything else (the bot's own status labels included) must short-circuit
@@ -392,6 +392,96 @@ export async function handlePullRequestEvent(payload: WebhookPayload) {
       return;
     }
   }
+
+  // PR `closed`/merged is terminal for the entity model: a closed PR has nothing
+  // to re-gate. A close the bot itself performed (closedByApp) is a pending/
+  // denied gate that must stay reopenable, so it is NOT terminal; a human close
+  // or a merge is. The per-PR entity workflow (prGate) uses this distinction to
+  // complete. Here we just avoid running the decision pipeline against a closed
+  // PR.
+  if (action === "closed") {
+    await handlePrClosed({
+      ghRepoId,
+      prNumber,
+      merged: payload.pull_request.merged ?? false,
+    });
+    return;
+  }
+
+  await convergePr({
+    ghRepoId,
+    repoFullName: payload.repository.full_name,
+    installationId: payload.installation.id,
+    prNumber,
+    prNodeId: payload.pull_request.node_id,
+    authorGhLogin: author.login,
+    authorGhId: author.id,
+    headSha: payload.pull_request.head?.sha ?? null,
+    prIsClosed: payload.pull_request.state === "closed",
+    isReEval: isReEvalLabel,
+  });
+}
+
+/**
+ * Distinguish a terminal PR close (human close or merge) from the bot's own
+ * pending/denied close (`closedByApp`, which must stay reopenable). Terminal is
+ * the signal prGate uses to complete; for now we only log, since the legacy
+ * processPullRequest path has no per-PR lifecycle to end.
+ */
+async function handlePrClosed(args: {
+  ghRepoId: number;
+  prNumber: number;
+  merged: boolean;
+}): Promise<void> {
+  const repo = await prisma.repo.findUnique({
+    where: { ghRepoId: args.ghRepoId },
+    select: { id: true },
+  });
+  if (!repo) return;
+  const prCheck = await prisma.prCheck.findUnique({
+    where: { repoId_prNumber: { repoId: repo.id, prNumber: args.prNumber } },
+    select: { closedByApp: true },
+  });
+  // Our own gate-close: not terminal, keep it reopenable.
+  if (prCheck?.closedByApp) return;
+  logger.debug(
+    { ghRepoId: args.ghRepoId, prNumber: args.prNumber, merged: args.merged },
+    "PR terminally closed",
+  );
+}
+
+/**
+ * Idempotently converge a single PR to its current decision: decide → upsert the
+ * PrCheck row → apply GitHub side effects (close/reopen, labels, comment, Check
+ * Run, quality). Driven today by the webhook (one call per pull_request event);
+ * the per-PR entity workflow (prGate) calls this through an activity to
+ * re-evaluate on demand. Every step is idempotent, so repeat calls are no-ops.
+ */
+export async function convergePr(ctx: {
+  ghRepoId: number;
+  repoFullName: string;
+  installationId: number;
+  prNumber: number;
+  prNodeId: string;
+  authorGhLogin: string;
+  authorGhId: number;
+  headSha: string | null;
+  prIsClosed: boolean;
+  /** Honor the re-evaluation semantics: reopen a now-passing closedByApp PR,
+   * strip the evaluate trigger label, and don't re-close an already-closed PR. */
+  isReEval: boolean;
+}): Promise<void> {
+  const {
+    ghRepoId,
+    repoFullName,
+    installationId,
+    prNumber,
+    prNodeId,
+    headSha,
+    prIsClosed,
+  } = ctx;
+  const author = { login: ctx.authorGhLogin, id: ctx.authorGhId };
+  const isReEvalLabel = ctx.isReEval;
 
   // The pipeline result. DCO is layered on later (it needs the PR's commits,
   // which the decision path doesn't load), so this is a mutable working copy.
