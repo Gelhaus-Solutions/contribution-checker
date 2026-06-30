@@ -13,6 +13,17 @@ if (!process.env.NEXT_SERVER_ACTIONS_ENCRYPTION_KEY && process.env.AUTH_SECRET) 
 }
 
 const config: NextConfig = {
+  // Keep the Temporal client + its gRPC transport OUT of the Next.js server
+  // bundle. @grpc/grpc-js does dynamic requires / proto loading that breaks when
+  // webpack-bundled, surfacing as a transport error ("undefined undefined:
+  // undefined" on getSystemInfo) the first time a route/action starts a workflow.
+  // Externalizing makes Next require them from node_modules at runtime instead.
+  serverExternalPackages: [
+    "@temporalio/client",
+    "@temporalio/common",
+    "@temporalio/proto",
+    "@grpc/grpc-js",
+  ],
   experimental: {
     serverActions: {
       bodySizeLimit: "2mb",
