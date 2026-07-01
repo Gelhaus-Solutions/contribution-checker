@@ -1,22 +1,25 @@
 import {
   condition,
   continueAsNew,
+  defineQuery,
   defineSignal,
   getExternalWorkflowHandle,
   setHandler,
   workflowInfo,
 } from "@temporalio/workflow";
 import { acts } from "./proxies";
-import { SIG } from "../../lib/temporal/contracts";
+import { QRY, SIG } from "../../lib/temporal/contracts";
 import type {
   GithubEventEnvelope,
   PrChildCompletedPayload,
   PrGateInput,
+  PrGateState,
   ReGatePayload,
 } from "../../lib/temporal/contracts";
 
 const githubEvent = defineSignal<[GithubEventEnvelope]>(SIG.githubEvent);
 const reGate = defineSignal<[ReGatePayload]>(SIG.reGate);
+const prGateState = defineQuery<PrGateState>(QRY.prGateState);
 
 /**
  * Tell the contributor parent this PR child has completed so it can drop us from
@@ -73,6 +76,7 @@ export async function prGate(input: PrGateInput): Promise<void> {
   let pendingReGate: ReGatePayload | null = input.pendingReGate ?? null;
   let lastNonce: string | null = input.lastNonce ?? null;
   let terminal = false;
+  let processed = 0;
 
   setHandler(githubEvent, (env) => {
     queue.push(env);
@@ -82,8 +86,18 @@ export async function prGate(input: PrGateInput): Promise<void> {
     // state, so an older un-applied request is subsumed by a newer one.
     pendingReGate = payload;
   });
+  // Ops/debugging read of the gate's durable state. Pure closure read: never
+  // mutates, never emits commands, so it is replay-safe on old histories.
+  setHandler(prGateState, (): PrGateState => ({
+    repoId: input.repoId,
+    prNumber: input.prNumber,
+    pendingEvents: queue.length,
+    pendingReGate,
+    lastNonce,
+    terminal,
+    processed,
+  }));
 
-  let processed = 0;
   while (processed < EVENTS_BEFORE_CONTINUE) {
     const hasWork = await condition(
       () => queue.length > 0 || pendingReGate !== null,

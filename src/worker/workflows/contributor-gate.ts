@@ -1,6 +1,7 @@
 import {
   condition,
   continueAsNew,
+  defineQuery,
   defineSignal,
   getExternalWorkflowHandle,
   ParentClosePolicy,
@@ -8,11 +9,12 @@ import {
   startChild,
 } from "@temporalio/workflow";
 import { acts } from "./proxies";
-import { SIG, WF } from "../../lib/temporal/contracts";
+import { QRY, SIG, WF } from "../../lib/temporal/contracts";
 import type {
   ClaCoverageChangedPayload,
   ClaStalenessArmedPayload,
   ContributorGateInput,
+  ContributorGateState,
   ContributorPrEvent,
   ContributorTask,
   CooldownRefreshPayload,
@@ -27,6 +29,7 @@ const decisionChanged = defineSignal<[DecisionChangedPayload]>(SIG.decisionChang
 const claCoverageChanged = defineSignal<[ClaCoverageChangedPayload]>(SIG.claCoverageChanged);
 const cooldownRefresh = defineSignal<[CooldownRefreshPayload]>(SIG.cooldownRefresh);
 const claStalenessArmed = defineSignal<[ClaStalenessArmedPayload]>(SIG.claStalenessArmed);
+const contributorGateState = defineQuery<ContributorGateState>(QRY.contributorGateState);
 
 /** Continue-As-New after this many drained tasks so a busy contributor never
  * approaches the history ceiling. Timers + queue + live children are carried. */
@@ -69,6 +72,7 @@ export async function contributorGate(input: ContributorGateInput): Promise<void
   // Bumped by every signal so the wait condition re-evaluates (recomputing the
   // next deadline / noticing a completed child) instead of sleeping through it.
   let seq = 0;
+  let processed = 0;
 
   setHandler(prEvent, (p) => {
     tasks.push({ type: "prEvent", ghRepoId: p.ghRepoId, prNumber: p.prNumber, envelope: p.envelope });
@@ -95,8 +99,19 @@ export async function contributorGate(input: ContributorGateInput): Promise<void
     staleness = { deadlineMs: Date.parse(p.atIso) };
     seq++;
   });
+  // Ops/debugging read of the gate's durable state. Pure closure read (fresh
+  // arrays via spread/map): never mutates, never emits commands.
+  setHandler(contributorGateState, (): ContributorGateState => ({
+    projectId: input.projectId,
+    authorGhId: input.authorGhId,
+    queuedTasks: tasks.length,
+    queuedKinds: tasks.map((t) => t.type),
+    liveChildren: [...liveChildren],
+    cooldown,
+    staleness,
+    processed,
+  }));
 
-  let processed = 0;
   while (processed < TASKS_BEFORE_CONTINUE) {
     // Fire any elapsed timers first (idempotent activities; clear once fired).
     const now = Date.now();
