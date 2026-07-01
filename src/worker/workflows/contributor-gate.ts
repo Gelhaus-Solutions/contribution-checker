@@ -9,8 +9,9 @@ import {
   setHandler,
   startChild,
   upsertSearchAttributes,
+  workflowInfo,
 } from "@temporalio/workflow";
-import { acts } from "./proxies";
+import { acts, localActs } from "./proxies";
 import { PATCHES, QRY, SIG, WF } from "../../lib/temporal/contracts";
 import { SA, type GateStatusValue } from "../../lib/temporal/search-attributes";
 import type {
@@ -34,9 +35,23 @@ const cooldownRefresh = defineSignal<[CooldownRefreshPayload]>(SIG.cooldownRefre
 const claStalenessArmed = defineSignal<[ClaStalenessArmedPayload]>(SIG.claStalenessArmed);
 const contributorGateState = defineQuery<ContributorGateState>(QRY.contributorGateState);
 
-/** Continue-As-New after this many drained tasks so a busy contributor never
- * approaches the history ceiling. Timers + queue + live children are carried. */
+/** Hard backstop cap on drained tasks before Continue-As-New. The PRIMARY
+ * trigger is the server's continueAsNewSuggested heuristic; this cap bounds
+ * the worst case and doubles as the pre-patch threshold for old histories.
+ * Timers + queue + live children are carried across the roll. */
 const TASKS_BEFORE_CONTINUE = 1000;
+
+/** Roll to a fresh run? Server suggestion first (patch-guarded: pre-patch
+ * histories keep the fixed-threshold behavior verbatim), hard cap always. */
+function shouldContinueAsNew(processed: number): boolean {
+  if (patched(PATCHES.contributorGateCanSuggested)) {
+    return (
+      workflowInfo().continueAsNewSuggested ||
+      processed >= TASKS_BEFORE_CONTINUE
+    );
+  }
+  return processed >= TASKS_BEFORE_CONTINUE;
+}
 
 /** Idle window with no armed timer, no work, and no live children before the
  * entity completes. A later signal simply signalWithStarts a fresh run. */
@@ -133,7 +148,7 @@ export async function contributorGate(input: ContributorGateInput): Promise<void
     ]);
   }
 
-  while (processed < TASKS_BEFORE_CONTINUE) {
+  while (!shouldContinueAsNew(processed)) {
     // Fire any elapsed timers first (idempotent activities; clear once fired).
     const now = Date.now();
     if (cooldown && cooldown.deadlineMs <= now) {
@@ -273,7 +288,12 @@ async function deliverPrEvent(
 async function readCooldown(
   applicationId: string,
 ): Promise<{ applicationId: string; deadlineMs: number } | null> {
-  const iso = await acts.readApplicationCooldown(applicationId);
+  // A pure single-row read: run it as a LOCAL activity (no history-heavy
+  // round-trip). Regular vs local activities emit different commands, so the
+  // swap is patch-guarded; pre-patch histories replay the old regular call.
+  const iso = patched(PATCHES.contributorGateCooldownLocal)
+    ? await localActs.readApplicationCooldown(applicationId)
+    : await acts.readApplicationCooldown(applicationId);
   if (!iso) return null;
   return { applicationId, deadlineMs: Date.parse(iso) };
 }

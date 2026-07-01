@@ -43,10 +43,23 @@ async function notifyParentCompleted(): Promise<void> {
   }
 }
 
-/** Continue-As-New once a busy PR has processed this many events so a PR that
- * sees many `synchronize`/re-gate events over its lifetime never approaches the
- * history-event ceiling. */
+/** Hard backstop cap on events processed before Continue-As-New. The PRIMARY
+ * trigger is the server's continueAsNewSuggested heuristic (history size and
+ * event count); this cap only bounds the worst case if that signal is
+ * unavailable, and doubles as the pre-patch threshold for old histories. */
 const EVENTS_BEFORE_CONTINUE = 500;
+
+/** Roll to a fresh run? Server suggestion first (patch-guarded: pre-patch
+ * histories keep the fixed-threshold behavior verbatim), hard cap always. */
+function shouldContinueAsNew(processed: number): boolean {
+  if (patched(PATCHES.prGateCanSuggested)) {
+    return (
+      workflowInfo().continueAsNewSuggested ||
+      processed >= EVENTS_BEFORE_CONTINUE
+    );
+  }
+  return processed >= EVENTS_BEFORE_CONTINUE;
+}
 
 /** Update the GateStatus search attribute. upsert emits a command, so every
  * call is behind the search-attrs patch: a history recorded before the patch
@@ -120,7 +133,7 @@ export async function prGate(input: PrGateInput): Promise<void> {
     ]);
   }
 
-  while (processed < EVENTS_BEFORE_CONTINUE) {
+  while (!shouldContinueAsNew(processed)) {
     const hasWork = await condition(
       () => queue.length > 0 || pendingReGate !== null,
       IDLE_TIMEOUT,
