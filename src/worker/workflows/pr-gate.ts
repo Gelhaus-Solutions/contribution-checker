@@ -4,11 +4,14 @@ import {
   defineQuery,
   defineSignal,
   getExternalWorkflowHandle,
+  patched,
   setHandler,
+  upsertSearchAttributes,
   workflowInfo,
 } from "@temporalio/workflow";
 import { acts } from "./proxies";
-import { QRY, SIG } from "../../lib/temporal/contracts";
+import { PATCHES, QRY, SIG } from "../../lib/temporal/contracts";
+import { SA, type GateStatusValue } from "../../lib/temporal/search-attributes";
 import type {
   GithubEventEnvelope,
   PrChildCompletedPayload,
@@ -44,6 +47,14 @@ async function notifyParentCompleted(): Promise<void> {
  * sees many `synchronize`/re-gate events over its lifetime never approaches the
  * history-event ceiling. */
 const EVENTS_BEFORE_CONTINUE = 500;
+
+/** Update the GateStatus search attribute. upsert emits a command, so every
+ * call is behind the search-attrs patch: a history recorded before the patch
+ * replays without the command and stays deterministic. */
+function setGateStatus(status: GateStatusValue): void {
+  if (!patched(PATCHES.prGateSearchAttrs)) return;
+  upsertSearchAttributes([{ key: SA.GateStatus, value: status }]);
+}
 
 /** How long to wait for the next event once the queue is drained before the
  * workflow COMPLETES. A later event simply signalWithStarts a fresh run. Keeps a
@@ -98,6 +109,17 @@ export async function prGate(input: PrGateInput): Promise<void> {
     processed,
   }));
 
+  // Identity attributes so the execution is findable in the Temporal UI by
+  // repo/PR/status even when started as a child (a client start passes typed
+  // attributes; startChild from the parent does not).
+  if (patched(PATCHES.prGateSearchAttrs)) {
+    upsertSearchAttributes([
+      { key: SA.RepoId, value: input.repoId },
+      { key: SA.PrNumber, value: input.prNumber },
+      { key: SA.GateStatus, value: "active" },
+    ]);
+  }
+
   while (processed < EVENTS_BEFORE_CONTINUE) {
     const hasWork = await condition(
       () => queue.length > 0 || pendingReGate !== null,
@@ -105,6 +127,7 @@ export async function prGate(input: PrGateInput): Promise<void> {
     );
     if (!hasWork) {
       // Idle → complete; a later signal starts a fresh run.
+      setGateStatus("idle");
       await notifyParentCompleted();
       return;
     }
@@ -139,6 +162,7 @@ export async function prGate(input: PrGateInput): Promise<void> {
 
   if (terminal) {
     // PR merged/human-closed → entity completes.
+    setGateStatus("terminal");
     await notifyParentCompleted();
     return;
   }
@@ -146,6 +170,7 @@ export async function prGate(input: PrGateInput): Promise<void> {
   // Hit the history cap with work still pending: roll it into a fresh run (the
   // workflow id and parent link are preserved across Continue-As-New).
   if (queue.length > 0 || pendingReGate !== null) {
+    setGateStatus("continued");
     await continueAsNew<typeof prGate>({
       repoId: input.repoId,
       prNumber: input.prNumber,
@@ -154,4 +179,7 @@ export async function prGate(input: PrGateInput): Promise<void> {
       lastNonce,
     });
   }
+
+  // Cap reached with nothing pending: complete like an idle timeout.
+  setGateStatus("idle");
 }

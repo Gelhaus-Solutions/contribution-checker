@@ -7,6 +7,7 @@ import {
 import { prisma } from "@/lib/db";
 import { getTemporalClient } from "./client";
 import { TASK_QUEUE, workflowIds } from "./task-queue";
+import { SA } from "./search-attributes";
 import { WF, SIG } from "./contracts";
 import type {
   ApplicationDecisionKind,
@@ -65,6 +66,12 @@ export async function dispatchPullRequestEvent(
       signal: SIG.prEvent,
       signalArgs: [{ ghRepoId: repoId, prNumber, envelope: env }],
       args: [{ projectId: repo.projectId, authorGhId }],
+      // Findable in the Temporal UI before the first task runs. Applies only
+      // on the start leg; the workflow re-upserts on transitions.
+      typedSearchAttributes: [
+        { key: SA.ProjectId, value: repo.projectId },
+        { key: SA.ContributorGhId, value: authorGhId },
+      ],
     });
     return;
   }
@@ -77,6 +84,10 @@ export async function dispatchPullRequestEvent(
     signal: SIG.githubEvent,
     signalArgs: [env],
     args: [{ repoId, prNumber }],
+    typedSearchAttributes: [
+      { key: SA.RepoId, value: repoId },
+      { key: SA.PrNumber, value: prNumber },
+    ],
   });
 }
 
@@ -95,6 +106,10 @@ export async function signalPrReGate(
     signal: SIG.reGate,
     signalArgs: [payload],
     args: [{ repoId, prNumber }],
+    typedSearchAttributes: [
+      { key: SA.RepoId, value: repoId },
+      { key: SA.PrNumber, value: prNumber },
+    ],
   });
 }
 
@@ -163,6 +178,10 @@ async function signalContributor(
     signal,
     signalArgs: [signalArg],
     args: [{ projectId, authorGhId }],
+    typedSearchAttributes: [
+      { key: SA.ProjectId, value: projectId },
+      { key: SA.ContributorGhId, value: authorGhId },
+    ],
   });
 }
 

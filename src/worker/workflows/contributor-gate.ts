@@ -5,11 +5,14 @@ import {
   defineSignal,
   getExternalWorkflowHandle,
   ParentClosePolicy,
+  patched,
   setHandler,
   startChild,
+  upsertSearchAttributes,
 } from "@temporalio/workflow";
 import { acts } from "./proxies";
-import { QRY, SIG, WF } from "../../lib/temporal/contracts";
+import { PATCHES, QRY, SIG, WF } from "../../lib/temporal/contracts";
+import { SA, type GateStatusValue } from "../../lib/temporal/search-attributes";
 import type {
   ClaCoverageChangedPayload,
   ClaStalenessArmedPayload,
@@ -44,6 +47,14 @@ const IDLE_TIMEOUT_MS = 60_000;
  * deterministic workflow bundle. */
 function prChildId(ghRepoId: string, prNumber: number): string {
   return `pr:${ghRepoId}:${prNumber}`;
+}
+
+/** Update the GateStatus search attribute. upsert emits a command, so every
+ * call is behind the search-attrs patch: a history recorded before the patch
+ * replays without the command and stays deterministic. */
+function setGateStatus(status: GateStatusValue): void {
+  if (!patched(PATCHES.contributorGateSearchAttrs)) return;
+  upsertSearchAttributes([{ key: SA.GateStatus, value: status }]);
 }
 
 /**
@@ -112,6 +123,16 @@ export async function contributorGate(input: ContributorGateInput): Promise<void
     processed,
   }));
 
+  // Identity attributes so the execution is findable in the Temporal UI by
+  // project/contributor/status (also re-established after Continue-As-New).
+  if (patched(PATCHES.contributorGateSearchAttrs)) {
+    upsertSearchAttributes([
+      { key: SA.ProjectId, value: input.projectId },
+      { key: SA.ContributorGhId, value: input.authorGhId },
+      { key: SA.GateStatus, value: "active" },
+    ]);
+  }
+
   while (processed < TASKS_BEFORE_CONTINUE) {
     // Fire any elapsed timers first (idempotent activities; clear once fired).
     const now = Date.now();
@@ -149,10 +170,15 @@ export async function contributorGate(input: ContributorGateInput): Promise<void
       await condition(pred); // stay alive for the children; no idle completion
     } else {
       const woke = await condition(pred, IDLE_TIMEOUT_MS);
-      if (!woke) return; // idle, nothing armed, no children → complete
+      if (!woke) {
+        // Idle, nothing armed, no children → complete.
+        setGateStatus("idle");
+        return;
+      }
     }
   }
 
+  setGateStatus("continued");
   await continueAsNew<typeof contributorGate>({
     projectId: input.projectId,
     authorGhId: input.authorGhId,
