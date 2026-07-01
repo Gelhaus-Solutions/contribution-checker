@@ -13,16 +13,20 @@ type ScheduleSpec = {
 };
 
 /**
- * The recurring sweeps, as Temporal Schedules. These replace the external
- * GitHub-Actions cron (reconcile), the admin-triggered CLA sweep, and the
- * inline processed-delivery prune. Each schedule starts a fresh workflow run on
- * fire, so the runs stay short and history-bounded.
+ * The recurring schedules. Reconcile + CLA sweeping moved onto per-project
+ * timers owned by the projectGate entities; the only sweep-adjacent schedule
+ * left is the ensureProjectGates keepalive that bootstraps/nudges those
+ * entities. Each schedule starts a fresh workflow run on fire, so the runs
+ * stay short and history-bounded.
  */
 const SCHEDULES: ScheduleSpec[] = [
-  // App-mode reconcile safety net, every 10 minutes (matches the old CI cron).
-  { id: scheduleIds.reconcileSweep, workflowType: WF.reconcileSweep, cron: "*/10 * * * *" },
-  // CLA unsigned-applicant sweep, hourly.
-  { id: scheduleIds.claSweep, workflowType: WF.claSweep, cron: "0 * * * *" },
+  // Project-entity keepalive: enumerate active projects and signalWithStart
+  // each projectGate (bootstraps new projects, resurrects retired entities).
+  {
+    id: scheduleIds.ensureProjectGates,
+    workflowType: WF.ensureProjectGates,
+    cron: "*/10 * * * *",
+  },
   // Prune stale inbound-delivery idempotency rows, daily at 03:00 UTC.
   {
     id: scheduleIds.pruneProcessedDeliveries,
@@ -31,10 +35,16 @@ const SCHEDULES: ScheduleSpec[] = [
   },
 ];
 
+/** Schedules retired by the projectGate migration, actively deleted on startup
+ * so the old crons stop firing (their workflow types remain in the bundle for
+ * one deploy cycle so in-flight runs can finish). */
+const RETIRED_SCHEDULE_IDS = [scheduleIds.reconcileSweep, scheduleIds.claSweep];
+
 /**
- * Idempotently ensure every schedule exists. Called once at worker startup.
- * Creating an already-existing schedule throws ScheduleAlreadyRunning, which we
- * treat as success (the deploy is just restarting).
+ * Idempotently ensure every schedule exists and every retired schedule is
+ * gone. Called once at worker startup. Creating an already-existing schedule
+ * throws ScheduleAlreadyRunning, which we treat as success (the deploy is
+ * just restarting); deleting a missing schedule is likewise a no-op.
  */
 export async function ensureSchedules(client: Client): Promise<void> {
   for (const spec of SCHEDULES) {
@@ -60,6 +70,15 @@ export async function ensureSchedules(client: Client): Promise<void> {
         continue;
       }
       throw e;
+    }
+  }
+
+  for (const scheduleId of RETIRED_SCHEDULE_IDS) {
+    try {
+      await client.schedule.getHandle(scheduleId).delete();
+      logger.info({ scheduleId }, "retired temporal schedule deleted");
+    } catch {
+      // Already gone (or never created on this cluster): nothing to retire.
     }
   }
 }

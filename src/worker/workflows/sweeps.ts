@@ -1,9 +1,10 @@
 import { acts } from "./proxies";
 
 /**
- * Scheduled App-mode reconcile safety net. A fresh run each fire (driven by a
- * Temporal Schedule), so history stays small; within the run it iterates
- * projects via bounded activities rather than an unbounded in-workflow loop.
+ * RETIRED (kept through one deploy cycle): the global reconcile sweep is now
+ * per-project timers on the projectGate entity. This export stays so an
+ * in-flight run scheduled by the old cron can still complete; ensureSchedules
+ * deletes the old schedule. Remove once no reconcileSweep executions are open.
  */
 export async function reconcileSweep(): Promise<{ projects: number; reopened: number }> {
   const projectIds = await acts.listReconcileProjects();
@@ -15,7 +16,8 @@ export async function reconcileSweep(): Promise<{ projects: number; reopened: nu
   return { projects: projectIds.length, reopened };
 }
 
-/** Scheduled CLA unsigned-applicant sweep across CLA-enabled projects. */
+/** RETIRED like reconcileSweep: the CLA sweep is now a per-project timer on
+ * the projectGate entity. Remove once no claSweep executions are open. */
 export async function claSweep(): Promise<{ projects: number; notified: number }> {
   const projectIds = await acts.listClaSweepProjects();
   let notified = 0;
@@ -24,6 +26,20 @@ export async function claSweep(): Promise<{ projects: number; notified: number }
     notified += res.notified;
   }
   return { projects: projectIds.length, notified };
+}
+
+/**
+ * Keepalive for the project entities (scheduled): enumerate active projects
+ * and signalWithStart each projectGate with a sweepTick. Bootstraps entities
+ * for newly-active projects, resurrects retired ones, and is a no-op nudge for
+ * running ones. The per-project sweep timers live on the entities themselves.
+ */
+export async function ensureProjectGates(): Promise<{ projects: number }> {
+  const projectIds = await acts.listReconcileProjects();
+  if (projectIds.length > 0) {
+    await acts.signalProjectGatesBatch(projectIds);
+  }
+  return { projects: projectIds.length };
 }
 
 /** Scheduled prune of stale processed-delivery idempotency rows. */

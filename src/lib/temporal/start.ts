@@ -262,73 +262,60 @@ export async function dispatchClaCoverageChange(
   await signalContributor(projectId, ghId, SIG.claCoverageChanged, payload);
 }
 
-/** DB-backed re-gate fan-out: signal `reGate` to every tracked PR by an author
- * in a project (by ghId and/or ghLogin), so each prGate re-evaluates itself.
- * signalWithStart means even a PR with no live gate (idle-completed) re-converges.
- * This replaces the label-spray and powers the manual-decision and corporate-CLA
- * re-gate fixes. A shared nonce coalesces duplicates at each prGate. */
+/** Low-level: signal the project entity (start it if not running). Keyed by
+ * projectId; the top of the project → contributor → pr tree. */
+async function signalProject(
+  projectId: string,
+  signal: string,
+  signalArg: unknown
+): Promise<void> {
+  const client = await getTemporalClient();
+  await client.workflow.signalWithStart(WF.projectGate, {
+    workflowId: workflowIds.project(projectId),
+    taskQueue: TASK_QUEUE,
+    signal,
+    signalArgs: [signalArg],
+    args: [{ projectId }],
+    typedSearchAttributes: [{ key: SA.ProjectId, value: projectId }],
+  });
+}
+
+/** Keepalive nudge from the ensureProjectGates schedule: bootstraps the entity
+ * for a newly-active project, resurrects one that idle-retired, and wakes a
+ * running one so elapsed sweep deadlines fire. */
+export async function signalProjectSweepTick(projectId: string): Promise<void> {
+  await signalProject(projectId, SIG.sweepTick, {});
+}
+
+/** Re-gate every tracked PR by an author in a project. Now a thin signal to the
+ * projectGate entity, which runs the DB query and the reGate fan-out durably
+ * and batched in activities (the old version looped signalWithStart per PR in
+ * this request). A shared nonce coalesces duplicates at each prGate. */
 export async function reGateAuthorPrs(args: {
   projectId: string;
   ghId?: number | null;
   ghLogin?: string | null;
   reason: string;
-}): Promise<{ signaled: number }> {
-  const authorOr: Array<{ authorGhId?: number; authorGhLogin?: string }> = [];
-  if (args.ghId != null) authorOr.push({ authorGhId: args.ghId });
-  if (args.ghLogin) authorOr.push({ authorGhLogin: args.ghLogin });
-  if (authorOr.length === 0) return { signaled: 0 };
-
-  const checks = await prisma.prCheck.findMany({
-    where: {
-      OR: authorOr,
-      repo: {
-        projectId: args.projectId,
-        active: true,
-        installationId: { not: null },
-      },
-    },
-    select: { prNumber: true, repo: { select: { ghRepoId: true } } },
+}): Promise<void> {
+  if (args.ghId == null && !args.ghLogin) return;
+  await signalProject(args.projectId, SIG.reGateAuthor, {
+    ghId: args.ghId ?? null,
+    ghLogin: args.ghLogin ?? null,
+    reason: args.reason,
+    nonce: randomUUID(),
   });
-  const nonce = randomUUID();
-  let signaled = 0;
-  for (const c of checks) {
-    if (c.repo.ghRepoId == null) continue;
-    await signalPrReGate(String(c.repo.ghRepoId), c.prNumber, {
-      reason: args.reason,
-      nonce,
-    });
-    signaled += 1;
-  }
-  return { signaled };
 }
 
-/** Re-gate every tracked PR in a project (used by config changes that affect all
- * authors, and the "re-evaluate all" admin action). */
+/** Re-gate every tracked PR in a project (config changes that affect all
+ * authors, and the "re-evaluate all" admin action). Durable via projectGate. */
 export async function reGateProjectPrs(args: {
   projectId: string;
   reason: string;
-}): Promise<{ signaled: number }> {
-  const checks = await prisma.prCheck.findMany({
-    where: {
-      repo: {
-        projectId: args.projectId,
-        active: true,
-        installationId: { not: null },
-      },
-    },
-    select: { prNumber: true, repo: { select: { ghRepoId: true } } },
+}): Promise<void> {
+  await signalProject(args.projectId, SIG.reGateAll, {
+    reason: args.reason,
+    nonce: randomUUID(),
   });
-  const nonce = randomUUID();
-  let signaled = 0;
-  for (const c of checks) {
-    if (c.repo.ghRepoId == null) continue;
-    await signalPrReGate(String(c.repo.ghRepoId), c.prNumber, {
-      reason: args.reason,
-      nonce,
-    });
-    signaled += 1;
-  }
-  return { signaled };
 }
 
 export type CiCoreResult = { status: number; json: unknown };
@@ -389,14 +376,17 @@ export async function startQualityBackfill(
   input: QualityBackfillInput,
   nonce: string
 ): Promise<string> {
-  const client = await getTemporalClient();
-  const handle = await client.workflow.start(WF.qualityBackfill, {
-    workflowId: workflowIds.qualityBackfill(input.projectId, nonce),
-    taskQueue: TASK_QUEUE,
-    args: [input],
+  // The projectGate entity launches qualityBackfill as its CHILD (dedup on the
+  // nonce while one is live), completing the project → backfill tree. The
+  // child's deterministic id is reconstructable, so the signature is unchanged.
+  await signalProject(input.projectId, SIG.runBackfill, {
+    triggeredById: input.triggeredById,
+    limit: input.limit,
+    nonce,
   });
-  logger.info({ workflowId: handle.workflowId }, "quality backfill started");
-  return handle.workflowId;
+  const workflowId = workflowIds.qualityBackfill(input.projectId, nonce);
+  logger.info({ workflowId }, "quality backfill dispatched via projectGate");
+  return workflowId;
 }
 
 export type { QualityBackfillResult };

@@ -222,8 +222,6 @@ export type ProjectTask =
 export type ProjectGateInput = {
   projectId: string;
   pendingTasks?: ProjectTask[];
-  /** Live qualityBackfill child ids; the gate stays alive while one runs. */
-  liveChildren?: string[];
   /** Next reconcile sweep deadline (epoch ms). Undefined/null = arm on start. */
   reconcileDeadlineMs?: number | null;
   /** Next CLA sweep deadline (epoch ms). Null = CLA sweeps disabled. */
@@ -280,8 +278,6 @@ export type ProjectGateState = {
   queuedTasks: number;
   /** Queued task kinds, in order. */
   queuedKinds: ProjectTask["type"][];
-  /** Live qualityBackfill child workflow ids. */
-  liveChildren: string[];
   /** Next reconcile sweep deadline (epoch ms), null when not armed. */
   reconcileDeadlineMs: number | null;
   /** Next CLA sweep deadline (epoch ms), null when CLA sweeps are off. */
