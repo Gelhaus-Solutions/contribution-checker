@@ -175,23 +175,9 @@ export async function approveApplication(args: {
     kind: "application.approved",
     payload: { applicationId: app.id, applicantId: app.userId },
   });
-  await notifyUser({
-    userId: app.userId,
-    kind: "application.approved",
-    payload: {
-      projectId: app.projectId,
-      projectSlug: app.project.slug,
-      projectName: app.project.name,
-    },
-  });
-  await emailUser({
-    userId: app.userId,
-    subject: `Approved: ${app.project.name}`,
-    text:
-      `Your application for ${app.project.name} was approved.\n\n` +
-      `You can now open pull requests on the linked repositories.\n\n` +
-      `${applyUrl(app.project.slug)}\n`,
-  });
+  // Applicant inbox + email are sent durably by the contributor entity's
+  // post-decision activity (notifyApplicationDecision), not in this request:
+  // a mail outage must never fault the admin's decision.
   await enqueueProjectWebhook({
     projectId: app.projectId,
     event: "application.approved",
@@ -249,24 +235,7 @@ export async function denyApplication(args: {
     kind: "application.denied",
     payload: { applicationId: app.id, applicantId: app.userId },
   });
-  await notifyUser({
-    userId: app.userId,
-    kind: "application.denied",
-    payload: {
-      projectId: app.projectId,
-      projectSlug: app.project.slug,
-      projectName: app.project.name,
-      reason: args.reason ?? null,
-    },
-  });
-  await emailUser({
-    userId: app.userId,
-    subject: `Application declined: ${app.project.name}`,
-    text:
-      `Your application for ${app.project.name} was declined.` +
-      (args.reason ? `\n\nReason: ${args.reason}` : "") +
-      `\n\n${applyUrl(app.project.slug)}\n`,
-  });
+  // Applicant inbox + email move to the durable post-decision activity.
   await enqueueProjectWebhook({
     projectId: app.projectId,
     event: "application.denied",
@@ -430,31 +399,8 @@ export async function revokeApplication(args: {
       target: args.target,
     },
   });
-  await notifyUser({
-    userId: app.userId,
-    kind: "application.revoked",
-    payload: {
-      projectId: app.projectId,
-      projectSlug: app.project.slug,
-      projectName: app.project.name,
-      reason: args.reason ?? null,
-      target: args.target,
-    },
-  });
-  const followUp =
-    args.target === "PENDING"
-      ? `\n\nYou may submit a new application at any time: ${applyUrl(app.project.slug)}\n`
-      : args.target === "SUBMITTED"
-        ? `\n\nYour application has been put back under review.\n`
-        : `\n`;
-  await emailUser({
-    userId: app.userId,
-    subject: `Approval revoked: ${app.project.name}`,
-    text:
-      `Your contributor approval for ${app.project.name} has been revoked.` +
-      (args.reason ? `\n\nReason: ${args.reason}` : "") +
-      followUp,
-  });
+  // Applicant inbox + email move to the durable post-decision activity (the
+  // dispatch carries `target` so the follow-up copy stays exact).
   await enqueueProjectWebhook({
     projectId: app.projectId,
     event: "application.revoked",

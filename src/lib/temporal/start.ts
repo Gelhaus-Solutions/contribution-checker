@@ -201,14 +201,38 @@ async function resolveApplicationContributor(
 /** An application decision (approve/deny/revoke) → run the GitHub fan-out on the
  * contributor entity and (re)arm its cooldown timer. Replaces the old
  * dispatchApplicationDecision + startCooldownTimer pair. Fire-and-forget: the
- * affected-PR count is not surfaced to the admin UI. */
+ * affected-PR count is not surfaced to the admin UI. The applicant's inbox +
+ * email ride the entity's post-decision activity; when the applicant has no
+ * GitHub identity (no entity to signal, and no PRs to fan out over) they are
+ * sent inline here, best-effort. */
 export async function dispatchContributorDecision(
   kind: ApplicationDecisionKind,
   applicationId: string,
   args: Record<string, unknown> = {}
 ): Promise<void> {
   const who = await resolveApplicationContributor(applicationId);
-  if (!who) return;
+  if (!who) {
+    const { notifyApplicationDecision } = await import(
+      "@/lib/applications/notify-decision"
+    );
+    await notifyApplicationDecision({
+      kind,
+      applicationId,
+      reason: typeof args.reason === "string" ? args.reason : undefined,
+      revokeTarget:
+        args.target === "DENIED" ||
+        args.target === "SUBMITTED" ||
+        args.target === "PENDING"
+          ? args.target
+          : undefined,
+    }).catch((e) =>
+      logger.warn(
+        { err: e, applicationId, kind },
+        "inline decision notification failed"
+      )
+    );
+    return;
+  }
   const payload: DecisionChangedPayload = { kind, applicationId, args };
   await signalContributor(who.projectId, who.ghId, SIG.decisionChanged, payload);
 }

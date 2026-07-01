@@ -1,3 +1,4 @@
+import { Context } from "@temporalio/activity";
 import {
   onApplicationApproved,
   onApplicationDenied,
@@ -11,6 +12,7 @@ import { prisma } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { recordAudit } from "@/lib/audit";
 import { classifyGithubError } from "@/lib/github/errors";
+import { notifyApplicationDecision } from "@/lib/applications/notify-decision";
 import { notifyUser } from "@/lib/notifications/inbox";
 import { emailUserById, applyUrl } from "@/lib/notifications/email";
 import type {
@@ -19,27 +21,32 @@ import type {
 } from "@/lib/temporal/contracts";
 
 /**
- * Run the GitHub-facing fan-out for an application decision. The reopen-all /
+ * Run the GitHub-facing fan-out for an application decision, then the
+ * applicant's inbox + email (moved out of decide.ts's request path so a mail
+ * outage retries here instead of faulting the admin's action). The reopen-all /
  * close-all / relabel loops in post-decision.ts are already idempotent (guarded
- * by the `closedByApp` flag + status filters), so re-running on activity retry
- * is safe.
+ * by the `closedByApp` flag + status filters), and the notification dedupes on
+ * a per-execution key, so re-running on activity retry is safe.
  */
 export async function runApplicationPostDecision(
   input: ApplicationDecisionInput
 ): Promise<ApplicationDecisionResult> {
+  let affectedPrs: number;
   try {
     switch (input.kind) {
       case "approved": {
         const { reopened } = await onApplicationApproved({
           applicationId: input.applicationId,
         });
-        return { affectedPrs: reopened };
+        affectedPrs = reopened;
+        break;
       }
       case "denied": {
         const { updated } = await onApplicationDenied({
           applicationId: input.applicationId,
         });
-        return { affectedPrs: updated };
+        affectedPrs = updated;
+        break;
       }
       case "revoked": {
         const reason =
@@ -48,12 +55,34 @@ export async function runApplicationPostDecision(
           applicationId: input.applicationId,
           reason,
         });
-        return { affectedPrs: closed };
+        affectedPrs = closed;
+        break;
       }
     }
   } catch (e) {
     throw classifyGithubError(e);
   }
+
+  // runId:activityId is constant across retries of this scheduled activity and
+  // distinct across separate decisions, so the inbox insert dedupes exactly.
+  const info = Context.current().info;
+  const dedupKey = info.workflowExecution
+    ? `${info.workflowExecution.runId}:${info.activityId}`
+    : undefined;
+  await notifyApplicationDecision({
+    kind: input.kind,
+    applicationId: input.applicationId,
+    reason: typeof input.args.reason === "string" ? input.args.reason : undefined,
+    revokeTarget:
+      input.args.target === "DENIED" ||
+      input.args.target === "SUBMITTED" ||
+      input.args.target === "PENDING"
+        ? input.args.target
+        : undefined,
+    dedupKey,
+  });
+
+  return { affectedPrs };
 }
 
 /**

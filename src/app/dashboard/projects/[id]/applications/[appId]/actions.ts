@@ -184,6 +184,7 @@ export async function revokeAction(formData: FormData) {
 
   await dispatchContributorDecision("revoked", parsed.appId, {
     reason: parsed.reason,
+    target: parsed.target,
   });
 
   revalidatePath(`/dashboard/projects/${parsed.projectId}/applications`);

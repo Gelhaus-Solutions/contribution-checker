@@ -241,7 +241,9 @@ export async function setApplicationStatus(args: {
       decidedById: session.user.id,
       target: parsed.target,
     });
-    await dispatchContributorDecision("revoked", app.id);
+    await dispatchContributorDecision("revoked", app.id, {
+      target: parsed.target,
+    });
   } else if (parsed.target === "DENIED") {
     await denyApplication({
       applicationId: app.id,
