@@ -16,6 +16,8 @@
 export const WF = {
   prGate: "prGate",
   contributorGate: "contributorGate",
+  projectGate: "projectGate",
+  ensureProjectGates: "ensureProjectGates",
   processMergeGroup: "processMergeGroup",
   processPush: "processPush",
   processInstallation: "processInstallation",
@@ -41,6 +43,33 @@ export const SIG = {
   claCoverageChanged: "claCoverageChanged",
   cooldownRefresh: "cooldownRefresh",
   claStalenessArmed: "claStalenessArmed",
+  // projectGate signals:
+  reGateAll: "reGateAll",
+  reGateAuthor: "reGateAuthor",
+  configChanged: "configChanged",
+  runBackfill: "runBackfill",
+  sweepTick: "sweepTick",
+} as const;
+
+/** Query names for reading an entity workflow's durable state (ops/debugging).
+ * Query handlers MUST be side-effect free: they only read closure state, never
+ * mutate it, never call activities or timers. */
+export const QRY = {
+  prGateState: "prGateState",
+  contributorGateState: "contributorGateState",
+  projectGateState: "projectGateState",
+} as const;
+
+/** Temporal patch ids (workflow versioning via patched()/deprecatePatch).
+ * Central registry so parallel changes don't collide and the deprecation
+ * lifecycle is tracked in one place. Never rename a shipped id; retire an id
+ * only after every run that could replay its old branch has drained. */
+export const PATCHES = {
+  prGateCanSuggested: "pr-gate-can-suggested-202607",
+  contributorGateCanSuggested: "contributor-gate-can-suggested-202607",
+  contributorGateCooldownLocal: "contributor-gate-cooldown-local-activity-202607",
+  prGateSearchAttrs: "pr-gate-search-attrs-202607",
+  contributorGateSearchAttrs: "contributor-gate-search-attrs-202607",
 } as const;
 
 /** A GitHub PR event routed to the contributor entity, which forwards it to (or
@@ -140,6 +169,125 @@ export type ContributorGateInput = {
    * stays alive while any child is live and completes only once all report done
    * (so an ABANDON child is never orphaned by the parent idling out). */
   liveChildren?: string[];
+};
+
+/** Re-gate every tracked PR in the project. `reason` is for observability;
+ * `nonce` is shared across the whole fan-out so each prGate coalesces
+ * duplicates (fast parent-signal path vs this completeness path). */
+export type ProjectReGateAllPayload = { reason: string; nonce: string };
+
+/** Re-gate one author's tracked PRs in the project (manual decision edits,
+ * corporate-CLA roster changes reaching an author with no user row, etc.). */
+export type ProjectReGateAuthorPayload = {
+  ghId?: number | null;
+  ghLogin?: string | null;
+  reason: string;
+  nonce: string;
+};
+
+/** A gate-affecting config change: behaves like reGateAll but kept a distinct
+ * signal so the source of the re-gate is observable in workflow history. */
+export type ProjectConfigChangedPayload = { reason: string; nonce: string };
+
+/** Admin-triggered quality backfill; the project entity launches the
+ * qualityBackfill CHILD (dedup on nonce while one is live). */
+export type ProjectRunBackfillPayload = {
+  triggeredById: string | null;
+  limit: number;
+  nonce: string;
+};
+
+/** Global keepalive tick: wakes the entity so elapsed sweep deadlines fire and
+ * a newly-active project bootstraps. Carries nothing; signalWithStart is the
+ * point. */
+export type ProjectSweepTickPayload = { reason?: string };
+
+/** A queued unit of project-tier fan-out work the projectGate drains. Kept
+ * structural so it survives Continue-As-New. */
+export type ProjectTask =
+  | { type: "reGateAll"; reason: string; nonce: string }
+  | {
+      type: "reGateAuthor";
+      ghId: number | null;
+      ghLogin: string | null;
+      reason: string;
+      nonce: string;
+    }
+  | { type: "runBackfill"; triggeredById: string | null; limit: number; nonce: string };
+
+/** Per-project entity workflow input, keyed by projectId: the top of the
+ * project → contributor → pr tree. Owns the durable per-project reconcile and
+ * CLA sweep timers (replacing the global cron sweeps) and the batched re-gate
+ * fan-out. Deadlines + queue + live children are carried across CAN. */
+export type ProjectGateInput = {
+  projectId: string;
+  pendingTasks?: ProjectTask[];
+  /** Live qualityBackfill child ids; the gate stays alive while one runs. */
+  liveChildren?: string[];
+  /** Next reconcile sweep deadline (epoch ms). Undefined/null = arm on start. */
+  reconcileDeadlineMs?: number | null;
+  /** Next CLA sweep deadline (epoch ms). Null = CLA sweeps disabled. */
+  claDeadlineMs?: number | null;
+};
+
+/** Per-project sweep cadences, replacing the global 10-minute reconcile cron
+ * and hourly CLA cron. The first arm is offset by a stable per-project jitter
+ * so entities don't all fire at the same instant. */
+export const PROJECT_RECONCILE_INTERVAL_MS = 10 * 60_000;
+export const PROJECT_CLA_SWEEP_INTERVAL_MS = 60 * 60_000;
+
+// --- query return types ------------------------------------------------------
+
+/** prGate durable state, exposed via QRY.prGateState. Mirrors the workflow's
+ * in-closure variables; `processed` resets on Continue-As-New. */
+export type PrGateState = {
+  repoId: string;
+  prNumber: number;
+  /** GitHub events queued but not yet converged. */
+  pendingEvents: number;
+  /** A re-gate received but not yet applied (null when none pending). */
+  pendingReGate: ReGatePayload | null;
+  /** Last applied re-gate nonce (dedupe key), null if never re-gated. */
+  lastNonce: string | null;
+  /** Terminal close (merge/human close) reached; the run is completing. */
+  terminal: boolean;
+  /** Events converged so far in THIS run. */
+  processed: number;
+};
+
+/** contributorGate durable state, exposed via QRY.contributorGateState. */
+export type ContributorGateState = {
+  projectId: string;
+  authorGhId: number;
+  /** Queued tasks not yet drained. */
+  queuedTasks: number;
+  /** Queued task kinds, in order, for at-a-glance triage. */
+  queuedKinds: ContributorTask["type"][];
+  /** Live prGate child workflow ids. */
+  liveChildren: string[];
+  /** Armed cooldown, or null. `deadlineMs` is epoch ms. */
+  cooldown: { applicationId: string; deadlineMs: number } | null;
+  /** Armed CLA-staleness re-check, or null. */
+  staleness: { deadlineMs: number } | null;
+  /** Tasks drained so far in THIS run. */
+  processed: number;
+};
+
+/** projectGate durable state, exposed via QRY.projectGateState. */
+export type ProjectGateState = {
+  projectId: string;
+  /** Queued project-tier tasks not yet drained. */
+  queuedTasks: number;
+  /** Queued task kinds, in order. */
+  queuedKinds: ProjectTask["type"][];
+  /** Live qualityBackfill child workflow ids. */
+  liveChildren: string[];
+  /** Next reconcile sweep deadline (epoch ms), null when not armed. */
+  reconcileDeadlineMs: number | null;
+  /** Next CLA sweep deadline (epoch ms), null when CLA sweeps are off. */
+  claDeadlineMs: number | null;
+  /** Tasks drained so far in THIS run. */
+  processed: number;
 };
 
 export type ProcessMergeGroupInput = { payload: unknown };

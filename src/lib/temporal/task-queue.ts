@@ -18,6 +18,7 @@ export const workflowIds = {
     `pr:${repoId}:${prNumber}`,
   contributor: (projectId: string, authorGhId: number) =>
     `contrib:${projectId}:${authorGhId}`,
+  project: (projectId: string) => `project:${projectId}`,
   mergeGroup: (repoId: string, headSha: string) =>
     `mergegroup:${repoId}:${headSha}`,
   push: (repoId: string, ref: string, after: string) =>
@@ -36,9 +37,12 @@ export const workflowIds = {
     `mutate-pr:${prCheckId}:${kind}:${nonce}`,
 } as const;
 
-/** Schedule ids for the recurring sweeps. */
+/** Schedule ids for the recurring sweeps. `reconcileSweep`/`claSweep` are
+ * retired (their work moved into per-project projectGate timers) but the ids
+ * are kept so ensureSchedules can actively delete the old schedules. */
 export const scheduleIds = {
   reconcileSweep: "schedule:reconcile-sweep",
   claSweep: "schedule:cla-sweep",
+  ensureProjectGates: "schedule:ensure-project-gates",
   pruneProcessedDeliveries: "schedule:prune-processed-deliveries",
 } as const;
