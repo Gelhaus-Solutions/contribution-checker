@@ -4,6 +4,7 @@ import {
   WorkflowExecutionAlreadyStartedError,
   WorkflowIdReusePolicy,
 } from "@temporalio/client";
+import type { SearchAttributePair } from "@temporalio/common";
 import { prisma } from "@/lib/db";
 import { getTemporalClient } from "./client";
 import { TASK_QUEUE, workflowIds } from "./task-queue";
@@ -84,11 +85,19 @@ export async function dispatchPullRequestEvent(
     signal: SIG.githubEvent,
     signalArgs: [env],
     args: [{ repoId, prNumber }],
-    typedSearchAttributes: [
-      { key: SA.RepoId, value: repoId },
-      { key: SA.PrNumber, value: prNumber },
-    ],
+    typedSearchAttributes: prGateStartAttributes(repoId),
   });
+}
+
+/** Typed attributes for a prGate start leg. RepoId is an INT attribute; the
+ * id string is numeric everywhere GitHub is the source, but guard anyway.
+ * (No PrNumber attribute: a single PR's gate is addressed by its
+ * deterministic workflow id.) */
+function prGateStartAttributes(repoId: string): SearchAttributePair[] {
+  const repoIdNum = Number(repoId);
+  return Number.isFinite(repoIdNum)
+    ? [{ key: SA.RepoId, value: repoIdNum }]
+    : [];
 }
 
 /** Tell the per-PR gate to re-evaluate itself (no payload — the gate re-fetches
@@ -106,10 +115,7 @@ export async function signalPrReGate(
     signal: SIG.reGate,
     signalArgs: [payload],
     args: [{ repoId, prNumber }],
-    typedSearchAttributes: [
-      { key: SA.RepoId, value: repoId },
-      { key: SA.PrNumber, value: prNumber },
-    ],
+    typedSearchAttributes: prGateStartAttributes(repoId),
   });
 }
 

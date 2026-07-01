@@ -123,12 +123,15 @@ export async function prGate(input: PrGateInput): Promise<void> {
   }));
 
   // Identity attributes so the execution is findable in the Temporal UI by
-  // repo/PR/status even when started as a child (a client start passes typed
-  // attributes; startChild from the parent does not).
+  // repo/status even when started as a child (a client start passes typed
+  // attributes; startChild from the parent does not). repoId is a numeric
+  // string; the attribute is INT (see search-attributes.ts).
   if (patched(PATCHES.prGateSearchAttrs)) {
+    const repoIdNum = Number(input.repoId);
     upsertSearchAttributes([
-      { key: SA.RepoId, value: input.repoId },
-      { key: SA.PrNumber, value: input.prNumber },
+      ...(Number.isFinite(repoIdNum)
+        ? [{ key: SA.RepoId, value: repoIdNum }]
+        : []),
       { key: SA.GateStatus, value: "active" },
     ]);
   }

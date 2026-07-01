@@ -18,9 +18,13 @@ import {
 export const SA = {
   /** Project the execution belongs to (contributorGate, projectGate). */
   ProjectId: defineSearchAttributeKey("ProjectId", SearchAttributeType.KEYWORD),
-  /** GitHub repo id, as a string to match the `pr:{repoId}:{prNumber}` id. */
-  RepoId: defineSearchAttributeKey("RepoId", SearchAttributeType.KEYWORD),
-  PrNumber: defineSearchAttributeKey("PrNumber", SearchAttributeType.INT),
+  /** GitHub repo id (all prGate executions for a repo). INT: it is numeric,
+   * and SQL-visibility namespaces cap custom attributes per type (a shared
+   * dev "default" namespace runs close to those caps). A single PR's gate
+   * needs no attribute at all: its workflow id `pr:{repoId}:{prNumber}` is
+   * deterministic. A PrNumber attribute is deliberately omitted for the same
+   * reason (a cross-repo PR-number filter carries no signal). */
+  RepoId: defineSearchAttributeKey("RepoId", SearchAttributeType.INT),
   ContributorGhId: defineSearchAttributeKey(
     "ContributorGhId",
     SearchAttributeType.INT
