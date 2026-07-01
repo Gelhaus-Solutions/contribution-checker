@@ -9,6 +9,7 @@
     "build:worker": "node scripts/build-worker.mjs",
     "worker": "node dist/worker.mjs",
     "worker:dev": "node scripts/build-worker.mjs && node dist/worker.mjs",
+    "temporal:register-sa": "tsx scripts/register-search-attributes.ts",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
     "db:generate": "prisma generate",
