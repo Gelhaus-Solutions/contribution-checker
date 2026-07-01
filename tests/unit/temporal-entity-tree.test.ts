@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { fileURLToPath } from "node:url";
 import { TestWorkflowEnvironment } from "@temporalio/testing";
 import { Worker } from "@temporalio/worker";
+import { registerTestSearchAttributes } from "./helpers/search-attributes";
 import { WF, SIG } from "@/lib/temporal/contracts";
 import type { GithubEventEnvelope } from "@/lib/temporal/contracts";
 
@@ -24,6 +25,9 @@ describe("contributor → pr tree", () => {
     const env = await TestWorkflowEnvironment.createTimeSkipping();
     const converged: GithubEventEnvelope[] = [];
     try {
+      // The gates upsert custom Search Attributes; register them or the first
+      // workflow task fails ("search attribute ... is not defined") forever.
+      await registerTestSearchAttributes(env);
       await env.client.workflow.signalWithStart(WF.contributorGate, {
         workflowId: "contrib:proj1:7",
         taskQueue: TASK_QUEUE,

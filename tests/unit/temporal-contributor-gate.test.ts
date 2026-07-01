@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { fileURLToPath } from "node:url";
 import { TestWorkflowEnvironment } from "@temporalio/testing";
 import { Worker } from "@temporalio/worker";
+import { registerTestSearchAttributes } from "./helpers/search-attributes";
 import { WF, SIG } from "@/lib/temporal/contracts";
 import type { DecisionChangedPayload } from "@/lib/temporal/contracts";
 
@@ -24,6 +25,9 @@ async function runGate(workflowId: string, cooldownIso: string | null, payload: 
   const env = await TestWorkflowEnvironment.createTimeSkipping();
   const mocks: Mocks = { postDecision: [], elapsed: [], cooldownIso };
   try {
+    // The gate upserts custom Search Attributes; register them or the first
+    // workflow task fails ("search attribute ... is not defined") forever.
+    await registerTestSearchAttributes(env);
     await env.client.workflow.signalWithStart(WF.contributorGate, {
       workflowId,
       taskQueue: TASK_QUEUE,

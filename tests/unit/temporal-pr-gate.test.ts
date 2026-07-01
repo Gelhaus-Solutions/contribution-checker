@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { fileURLToPath } from "node:url";
 import { TestWorkflowEnvironment } from "@temporalio/testing";
 import { Worker } from "@temporalio/worker";
+import { registerTestSearchAttributes } from "./helpers/search-attributes";
 import { WF, SIG } from "@/lib/temporal/contracts";
 import type {
   GithubEventEnvelope,
@@ -36,6 +37,9 @@ async function runGate(
   const events: GithubEventEnvelope[] = [];
   const reGates: ReGatePayload[] = [];
   try {
+    // The gate upserts custom Search Attributes; register them or the first
+    // workflow task fails ("search attribute RepoId is not defined") forever.
+    await registerTestSearchAttributes(env);
     // Buffer every signal on the server first; the worker is created afterwards
     // so the workflow's first task sees the full queue at once.
     await seed(workflowId, env.client);
