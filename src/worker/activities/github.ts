@@ -7,6 +7,7 @@ import {
   reGatePr,
   type PrEventResult,
 } from "@/lib/github/webhook";
+import { classifyGithubError } from "@/lib/github/errors";
 import type { GithubEventEnvelope } from "@/lib/temporal/contracts";
 
 /**
@@ -17,6 +18,10 @@ import type { GithubEventEnvelope } from "@/lib/temporal/contracts";
  * lost on failure. The handlers were already written to be idempotent
  * (PrCheck upsert, label set, comment dedup), which is exactly what activity
  * retries require.
+ *
+ * Errors are classified at this boundary: permanent GitHub failures (revoked
+ * installation, deleted repo/PR, malformed request) become non-retryable
+ * ApplicationFailures instead of burning the full retry policy.
  */
 /**
  * prGate's converge for a GitHub event: runs the per-PR handler and surfaces
@@ -26,7 +31,11 @@ import type { GithubEventEnvelope } from "@/lib/temporal/contracts";
 export async function convergePrEvent(
   env: GithubEventEnvelope
 ): Promise<PrEventResult> {
-  return handlePullRequestEvent(env.payload as never);
+  try {
+    return await handlePullRequestEvent(env.payload as never);
+  } catch (e) {
+    throw classifyGithubError(e);
+  }
 }
 
 /**
@@ -38,24 +47,40 @@ export async function convergePrReGate(args: {
   prNumber: number;
   reason?: string;
 }): Promise<void> {
-  await reGatePr({ ghRepoId: Number(args.repoId), prNumber: args.prNumber });
+  try {
+    await reGatePr({ ghRepoId: Number(args.repoId), prNumber: args.prNumber });
+  } catch (e) {
+    throw classifyGithubError(e);
+  }
 }
 
 export async function processMergeGroupEvent(payload: unknown): Promise<void> {
-  await handleMergeGroupEvent(payload as never);
+  try {
+    await handleMergeGroupEvent(payload as never);
+  } catch (e) {
+    throw classifyGithubError(e);
+  }
 }
 
 export async function processPushEvent(payload: unknown): Promise<void> {
-  await handlePushEvent(payload as never);
+  try {
+    await handlePushEvent(payload as never);
+  } catch (e) {
+    throw classifyGithubError(e);
+  }
 }
 
 export async function processInstallationEvent(
   kind: "installation" | "installation_repositories",
   payload: unknown
 ): Promise<void> {
-  if (kind === "installation") {
-    await handleInstallationEvent(payload as never);
-  } else {
-    await handleInstallationReposEvent(payload as never);
+  try {
+    if (kind === "installation") {
+      await handleInstallationEvent(payload as never);
+    } else {
+      await handleInstallationReposEvent(payload as never);
+    }
+  } catch (e) {
+    throw classifyGithubError(e);
   }
 }

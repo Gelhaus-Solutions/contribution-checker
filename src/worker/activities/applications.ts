@@ -10,6 +10,7 @@ import {
 import { prisma } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { recordAudit } from "@/lib/audit";
+import { classifyGithubError } from "@/lib/github/errors";
 import { notifyUser } from "@/lib/notifications/inbox";
 import { emailUserById, applyUrl } from "@/lib/notifications/email";
 import type {
@@ -26,28 +27,32 @@ import type {
 export async function runApplicationPostDecision(
   input: ApplicationDecisionInput
 ): Promise<ApplicationDecisionResult> {
-  switch (input.kind) {
-    case "approved": {
-      const { reopened } = await onApplicationApproved({
-        applicationId: input.applicationId,
-      });
-      return { affectedPrs: reopened };
+  try {
+    switch (input.kind) {
+      case "approved": {
+        const { reopened } = await onApplicationApproved({
+          applicationId: input.applicationId,
+        });
+        return { affectedPrs: reopened };
+      }
+      case "denied": {
+        const { updated } = await onApplicationDenied({
+          applicationId: input.applicationId,
+        });
+        return { affectedPrs: updated };
+      }
+      case "revoked": {
+        const reason =
+          typeof input.args.reason === "string" ? input.args.reason : null;
+        const { closed } = await onApplicationRevokedWithClose({
+          applicationId: input.applicationId,
+          reason,
+        });
+        return { affectedPrs: closed };
+      }
     }
-    case "denied": {
-      const { updated } = await onApplicationDenied({
-        applicationId: input.applicationId,
-      });
-      return { affectedPrs: updated };
-    }
-    case "revoked": {
-      const reason =
-        typeof input.args.reason === "string" ? input.args.reason : null;
-      const { closed } = await onApplicationRevokedWithClose({
-        applicationId: input.applicationId,
-        reason,
-      });
-      return { affectedPrs: closed };
-    }
+  } catch (e) {
+    throw classifyGithubError(e);
   }
 }
 
@@ -62,10 +67,14 @@ export async function applyClaCoverageChange(args: {
   ghId: number;
   direction: "gain" | "loss";
 }): Promise<void> {
-  if (args.direction === "gain") {
-    await onClaCoverageChanged({ projectId: args.projectId, ghId: args.ghId });
-  } else {
-    await onClaCoverageRevoked({ projectId: args.projectId, ghIds: [args.ghId] });
+  try {
+    if (args.direction === "gain") {
+      await onClaCoverageChanged({ projectId: args.projectId, ghId: args.ghId });
+    } else {
+      await onClaCoverageRevoked({ projectId: args.projectId, ghIds: [args.ghId] });
+    }
+  } catch (e) {
+    throw classifyGithubError(e);
   }
 }
 
