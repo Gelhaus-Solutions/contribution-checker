@@ -35,7 +35,68 @@ function buildDeploymentOptions(): WorkerDeploymentOptions | null {
 import { TASK_QUEUE } from "@/lib/temporal/task-queue";
 import { resolveTemporalTls, temporalAddress } from "@/lib/temporal/connection";
 import { ensureSchedules } from "@/lib/temporal/schedules";
+import {
+  ensureSearchAttributes,
+  indexedValueTypeName,
+} from "@/lib/temporal/search-attribute-registration";
 import { warmupSecrets } from "@/lib/vault/resolver";
+
+/**
+ * Self-register the custom Search Attributes on the namespace, the same way
+ * the container entrypoint self-applies DB migrations (`prisma migrate
+ * deploy`): there is no separate operator step in the deploy path, and the
+ * docker-compose dev server is in-memory (it forgets registrations on every
+ * restart). Without them, every entity signalWithStart that carries typed
+ * attributes is rejected with INVALID_ARGUMENT and the scheduled
+ * ensureProjectGates workflow fails permanently. Idempotent and race-safe
+ * across replicas; never fatal: on failure the worker still boots and the
+ * client side degrades by dropping the attributes (see start.ts).
+ */
+async function registerSearchAttributes(
+  connection: NativeConnection
+): Promise<void> {
+  const namespace = env.TEMPORAL_NAMESPACE;
+  try {
+    const res = await ensureSearchAttributes(
+      connection.operatorService,
+      namespace
+    );
+    if (res.added.length > 0) {
+      logger.info(
+        { namespace, added: res.added },
+        "registered temporal search attributes"
+      );
+    }
+    for (const m of res.mismatched) {
+      logger.error(
+        {
+          namespace,
+          name: m.name,
+          registered: indexedValueTypeName(m.registered),
+          wanted: indexedValueTypeName(m.wanted),
+        },
+        "temporal search attribute is registered with a different type; " +
+          "executions that carry or upsert it will be rejected until it is " +
+          "deleted and recreated on the namespace (or renamed in code)"
+      );
+    }
+    for (const f of res.failed) {
+      logger.error(
+        { err: f.error, namespace, name: f.name },
+        "registering temporal search attribute failed (per-type visibility " +
+          "caps or missing permission); executions carrying it degrade to " +
+          "attribute-less starts"
+      );
+    }
+  } catch (e) {
+    logger.error(
+      { err: e, namespace },
+      "could not inspect the namespace's search attributes; register them " +
+        "out of band (Temporal Cloud blocks the Operator API: use tcld or " +
+        "the UI; self-hosted: pnpm temporal:register-sa)"
+    );
+  }
+}
 
 /**
  * Set this worker's Build ID as the deployment's Current version, retrying
@@ -99,8 +160,12 @@ async function main(): Promise<void> {
     "temporal worker connecting"
   );
 
-  // Register the recurring Schedules once, idempotently, using a client over the
+  // Namespace-level prerequisites, both idempotent: the custom Search
+  // Attributes FIRST (the scheduled ensureProjectGates run signalWithStarts
+  // the project entities with typed attributes, so the first tick must find
+  // them registered), then the recurring Schedules, using a client over the
   // same connection.
+  await registerSearchAttributes(connection);
   const client = new Client({ connection, namespace: env.TEMPORAL_NAMESPACE });
   await ensureSchedules(client).catch((e) =>
     logger.error({ err: e }, "ensureSchedules failed (continuing)")

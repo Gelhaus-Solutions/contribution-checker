@@ -10,10 +10,12 @@ import {
  * registration script. Import-light: only @temporalio/common, so this module
  * is safe inside the deterministic workflow bundle.
  *
- * The attribute names MUST be registered on the namespace before any worker
- * upserts them (run `pnpm temporal:register-sa`, see
- * scripts/register-search-attributes.ts); an upsert against an unregistered
- * attribute fails the workflow task at runtime.
+ * The attribute names MUST be registered on the namespace before use: an
+ * unregistered attribute rejects any start/signalWithStart that carries it
+ * (INVALID_ARGUMENT) and fails the workflow task of any run that upserts it.
+ * The worker self-registers them at startup (src/worker/run.ts); on Temporal
+ * Cloud, where the Operator API is blocked, register them with tcld or the
+ * Cloud UI (names and types below; see scripts/register-search-attributes.ts).
  */
 export const SA = {
   /** Project the execution belongs to (contributorGate, projectGate). */
