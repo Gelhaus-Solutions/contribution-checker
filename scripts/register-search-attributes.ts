@@ -1,42 +1,38 @@
 /**
  * Register the custom Search Attributes (src/lib/temporal/search-attributes.ts)
- * on the Temporal namespace. Run once per namespace BEFORE deploying a worker
- * that upserts them:
+ * on the Temporal namespace:
  *
  *   pnpm temporal:register-sa
  *
- * Idempotent: lists the namespace's existing custom attributes and adds only
- * the missing ones (addSearchAttributes errors if ANY requested attribute
- * already exists, so a blind add is not re-runnable). A type mismatch on an
- * existing name is reported and fails the run; renaming/re-typing a registered
- * attribute is a manual operator action.
+ * The worker also self-registers these at startup (src/worker/run.ts), so on a
+ * self-hosted cluster this script is optional: use it to pre-register before
+ * the first deploy, or to verify a namespace from CI. It is REQUIRED knowledge
+ * for Temporal Cloud, where the Operator API is blocked for both this script
+ * and the worker: register the attributes there with `tcld` or the Cloud UI
+ * instead (same names and types; see the summary this script prints).
  *
- * Deploy-phase script by design (like `prisma migrate deploy`), NOT worker
- * startup: registration is a namespace-level operator mutation and racing it
- * across worker replicas is noise. Standalone tsx script convention: reads
- * TEMPORAL_* from the environment (.env.local/.env via dotenv); TLS values may
- * be a PEM file path or inline PEM text, matching src/lib/temporal/connection.ts.
- * Vault-stored certs are not resolved here; export them into the environment
- * for this script.
+ * Idempotent and re-runnable: existing attributes are skipped, missing ones
+ * are added one at a time so a single conflicted or capped name cannot block
+ * the rest. A type mismatch on an existing name is reported and fails the run;
+ * re-typing a registered attribute is a manual operator action
+ * (delete+recreate) by design.
+ *
+ * Standalone tsx script convention: reads TEMPORAL_* from the environment
+ * (.env.local/.env via dotenv); TLS values may be a PEM file path or inline
+ * PEM text, matching src/lib/temporal/connection.ts. Vault-stored certs are
+ * not resolved here; export them into the environment for this script.
  */
 import { readFile } from "node:fs/promises";
 import { config as loadEnv } from "dotenv";
 import { Connection } from "@temporalio/client";
 import { SEARCH_ATTRIBUTE_REGISTRATIONS } from "../src/lib/temporal/search-attributes";
+import {
+  ensureSearchAttributes,
+  indexedValueTypeName,
+} from "../src/lib/temporal/search-attribute-registration";
 
 loadEnv({ path: ".env.local" });
 loadEnv({ path: ".env" });
-
-/** temporal.api.enums.v1.IndexedValueType values for the raw operator call. */
-const INDEXED_VALUE_TYPE: Record<string, number> = {
-  TEXT: 1,
-  KEYWORD: 2,
-  INT: 3,
-  DOUBLE: 4,
-  BOOL: 5,
-  DATETIME: 6,
-  KEYWORD_LIST: 7,
-};
 
 async function resolvePem(value: string): Promise<Buffer> {
   const looksLikePem = value.includes("-----BEGIN");
@@ -73,39 +69,34 @@ async function main(): Promise<void> {
   const namespace = process.env.TEMPORAL_NAMESPACE ?? "default";
   const connection = await connect();
   try {
-    const existing = await connection.operatorService.listSearchAttributes({
-      namespace,
-    });
-    const current = existing.customAttributes ?? {};
+    const res = await ensureSearchAttributes(
+      connection.operatorService,
+      namespace
+    );
 
-    const missing: Record<string, number> = {};
-    for (const { name, type } of SEARCH_ATTRIBUTE_REGISTRATIONS) {
-      const wanted = INDEXED_VALUE_TYPE[type];
-      if (wanted == null) throw new Error(`unmapped attribute type: ${type}`);
-      const got = current[name];
-      if (got == null) {
-        missing[name] = wanted;
-      } else if (Number(got) !== wanted) {
-        throw new Error(
-          `search attribute ${name} already registered with type ${got}, wanted ${wanted} (${type}); fix manually`
-        );
-      }
+    if (res.added.length > 0) {
+      console.log(
+        `[register-sa] namespace "${namespace}": registered ${res.added.join(", ")}`
+      );
     }
-
-    if (Object.keys(missing).length === 0) {
+    if (res.added.length === 0 && res.mismatched.length === 0 && res.failed.length === 0) {
       console.log(
         `[register-sa] namespace "${namespace}": all ${SEARCH_ATTRIBUTE_REGISTRATIONS.length} attributes already registered`
       );
-      return;
     }
-
-    await connection.operatorService.addSearchAttributes({
-      namespace,
-      searchAttributes: missing,
-    });
-    console.log(
-      `[register-sa] namespace "${namespace}": registered ${Object.keys(missing).join(", ")}`
-    );
+    for (const m of res.mismatched) {
+      console.error(
+        `[register-sa] ${m.name} already registered with type ${indexedValueTypeName(
+          m.registered
+        )}, wanted ${indexedValueTypeName(m.wanted)}; fix manually (delete+recreate on the namespace, or rename in code)`
+      );
+    }
+    for (const f of res.failed) {
+      console.error(`[register-sa] failed to register ${f.name}:`, f.error);
+    }
+    if (res.mismatched.length > 0 || res.failed.length > 0) {
+      process.exit(1);
+    }
   } finally {
     await connection.close();
   }

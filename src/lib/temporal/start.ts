@@ -9,6 +9,7 @@ import { prisma } from "@/lib/db";
 import { getTemporalClient } from "./client";
 import { TASK_QUEUE, workflowIds } from "./task-queue";
 import { SA } from "./search-attributes";
+import { isSearchAttributeRejection } from "./search-attribute-registration";
 import { WF, SIG } from "./contracts";
 import type {
   ApplicationDecisionKind,
@@ -37,6 +38,54 @@ async function startIdempotent(fn: () => Promise<unknown>): Promise<void> {
   }
 }
 
+/** The entity signalWithStart request shape (string-named workflow + signal,
+ * one start arg, one signal arg, optional typed attributes). */
+type EntitySignalWithStart = {
+  workflowId: string;
+  taskQueue: string;
+  signal: string;
+  signalArgs: [unknown];
+  args: [unknown];
+  typedSearchAttributes?: SearchAttributePair[];
+};
+
+/**
+ * signalWithStart that survives a namespace missing our custom Search
+ * Attributes. The server rejects the WHOLE request with INVALID_ARGUMENT when
+ * a carried attribute is unregistered or type-mismatched, which took the gate
+ * down (the scheduled ensureProjectGates workflow failed permanently and
+ * webhook dispatches were rejected). The attributes are a findability nicety,
+ * not correctness, so on that specific rejection retry once without them and
+ * log the remediation. The worker self-registers the attributes at startup
+ * (src/worker/run.ts), so this fires only when that could not succeed (e.g.
+ * Temporal Cloud blocks the Operator API, or a type conflict on a shared
+ * namespace).
+ */
+async function signalWithStartTolerant(
+  workflowType: string,
+  options: EntitySignalWithStart
+): Promise<void> {
+  const client = await getTemporalClient();
+  try {
+    await client.workflow.signalWithStart(workflowType, options);
+  } catch (e) {
+    if (!options.typedSearchAttributes?.length || !isSearchAttributeRejection(e)) {
+      throw e;
+    }
+    logger.error(
+      { err: e, workflowType, workflowId: options.workflowId },
+      "temporal rejected this start's search attributes; retrying without them. " +
+        "Register the custom search attributes on the namespace (the worker " +
+        "does this on startup where the Operator API is available; on " +
+        "Temporal Cloud use tcld or the UI, see scripts/register-search-attributes.ts)"
+    );
+    await client.workflow.signalWithStart(workflowType, {
+      ...options,
+      typedSearchAttributes: undefined,
+    });
+  }
+}
+
 /** Route a PR event into the entity tree: signal the author's contributorGate,
  * which starts/forwards to the per-PR prGate CHILD (so the Relationships tab
  * shows contributor → pr). Resolves the project from the repo and the author
@@ -48,7 +97,6 @@ export async function dispatchPullRequestEvent(
   prNumber: number,
   env: GithubEventEnvelope
 ): Promise<void> {
-  const client = await getTemporalClient();
   const ghRepoId = Number(repoId);
   const authorGhId = (
     env.payload as { pull_request?: { user?: { id?: number } } } | null
@@ -61,7 +109,7 @@ export async function dispatchPullRequestEvent(
     : null;
 
   if (repo && authorGhId != null) {
-    await client.workflow.signalWithStart(WF.contributorGate, {
+    await signalWithStartTolerant(WF.contributorGate, {
       workflowId: workflowIds.contributor(repo.projectId, authorGhId),
       taskQueue: TASK_QUEUE,
       signal: SIG.prEvent,
@@ -79,7 +127,7 @@ export async function dispatchPullRequestEvent(
 
   // Fallback: top-level prGate (no contributor parent). The triggering event
   // arrives via the signal, so the start args carry only the PR identity.
-  await client.workflow.signalWithStart(WF.prGate, {
+  await signalWithStartTolerant(WF.prGate, {
     workflowId: workflowIds.pullRequest(repoId, prNumber),
     taskQueue: TASK_QUEUE,
     signal: SIG.githubEvent,
@@ -108,8 +156,7 @@ export async function signalPrReGate(
   prNumber: number,
   payload: ReGatePayload
 ): Promise<void> {
-  const client = await getTemporalClient();
-  await client.workflow.signalWithStart(WF.prGate, {
+  await signalWithStartTolerant(WF.prGate, {
     workflowId: workflowIds.pullRequest(repoId, prNumber),
     taskQueue: TASK_QUEUE,
     signal: SIG.reGate,
@@ -177,8 +224,7 @@ async function signalContributor(
   signal: string,
   signalArg: unknown
 ): Promise<void> {
-  const client = await getTemporalClient();
-  await client.workflow.signalWithStart(WF.contributorGate, {
+  await signalWithStartTolerant(WF.contributorGate, {
     workflowId: workflowIds.contributor(projectId, authorGhId),
     taskQueue: TASK_QUEUE,
     signal,
@@ -275,8 +321,7 @@ async function signalProject(
   signal: string,
   signalArg: unknown
 ): Promise<void> {
-  const client = await getTemporalClient();
-  await client.workflow.signalWithStart(WF.projectGate, {
+  await signalWithStartTolerant(WF.projectGate, {
     workflowId: workflowIds.project(projectId),
     taskQueue: TASK_QUEUE,
     signal,
