@@ -526,8 +526,11 @@ model PrQuality {
   signalsRaw String   @default("{}")
   // JSON: cached fetched data (PR files+commits, account snapshot) so re-eval
   // doesn't require re-fetching everything on synchronize.
-  fetchedRaw String   @default("{}")
-  computedAt DateTime @default(now())
+  fetchedRaw      String    @default("{}")
+  computedAt      DateTime  @default(now())
+  // Set when the public low-score warning comment has been posted, so
+  // synchronize re-runs never post it a second time.
+  warnCommentedAt DateTime?
 
   prCheck PrCheck @relation(fields: [prCheckId], references: [id], onDelete: Cascade)
 

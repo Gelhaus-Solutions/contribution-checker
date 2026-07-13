@@ -223,24 +223,42 @@ export async function runQualityForPrCheck(args: {
     },
   });
 
-  // Public warning comment when score is concerning. Only posted once
-  // (idempotent via PrQuality having no commentedAt; we use a JobQueue
-  // entry to avoid duplicate comments on synchronize re-runs).
+  // Public warning comment when score is concerning. Posted at most once per
+  // PrCheck: the warnCommentedAt claim is taken atomically before posting so
+  // synchronize re-runs (and concurrent deliveries) never post a duplicate.
   if (
     !args.skipComment &&
     summary.score !== null &&
     summary.score < args.project.qualityCommentMin
   ) {
-    await postQualityWarningComment({
-      installationId: args.installationId,
-      repoFullName: args.repoFullName,
-      prNumber: args.prNumber,
-      summary,
-      signals,
-      config,
-    }).catch((e) =>
-      logger.warn({ err: e, prCheckId: args.prCheckId }, "quality comment failed")
-    );
+    const claimed = await prisma.prQuality.updateMany({
+      where: { prCheckId: args.prCheckId, warnCommentedAt: null },
+      data: { warnCommentedAt: new Date() },
+    });
+    if (claimed.count === 1) {
+      try {
+        await postQualityWarningComment({
+          installationId: args.installationId,
+          repoFullName: args.repoFullName,
+          prNumber: args.prNumber,
+          summary,
+          signals,
+          config,
+        });
+      } catch (e) {
+        logger.warn(
+          { err: e, prCheckId: args.prCheckId },
+          "quality comment failed"
+        );
+        // Release the claim so a later re-run can retry the comment.
+        await prisma.prQuality
+          .updateMany({
+            where: { prCheckId: args.prCheckId },
+            data: { warnCommentedAt: null },
+          })
+          .catch(() => {});
+      }
+    }
   }
 
   if (summary.score !== null) {
