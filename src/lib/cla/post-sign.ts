@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { env } from "@/lib/env";
-import { applyUrl as buildApplyUrl, contributorInfoUrl } from "@/lib/notifications/email";
+import { applyUrl as buildApplyUrl } from "@/lib/notifications/email";
 import {
   decideForRepo,
   decisionRepoInclude,
@@ -429,13 +429,15 @@ export async function reapplyClaGateForApprovedAuthor(args: {
           claUrl,
         );
         if (!alreadyPosted) {
+          // No infoUrl: this path only ever carries a CLA gate, and those
+          // messages deliberately keep the signing link as the single call to
+          // action.
           const body = buildDecisionMessage({
             decision,
             projectName: project.name,
             applyUrl,
             ghLogin: check.authorGhLogin,
             claUrl,
-            infoUrl: contributorInfoUrl(),
           });
           if (body) {
             await commentOnPr(ref, check.prNumber, body).catch(() => undefined);
