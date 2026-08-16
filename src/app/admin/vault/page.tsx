@@ -17,6 +17,7 @@ import {
 } from "@/lib/vault/resolver";
 import { getSecretStatus } from "@/lib/vault/status";
 import { CodeBlock } from "@/components/code-block";
+import { PageHeader } from "@/components/page-header";
 
 export const dynamic = "force-dynamic";
 
@@ -102,12 +103,10 @@ export default async function VaultStatusPage() {
     <>
       <SiteHeader />
       <main className="mx-auto max-w-3xl space-y-6 px-4 py-10">
-        <div>
-          <h1 className="text-2xl font-semibold">HashiCorp Vault</h1>
-          <p className="text-sm text-muted-foreground">
-            Per-secret resolution status. No secret values are displayed.
-          </p>
-        </div>
+        <PageHeader
+          title="HashiCorp Vault"
+          description="Per-secret resolution status. No secret values are displayed."
+        />
 
         <Card>
           <CardHeader>

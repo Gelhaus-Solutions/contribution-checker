@@ -33,7 +33,7 @@ export default async function GitHubAppSetup() {
       <SiteHeader />
       <main className="mx-auto max-w-2xl space-y-6 px-4 py-10">
         <div>
-          <h1 className="text-2xl font-semibold">GitHub App setup</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">GitHub App setup</h1>
           <p className="text-sm text-muted-foreground">
             Manual setup. The GitHub App handles repo automation (installation
             tokens); human sign-in is handled by Hexclave (see the Hexclave

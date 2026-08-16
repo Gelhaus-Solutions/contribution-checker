@@ -17,6 +17,8 @@ import { Badge } from "@/components/ui/badge";
 import { SearchInput } from "@/components/ui/search-input";
 import { Pagination } from "@/components/ui/pagination";
 import { parsePageParams, type SearchParamRecord } from "@/lib/pagination";
+import { PageHeader } from "@/components/page-header";
+import { EmptyState } from "@/components/empty-state";
 import {
   grantCreatorByGhLogin,
   revokeCreator,
@@ -72,12 +74,11 @@ export default async function AllowlistPage({
     <>
       <SiteHeader />
       <main className="mx-auto max-w-3xl space-y-6 px-4 py-10">
-        <div>
-          <h1 className="text-2xl font-semibold">Allowlist</h1>
-          <p className="text-sm text-muted-foreground">
-            Users with project-creation rights or super-admin role.
-          </p>
-        </div>
+        <PageHeader
+          title="Allowlist"
+          description="Users with project-creation rights or super-admin role."
+          back={{ href: "/admin", label: "Super-admin" }}
+        />
 
         <Card>
           <CardHeader>
@@ -113,9 +114,13 @@ export default async function AllowlistPage({
               />
             </div>
             {users.length === 0 ? (
-              <div className="px-6 py-6 text-sm text-muted-foreground">
-                {q ? "No users match your search." : "None yet. Grant access above."}
-              </div>
+              <EmptyState
+                variant="row"
+                query={q}
+                clearHref={basePath}
+                title="No users on the allowlist"
+                description="Grant project-creation rights using the form above."
+              />
             ) : (
               <ul className="divide-y divide-border">
                 {users.map((u) => (

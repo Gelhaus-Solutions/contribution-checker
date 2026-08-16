@@ -14,6 +14,7 @@ import { Pagination } from "@/components/ui/pagination";
 import { parsePageParams, type SearchParamRecord } from "@/lib/pagination";
 import { StatusBadge } from "@/components/status-badge";
 import { formatDate } from "@/lib/ui/format";
+import { EmptyState } from "@/components/empty-state";
 
 const STATUS_OPTIONS = [
   { value: "SUBMITTED", label: "Submitted" },
@@ -111,9 +112,13 @@ export default async function ProjectApplications({
           />
         </div>
         {apps.length === 0 ? (
-          <div className="px-6 py-6 text-sm text-muted-foreground">
-            {q ? "No applications match your search." : "Nothing in this bucket."}
-          </div>
+          <EmptyState
+            variant="row"
+            query={q}
+            clearHref={`${basePath}?status=${filterStatus}`}
+            title="Nothing in this bucket"
+            description="Applications appear here once contributors submit them."
+          />
         ) : (
           <ul className="divide-y divide-border">
             {apps.map((a) => (

@@ -18,6 +18,7 @@ import { Label } from "@/components/ui/label";
 import { SearchInput } from "@/components/ui/search-input";
 import { parsePageParams, type SearchParamRecord } from "@/lib/pagination";
 import { CodeBlock } from "@/components/code-block";
+import { EmptyState } from "@/components/empty-state";
 import { addRepoByName, removeRepo } from "./actions";
 
 function ciGateYaml(baseUrl: string, slug: string): string {
@@ -273,9 +274,12 @@ export default async function ProjectRepos({
             placeholder="Search repos"
           />
           {repos.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              {q ? "No repos match your search." : "No repos yet."}
-            </p>
+            <EmptyState
+              variant="row"
+              query={q}
+              title="No repositories linked"
+              description="Add a repository above to start gating its pull requests."
+            />
           ) : (
             <ul className="divide-y divide-border">
               {repos.map((r) => (

@@ -14,6 +14,7 @@ import { Pagination } from "@/components/ui/pagination";
 import { parsePageParams, type SearchParamRecord } from "@/lib/pagination";
 import { formatDateTimeSeconds } from "@/lib/ui/format";
 import { CodeBlock } from "@/components/code-block";
+import { EmptyState } from "@/components/empty-state";
 
 /**
  * Pretty-print an audit payload for display. The column is a plain JSON string
@@ -84,9 +85,13 @@ export default async function AuditLog({
           />
         </div>
         {events.length === 0 ? (
-          <div className="px-6 py-6 text-sm text-muted-foreground">
-            {q ? "No events match your search." : "No events yet."}
-          </div>
+          <EmptyState
+            variant="row"
+            query={q}
+            clearHref={basePath}
+            title="No audit events yet"
+            description="Approvals, denials and settings changes are recorded here."
+          />
         ) : (
           <ul className="divide-y divide-border">
             {events.map((e) => (

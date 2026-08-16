@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { FileText, FolderGit2 } from "lucide-react";
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import { SiteHeader } from "@/components/site-header";
@@ -13,6 +14,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { StatusBadge } from "@/components/status-badge";
 import { formatDate } from "@/lib/ui/format";
+import { EmptyState } from "@/components/empty-state";
 import {
   listAppliedProjectsForUser,
   listProjectsForUser,
@@ -56,9 +58,11 @@ export default async function DashboardHome() {
 
           {memberships.length === 0 ? (
             <Card>
-              <CardContent className="py-10 text-center text-muted-foreground">
-                You&apos;re not a member of any project yet.
-              </CardContent>
+              <EmptyState
+                icon={FolderGit2}
+                title="No projects yet"
+                description="A project links one or more repositories to an application form. Create one to start gating pull requests."
+              />
             </Card>
           ) : (
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -96,9 +100,11 @@ export default async function DashboardHome() {
           <h2 className="mb-4 text-2xl font-semibold">Your applications</h2>
           {applications.length === 0 ? (
             <Card>
-              <CardContent className="py-10 text-center text-muted-foreground">
-                You haven&apos;t applied to any project yet.
-              </CardContent>
+              <EmptyState
+                icon={FileText}
+                title="No applications yet"
+                description="Applications you submit to gated projects show up here with their status."
+              />
             </Card>
           ) : (
             <Card>

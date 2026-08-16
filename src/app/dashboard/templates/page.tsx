@@ -18,6 +18,7 @@ import { Pagination } from "@/components/ui/pagination";
 import { parsePageParams, type SearchParamRecord } from "@/lib/pagination";
 import { parseFormSchema } from "@/lib/applications/schema";
 import { formatDate } from "@/lib/ui/format";
+import { PageHeader } from "@/components/page-header";
 import { createTemplate, deleteTemplate } from "./actions";
 
 export default async function TemplatesPage({
@@ -50,12 +51,11 @@ export default async function TemplatesPage({
     <>
       <SiteHeader />
       <main className="mx-auto max-w-3xl space-y-6 px-4 py-10">
-        <div>
-          <h1 className="text-2xl font-semibold">Form templates</h1>
-          <p className="text-sm text-muted-foreground">
-            Reusable form schemas that you can apply to any of your projects.
-          </p>
-        </div>
+        <PageHeader
+          title="Form templates"
+          description="Reusable form schemas that you can apply to any of your projects."
+          back={{ href: "/dashboard", label: "Dashboard" }}
+        />
 
         <Card>
           <CardHeader>
@@ -100,7 +100,7 @@ export default async function TemplatesPage({
             </div>
             {templates.length === 0 ? (
               <div className="px-6 py-6 text-sm text-muted-foreground">
-                {q ? "No templates match your search." : "No templates yet."}
+                {q ? `No templates match "${q}".` : "No templates yet."}
               </div>
             ) : (
               <ul className="divide-y divide-border">
