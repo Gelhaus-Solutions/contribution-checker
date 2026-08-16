@@ -18,12 +18,15 @@ export function SpecTable({
   head,
   rows,
   mono,
+  widths,
   className,
 }: {
   head: React.ReactNode[];
   rows: React.ReactNode[][];
   /** Column indices to render in mono, e.g. status or field names. */
   mono?: number[];
+  /** Per-column width hints, positional. Pass undefined to let a column flex. */
+  widths?: (string | undefined)[];
   className?: string;
 }) {
   const monoCols = new Set(mono ?? []);
@@ -33,7 +36,11 @@ export function SpecTable({
         <TableHeader>
           <TableRow className="bg-muted/40">
             {head.map((h, i) => (
-              <TableHead key={i} className="px-3 py-2">
+              <TableHead
+                key={i}
+                className="px-3 py-2"
+                style={widths?.[i] ? { width: widths[i] } : undefined}
+              >
                 {h}
               </TableHead>
             ))}

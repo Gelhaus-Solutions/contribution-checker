@@ -70,7 +70,10 @@ export function HeuristicTable() {
             </span>
           </div>
           <SpecTable
+            // Widths keep the identifier and weight columns from being
+            // squeezed by the long description column.
             head={["Heuristic", "Weight", "Default", "What it looks for"]}
+            widths={["16rem", "7rem", "6rem", undefined]}
             rows={g.items.map((h) => [
               <span key="id" className="block">
                 <span className="block">{h.label}</span>
@@ -78,7 +81,11 @@ export function HeuristicTable() {
                   {h.id}
                 </code>
               </span>,
-              <Badge key="w" variant={WEIGHT_TONE[h.weight]}>
+              <Badge
+                key="w"
+                variant={WEIGHT_TONE[h.weight]}
+                className="whitespace-nowrap"
+              >
                 {h.weight} {WEIGHT_LABEL[h.weight]}
               </Badge>,
               <span key="d" className="text-xs whitespace-nowrap">
