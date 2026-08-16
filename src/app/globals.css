@@ -1,62 +1,210 @@
 @import "tailwindcss";
+@import "tw-animate-css";
+
+/* Tailwind v4 has no JS config, so the class-based dark variant is declared
+   here. :where() keeps specificity at 0 so a `dark:` utility never outranks a
+   later plain utility, and listing `.dark` itself (not just `.dark *`) means
+   the variant also applies to <html> where the class actually lives. */
+@custom-variant dark (&:where(.dark, .dark *));
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222 47% 11%;
-    --muted: 210 40% 96%;
-    --muted-foreground: 215 16% 47%;
-    --border: 214 32% 91%;
-    --input: 214 32% 91%;
-    --ring: 222 47% 11%;
-    --primary: 222 47% 11%;
-    --primary-foreground: 210 40% 98%;
-    --destructive: 0 72% 51%;
-    --destructive-foreground: 210 40% 98%;
-    --success: 142 71% 45%;
-    --success-foreground: 210 40% 98%;
-    --warning: 38 92% 50%;
-    --warning-foreground: 222 47% 11%;
-    --radius: 0.5rem;
+    color-scheme: light;
+
+    /* Surfaces. `background` is the page plane, `card` sits above it, and
+       `popover` above that. Cards previously reused --background, which is why
+       they were invisible against the page. */
+    --background: oklch(0.985 0.002 259);
+    --foreground: oklch(0.208 0.04 266);
+    --card: oklch(1 0 0);
+    --card-foreground: oklch(0.208 0.04 266);
+    --popover: oklch(1 0 0);
+    --popover-foreground: oklch(0.208 0.04 266);
+
+    --muted: oklch(0.968 0.007 259);
+    --muted-foreground: oklch(0.554 0.041 257);
+    --secondary: oklch(0.968 0.007 259);
+    --secondary-foreground: oklch(0.279 0.037 260);
+
+    /* Brand cobalt, reserved for links, focus, the primary button and active
+       nav. OKLCH hue angles are not HSL degrees: 256 here reads as roughly HSL
+       214. Deliberately clear of the 250-290 violet band, and far enough from
+       the semantic green that status badges never muddy against it. `accent`
+       is the same hue at low chroma, used only as a hover and active fill. */
+    --primary: oklch(0.549 0.204 256);
+    --primary-foreground: oklch(0.985 0 0);
+    --accent: oklch(0.961 0.019 256);
+    --accent-foreground: oklch(0.424 0.181 256);
+
+    /* Hairlines sit close to the surface: the border carries the structure and
+       shadows stay almost invisible. */
+    --border: oklch(0.928 0.006 265);
+    --input: oklch(0.928 0.006 265);
+    --ring: oklch(0.549 0.204 256);
+
+    /* Semantic only. Never used for branding. */
+    --destructive: oklch(0.577 0.215 27);
+    --destructive-foreground: oklch(0.985 0 0);
+    --success: oklch(0.597 0.136 154);
+    --success-foreground: oklch(0.985 0 0);
+    --warning: oklch(0.689 0.162 69);
+    --warning-foreground: oklch(0.208 0.04 266);
   }
 
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --background: 222 47% 7%;
-      --foreground: 210 40% 98%;
-      --muted: 217 33% 17%;
-      --muted-foreground: 215 20% 65%;
-      --border: 217 33% 17%;
-      --input: 217 33% 17%;
-      --ring: 212 27% 84%;
-      --primary: 210 40% 98%;
-      --primary-foreground: 222 47% 11%;
-    }
+  /* Written once, not duplicated under a media query. The server stamps this
+     class on <html> from the cc-theme cookie, and the inline head script
+     resolves theme=system before first paint, so all three theme states land
+     without a flash. See src/app/theme-script.tsx. */
+  .dark {
+    color-scheme: dark;
+
+    --background: oklch(0.182 0.014 259);
+    --foreground: oklch(0.933 0.01 259);
+    --card: oklch(0.218 0.017 259);
+    --card-foreground: oklch(0.933 0.01 259);
+    --popover: oklch(0.241 0.018 259);
+    --popover-foreground: oklch(0.933 0.01 259);
+
+    --muted: oklch(0.264 0.018 259);
+    --muted-foreground: oklch(0.689 0.016 259);
+    --secondary: oklch(0.264 0.018 259);
+    --secondary-foreground: oklch(0.933 0.01 259);
+
+    --primary: oklch(0.611 0.193 256);
+    --primary-foreground: oklch(0.985 0 0);
+    --accent: oklch(0.291 0.039 256);
+    --accent-foreground: oklch(0.8 0.09 256);
+
+    --border: oklch(0.302 0.019 259);
+    --input: oklch(0.302 0.019 259);
+    --ring: oklch(0.643 0.167 256);
+
+    /* The previous dark block silently left these three at their light-mode
+       values, so red/green/amber were tuned for white and rendered on a near
+       black ground. */
+    --destructive: oklch(0.637 0.208 25);
+    --destructive-foreground: oklch(0.985 0 0);
+    --success: oklch(0.696 0.149 159);
+    --success-foreground: oklch(0.182 0.014 259);
+    --warning: oklch(0.769 0.165 70);
+    --warning-foreground: oklch(0.182 0.014 259);
   }
 
-  html, body {
-    background: hsl(var(--background));
-    color: hsl(var(--foreground));
+  /* Tailwind v4 dropped v3's preflight rule that defaulted every border to the
+     theme border color, so a bare `border` renders currentColor. Two live
+     sites depend on the old behavior (repos/page.tsx, the workflow YAML
+     blocks). Restore it. */
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--color-border);
+  }
+
+  html {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    /* Geist ss01 is the slashed zero and cv05 disambiguates l from 1. This is
+       a tool full of shas, counts and identifiers, so both earn their place. */
+    font-feature-settings:
+      "ss01" 1,
+      "cv05" 1;
+  }
+
+  /* Numbers in a column have to line up. Covers every table and every
+     divide-y list of counts, scores and dates. */
+  table,
+  .tnum {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* One focus treatment, cobalt, everywhere. */
+  :focus-visible {
+    outline: 2px solid var(--color-ring);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background: color-mix(in oklab, var(--color-primary) 22%, transparent);
   }
 }
 
+/* Colors, radii and fonts have to resolve at the use site, which is what
+   `inline` means here: the emitted utility becomes `background-color:
+   var(--card)` rather than a :root snapshot. That is what makes both the .dark
+   override and the next/font class work. Every --color-* name below is
+   byte-identical to the previous file, so no className in src/ changes. */
 @theme inline {
-  --color-background: hsl(var(--background));
-  --color-foreground: hsl(var(--foreground));
-  --color-muted: hsl(var(--muted));
-  --color-muted-foreground: hsl(var(--muted-foreground));
-  --color-border: hsl(var(--border));
-  --color-input: hsl(var(--input));
-  --color-ring: hsl(var(--ring));
-  --color-primary: hsl(var(--primary));
-  --color-primary-foreground: hsl(var(--primary-foreground));
-  --color-destructive: hsl(var(--destructive));
-  --color-destructive-foreground: hsl(var(--destructive-foreground));
-  --color-success: hsl(var(--success));
-  --color-success-foreground: hsl(var(--success-foreground));
-  --color-warning: hsl(var(--warning));
-  --color-warning-foreground: hsl(var(--warning-foreground));
-  --radius-lg: var(--radius);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-sm: calc(var(--radius) - 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+
+  --font-sans:
+    var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+    sans-serif;
+  --font-mono:
+    var(--font-geist-mono), ui-monospace, SFMono-Regular, "SF Mono", Menlo,
+    monospace;
+}
+
+/* Static scales: literal values, no base-layer indirection needed. */
+@theme {
+  /* 6px base, down from 8px. Corners read as machined rather than soft. */
+  --radius-sm: 0.25rem;
+  --radius-md: 0.375rem;
+  --radius-lg: 0.5rem;
+  --radius-xl: 0.75rem;
+
+  /* Elevation is carried almost entirely by the border plus the surface delta.
+     Shadows are a whisper in light mode and near-zero in dark. */
+  --shadow-xs: 0 1px 2px 0 oklch(0.208 0.04 266 / 0.04);
+  --shadow-sm:
+    0 1px 2px 0 oklch(0.208 0.04 266 / 0.05),
+    0 1px 3px 0 oklch(0.208 0.04 266 / 0.04);
+  --shadow-md:
+    0 2px 4px -1px oklch(0.208 0.04 266 / 0.06),
+    0 4px 12px -2px oklch(0.208 0.04 266 / 0.08);
+  --shadow-lg:
+    0 8px 24px -4px oklch(0.208 0.04 266 / 0.1),
+    0 2px 6px -2px oklch(0.208 0.04 266 / 0.06);
+
+  --ease-out-quad: cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+
+@layer base {
+  /* Respect the OS setting for everything, including the tw-animate-css
+     enter/exit animations the Radix primitives rely on. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    ::before,
+    ::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
 }
