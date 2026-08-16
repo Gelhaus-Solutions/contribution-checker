@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { slugify } from "@/lib/slug";
+import { Alert } from "@/components/ui/alert";
 import type { CreateProjectState } from "./actions";
 
 export function CreateProjectForm({
@@ -69,7 +70,7 @@ export function CreateProjectForm({
         />
       </div>
       {state.error && (
-        <p className="text-sm text-destructive">{state.error}</p>
+        <Alert variant="destructive">{state.error}</Alert>
       )}
       <Button type="submit" loading={pending}>
         Create project

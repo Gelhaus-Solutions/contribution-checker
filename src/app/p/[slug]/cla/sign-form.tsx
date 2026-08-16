@@ -10,6 +10,7 @@ import { FormRenderer } from "@/components/form-renderer";
 import { SignatureInput } from "@/components/signature-input";
 import { CLA_CUSTOM_FIELD_PREFIX } from "@/lib/cla/schema";
 import type { FormSchema } from "@/lib/applications/schema";
+import { Alert } from "@/components/ui/alert";
 import type { ClaActionState } from "./actions";
 
 /**
@@ -50,9 +51,9 @@ export function SignForm({
 
   if (state.status === "ok") {
     return (
-      <div className="rounded-md border border-success/40 bg-success/10 p-4 text-sm">
+      <Alert variant="success">
         Signed. Any PRs blocked pending your CLA will re-check automatically.
-      </div>
+      </Alert>
     );
   }
 
@@ -123,7 +124,7 @@ export function SignForm({
       </p>
 
       {state.status === "error" && (
-        <p className="text-sm text-destructive">{state.reason}</p>
+        <Alert variant="destructive">{state.reason}</Alert>
       )}
 
       <Button type="submit" loading={pending}>
@@ -158,11 +159,11 @@ export function DisputeForm({
 
   if (state.status === "ok") {
     return (
-      <div className="rounded-md border border-warning/40 bg-warning/10 p-4 text-sm">
+      <Alert variant="warning">
         Your dispute was filed. Your coverage under {companyName} is suspended
         and the maintainers have been notified. You can now sign the CLA
         individually.
-      </div>
+      </Alert>
     );
   }
 
@@ -181,7 +182,7 @@ export function DisputeForm({
         />
       </div>
       {state.status === "error" && (
-        <p className="text-sm text-destructive">{state.reason}</p>
+        <Alert variant="destructive">{state.reason}</Alert>
       )}
       <Button type="submit" variant="outline" loading={pending}>
         I&apos;m not affiliated, request exemption

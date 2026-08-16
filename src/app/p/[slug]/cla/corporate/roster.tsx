@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { StatusBadge } from "@/components/status-badge";
+import { Alert } from "@/components/ui/alert";
 import type { ClaActionState } from "../actions";
 
 // The corporate roster server actions (`addRosterMembers`,
@@ -166,7 +167,7 @@ function AddRosterForm({
         </p>
       </div>
       {state.status === "error" && (
-        <p className="text-sm text-destructive">{state.reason}</p>
+        <Alert variant="destructive">{state.reason}</Alert>
       )}
       {state.status === "ok" && (
         <p className="text-sm text-success">Roster updated.</p>
@@ -213,7 +214,7 @@ function ActiveRow({
         </Button>
       </form>
       {state.status === "error" && (
-        <p className="w-full text-xs text-destructive">{state.reason}</p>
+        <Alert variant="destructive" className="w-full">{state.reason}</Alert>
       )}
     </li>
   );

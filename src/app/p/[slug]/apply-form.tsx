@@ -9,6 +9,7 @@ import { FormRenderer, type FormValue } from "@/components/form-renderer";
 import { SignatureInput } from "@/components/signature-input";
 import type { FormSchema } from "@/lib/applications/schema";
 import { CLA_CUSTOM_FIELD_PREFIX } from "@/lib/cla/schema";
+import { Alert } from "@/components/ui/alert";
 
 type FormValues = Record<string, FormValue>;
 
@@ -129,10 +130,10 @@ export function ApplyForm({
 
   if (state.status === "ok") {
     return (
-      <div className="rounded-md border border-success/40 bg-success/10 p-4 text-sm">
+      <Alert variant="success">
         Application submitted. You&apos;ll be notified when a project admin
         reviews it.
-      </div>
+      </Alert>
     );
   }
 
@@ -200,7 +201,7 @@ export function ApplyForm({
         </div>
       )}
       {state.status === "error" && (
-        <p className="text-sm text-destructive">{state.reason}</p>
+        <Alert variant="destructive">{state.reason}</Alert>
       )}
       {fields.length === 0 && !claEmbed ? (
         <p className="text-sm text-muted-foreground">

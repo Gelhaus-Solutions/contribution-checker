@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Alert } from "@/components/ui/alert";
 
 type Mode = "typed" | "drawn" | "uploaded";
 
@@ -175,7 +176,7 @@ export function SignatureInput({
         </div>
       )}
 
-      {error && <p className="text-xs text-destructive">{error}</p>}
+      {error && <Alert variant="destructive">{error}</Alert>}
 
       <input type="hidden" name={name("signatureKind")} value={mode} />
       <input

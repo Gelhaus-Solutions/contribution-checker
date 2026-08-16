@@ -9,6 +9,7 @@ import { FormRenderer } from "@/components/form-renderer";
 import { SignatureInput } from "@/components/signature-input";
 import { CLA_CUSTOM_FIELD_PREFIX } from "@/lib/cla/schema";
 import type { FormSchema } from "@/lib/applications/schema";
+import { Alert } from "@/components/ui/alert";
 import type { ClaActionState } from "../actions";
 
 // `signCcla` returns the shared `ClaActionState`; on success the page
@@ -174,7 +175,7 @@ export function SignCclaForm({
       </label>
 
       {state.status === "error" && (
-        <p className="text-sm text-destructive">{state.reason}</p>
+        <Alert variant="destructive">{state.reason}</Alert>
       )}
 
       <Button type="submit" loading={pending} disabled={!agreed}>

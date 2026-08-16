@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Markdown } from "@/components/markdown";
 import { fetchClaRepoSource, runClaRepoSync } from "./actions";
 import type { RepoSourceView, SyncOutcome } from "@/lib/cla/repo-source";
+import { Alert } from "@/components/ui/alert";
 
 function outcomeText(o: SyncOutcome): string {
   switch (o.status) {
@@ -117,7 +118,7 @@ export function RepoSourcePanel({
         </div>
       </div>
 
-      {error && <p className="text-xs text-destructive">{error}</p>}
+      {error && <Alert variant="destructive">{error}</Alert>}
       {syncMsg && <p className="text-xs text-muted-foreground">{syncMsg}</p>}
 
       {view?.sourced && (
