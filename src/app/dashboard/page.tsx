@@ -11,19 +11,12 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { StatusBadge } from "@/components/status-badge";
 import {
   listAppliedProjectsForUser,
   listProjectsForUser,
 } from "@/lib/projects";
 
-const STATUS_VARIANT: Record<
-  string,
-  "default" | "secondary" | "success" | "warning" | "destructive"
-> = {
-  SUBMITTED: "warning",
-  APPROVED: "success",
-  DENIED: "destructive",
-};
 
 export default async function DashboardHome() {
   const session = await auth();
@@ -125,11 +118,7 @@ export default async function DashboardHome() {
                         <span className="text-xs text-muted-foreground">
                           {app.createdAt.toISOString().slice(0, 10)}
                         </span>
-                        <Badge
-                          variant={STATUS_VARIANT[app.status] ?? "secondary"}
-                        >
-                          {app.status}
-                        </Badge>
+                        <StatusBadge status={app.status} />
                       </div>
                     </li>
                   ))}

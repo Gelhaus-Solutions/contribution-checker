@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { SubmitButton } from "@/components/ui/submit-button";
 import { useActionFeedback } from "@/components/ui/use-action-feedback";
+import { StatusBadge } from "@/components/status-badge";
 import {
   removeManualDecision,
   getUserOverview,
@@ -42,11 +43,6 @@ export type PersonRow = {
   latestDecidedByLogin: string | null;
 };
 
-const STATUS_VARIANT = {
-  APPROVED: "success",
-  DENIED: "destructive",
-  PENDING: "warning",
-} as const;
 
 const PAGE_SIZE = 25;
 
@@ -197,7 +193,7 @@ export function PeopleList({
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="font-mono">{d.ghLogin}</span>
-                  <Badge variant={STATUS_VARIANT[d.status]}>{d.status}</Badge>
+                  <StatusBadge status={d.status} />
                   {d.manual && (
                     <Badge variant="outline" className="text-xs">
                       Manual

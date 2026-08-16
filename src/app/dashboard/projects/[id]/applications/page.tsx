@@ -9,10 +9,10 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { SearchInput } from "@/components/ui/search-input";
 import { Pagination } from "@/components/ui/pagination";
 import { parsePageParams, type SearchParamRecord } from "@/lib/pagination";
+import { StatusBadge } from "@/components/status-badge";
 
 const STATUS_OPTIONS = [
   { value: "SUBMITTED", label: "Submitted" },
@@ -22,14 +22,6 @@ const STATUS_OPTIONS = [
   { value: "APPEALED", label: "Appealed" },
 ] as const;
 
-const STATUS_VARIANT: Record<
-  string,
-  "default" | "secondary" | "success" | "warning" | "destructive"
-> = {
-  SUBMITTED: "warning",
-  APPROVED: "success",
-  DENIED: "destructive",
-};
 
 export default async function ProjectApplications({
   params,
@@ -152,9 +144,7 @@ export default async function ProjectApplications({
                     <span className="text-xs text-muted-foreground">
                       {a.createdAt.toISOString().slice(0, 10)}
                     </span>
-                    <Badge variant={STATUS_VARIANT[a.status] ?? "secondary"}>
-                      {a.status}
-                    </Badge>
+                    <StatusBadge status={a.status} />
                   </div>
                 </Link>
               </li>

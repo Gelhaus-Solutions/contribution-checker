@@ -27,19 +27,12 @@ import { ALL_HEURISTICS, parseQualityConfig } from "@/lib/quality/registry";
 import type { SignalsRaw } from "@/lib/quality/types";
 import { countApprovingReviewers } from "@/lib/applications/decide";
 import { getClaStatus } from "@/lib/cla/status";
+import { StatusBadge } from "@/components/status-badge";
 import { FieldThread, type FieldThreadNote } from "./_components/field-thread";
 import { NoteCard } from "./_components/note-card";
 import { ReviewComposer, type DraftComment } from "./_components/review-composer";
 import { ReviewsList, type ReviewListItem } from "./_components/reviews-list";
 
-const STATUS_VARIANT: Record<
-  string,
-  "default" | "secondary" | "success" | "warning" | "destructive"
-> = {
-  SUBMITTED: "warning",
-  APPROVED: "success",
-  DENIED: "destructive",
-};
 
 export default async function ApplicationDetail({
   params,
@@ -333,9 +326,7 @@ export default async function ApplicationDetail({
         >
           ← Back to queue
         </Link>
-        <Badge variant={STATUS_VARIANT[app.status] ?? "secondary"}>
-          {app.status}
-        </Badge>
+        <StatusBadge status={app.status} />
       </div>
 
       <Card>

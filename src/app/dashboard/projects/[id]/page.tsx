@@ -9,15 +9,8 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { StatusBadge } from "@/components/status-badge";
 
-const STATUS_VARIANT: Record<
-  string,
-  "default" | "secondary" | "success" | "warning" | "destructive"
-> = {
-  SUBMITTED: "warning",
-  APPROVED: "success",
-  DENIED: "destructive",
-};
 
 export default async function ProjectOverview({
   params,
@@ -74,9 +67,7 @@ export default async function ProjectOverview({
                       <span className="text-xs text-muted-foreground">
                         {a.createdAt.toISOString().slice(0, 10)}
                       </span>
-                      <Badge variant={STATUS_VARIANT[a.status] ?? "secondary"}>
-                        {a.status}
-                      </Badge>
+                      <StatusBadge status={a.status} />
                     </div>
                   </Link>
                 </li>

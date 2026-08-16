@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useActionFeedback } from "@/components/ui/use-action-feedback";
+import { StatusBadge } from "@/components/status-badge";
 import {
   getPrOverview,
   rescanPrQuality,
@@ -44,15 +45,6 @@ type Filters = {
 
 const PAGE_SIZE = 20;
 
-const STATUS_VARIANT: Record<
-  PrStatus,
-  "success" | "destructive" | "warning" | "secondary"
-> = {
-  APPROVED: "success",
-  BYPASSED: "success",
-  DENIED: "destructive",
-  PENDING: "warning",
-};
 
 export function PrsList({
   projectId,
@@ -279,9 +271,7 @@ export function PrsList({
                 <span className="text-xs text-muted-foreground">
                   by <span className="font-mono">{pr.authorGhLogin}</span>
                 </span>
-                <Badge variant={STATUS_VARIANT[pr.status]} className="text-[10px]">
-                  {pr.status}
-                </Badge>
+                <StatusBadge status={pr.status} />
                 {pr.closedByApp && (
                   <Badge variant="outline" className="text-[10px]">
                     closed by app
@@ -512,7 +502,7 @@ function PrOverviewDialog({
           <div className="mt-4 space-y-5">
             <section>
               <div className="flex flex-wrap items-center gap-2 text-sm">
-                <Badge variant={STATUS_VARIANT[data.status]}>{data.status}</Badge>
+                <StatusBadge status={data.status} />
                 {data.closedByApp && (
                   <Badge variant="outline" className="text-[10px]">
                     closed by app

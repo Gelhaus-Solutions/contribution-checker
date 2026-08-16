@@ -22,16 +22,8 @@ import { isManuallyBlocked } from "@/lib/applications/lifecycle";
 import { getClaStatus } from "@/lib/cla/status";
 import type { FormValue } from "@/components/form-renderer";
 import { replyToCommentAction } from "@/app/dashboard/projects/[id]/applications/[appId]/actions";
+import { StatusBadge } from "@/components/status-badge";
 
-const STATUS_VARIANT: Record<
-  string,
-  "default" | "secondary" | "success" | "warning" | "destructive"
-> = {
-  PENDING: "warning",
-  SUBMITTED: "warning",
-  APPROVED: "success",
-  DENIED: "destructive",
-};
 
 export default async function PublicProjectPage({
   params,
@@ -630,9 +622,7 @@ function ExistingApplication({
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2">
-        <Badge variant={STATUS_VARIANT[derivedStatus] ?? "secondary"}>
-          {derivedStatus}
-        </Badge>
+        <StatusBadge status={derivedStatus} />
       </div>
       {info}
     </div>
