@@ -21,6 +21,7 @@ import { SubmitButton } from "@/components/ui/submit-button";
 import { Badge } from "@/components/ui/badge";
 import { SearchInput } from "@/components/ui/search-input";
 import { parsePageParams, type SearchParamRecord } from "@/lib/pagination";
+import { Select } from "@/components/ui/select";
 import { inviteMember, removeMemberAction, changeRoleAction } from "./actions";
 import { RoleSelect } from "./role-select";
 import {
@@ -83,16 +84,15 @@ export default async function ProjectTeam({
             </div>
             <div className="space-y-2">
               <Label htmlFor="role">Role</Label>
-              <select
+              <Select
                 id="role"
                 name="role"
                 defaultValue="REVIEWER"
-                className="h-9 rounded-md border border-border bg-background px-3 text-sm"
               >
                 <option value="REVIEWER">Reviewer</option>
                 <option value="ADMIN">Admin</option>
                 {viewerRole === "OWNER" && <option value="OWNER">Owner (transfer)</option>}
-              </select>
+              </Select>
             </div>
             <SubmitButton>Invite</SubmitButton>
           </form>

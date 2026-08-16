@@ -4,6 +4,7 @@ import { parseFormSchema } from "@/lib/applications/schema";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { SubmitButton } from "@/components/ui/submit-button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import { FormBuilder } from "./builder";
 import { saveFormSchema, applyTemplate, saveAsTemplate } from "./actions";
 
@@ -100,12 +101,7 @@ export default async function ProjectFormPage({
                 <label className="text-xs font-medium" htmlFor="tpl-name">
                   Save current schema as new template
                 </label>
-                <input
-                  id="tpl-name"
-                  name="name"
-                  placeholder="Template name"
-                  className="flex h-9 w-full rounded-md border border-border bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
-                />
+                <Input id="tpl-name" name="name" placeholder="Template name" />
               </div>
               <SubmitButton variant="outline" size="sm">
                 Save as template

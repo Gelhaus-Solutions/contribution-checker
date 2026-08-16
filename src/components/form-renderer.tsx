@@ -2,6 +2,7 @@ import type { FormSchema } from "@/lib/applications/schema";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
 
 export type FormValue = string | boolean | undefined;
 
@@ -71,12 +72,11 @@ export function FormRenderer({
                   : { defaultValue: stringValue })}
               />
             ) : field.type === "select" ? (
-              <select
+              <Select
                 id={inputId}
                 name={inputName}
                 required={required}
                 disabled={disabled}
-                className="flex h-9 w-full rounded-md border border-border bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                 {...(controlled
                   ? {
                       value: stringValue,
@@ -90,7 +90,7 @@ export function FormRenderer({
                     {o.label}
                   </option>
                 ))}
-              </select>
+              </Select>
             ) : (
               <label className="flex items-center gap-2 text-sm">
                 <input

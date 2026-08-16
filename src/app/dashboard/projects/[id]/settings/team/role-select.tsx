@@ -1,15 +1,19 @@
 "use client";
 
+import { Select } from "@/components/ui/select";
+
 export function RoleSelect({ defaultValue }: { defaultValue: string }) {
   return (
-    <select
+    <Select
       name="role"
+      fieldSize="sm"
       defaultValue={defaultValue}
-      className="h-7 rounded-md border border-border bg-background px-2 text-xs"
+      // Native element on purpose: Radix has no `form` association, so this
+      // submit-on-change would have nothing to submit.
       onChange={(e) => e.currentTarget.form?.requestSubmit()}
     >
       <option value="REVIEWER">Reviewer</option>
       <option value="ADMIN">Admin</option>
-    </select>
+    </Select>
   );
 }

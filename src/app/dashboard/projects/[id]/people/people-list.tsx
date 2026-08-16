@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { SubmitButton } from "@/components/ui/submit-button";
 import { useActionFeedback } from "@/components/ui/use-action-feedback";
 import { StatusBadge } from "@/components/status-badge";
+import { Select } from "@/components/ui/select";
 import {
   removeManualDecision,
   getUserOverview,
@@ -115,17 +116,20 @@ export function PeopleList({
     <div className="space-y-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
         <div className="flex flex-1 gap-2 sm:max-w-md">
-          <select
-            value={searchField}
-            onChange={(e) => setSearchField(e.target.value as SearchField)}
-            className="h-9 rounded-md border border-border bg-background px-2 text-sm"
-            aria-label="Search field"
-          >
-            <option value="ALL">All fields</option>
-            <option value="login">Login</option>
-            <option value="reason">Reason</option>
-            <option value="reviewer">Reviewer</option>
-          </select>
+          {/* Select fills its container, so the container is what caps it and
+              leaves the search input the rest of the row. */}
+          <div className="w-32 shrink-0">
+            <Select
+              value={searchField}
+              onChange={(e) => setSearchField(e.target.value as SearchField)}
+              aria-label="Search field"
+            >
+              <option value="ALL">All fields</option>
+              <option value="login">Login</option>
+              <option value="reason">Reason</option>
+              <option value="reviewer">Reviewer</option>
+            </Select>
+          </div>
           <Input
             placeholder={
               searchField === "ALL"

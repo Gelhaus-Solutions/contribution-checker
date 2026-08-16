@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useActionFeedback } from "@/components/ui/use-action-feedback";
 import { StatusBadge } from "@/components/status-badge";
+import { Select } from "@/components/ui/select";
 import {
   getPrOverview,
   rescanPrQuality,
@@ -142,7 +143,7 @@ export function PrsList({
         </div>
         <div className="space-y-1">
           <label className="text-xs text-muted-foreground">Status</label>
-          <select
+          <Select
             value={filters.status}
             onChange={(e) =>
               setFilters((f) => ({
@@ -150,23 +151,21 @@ export function PrsList({
                 status: e.target.value as Filters["status"],
               }))
             }
-            className="h-9 w-full rounded-md border border-border bg-background px-2 text-sm"
           >
             <option value="ALL">All ({counts.total})</option>
             <option value="PENDING">Pending ({counts.pending})</option>
             <option value="APPROVED">Approved</option>
             <option value="BYPASSED">Bypassed</option>
             <option value="DENIED">Denied ({counts.denied})</option>
-          </select>
+          </Select>
         </div>
         <div className="space-y-1">
           <label className="text-xs text-muted-foreground">Repo</label>
-          <select
+          <Select
             value={filters.repoId}
             onChange={(e) =>
               setFilters((f) => ({ ...f, repoId: e.target.value }))
             }
-            className="h-9 w-full rounded-md border border-border bg-background px-2 text-sm"
           >
             <option value="ALL">All repos</option>
             {repos.map((r) => (
@@ -174,11 +173,11 @@ export function PrsList({
                 {r.fullName}
               </option>
             ))}
-          </select>
+          </Select>
         </div>
         <div className="space-y-1">
           <label className="text-xs text-muted-foreground">Closed by app</label>
-          <select
+          <Select
             value={
               filters.closedByApp === null
                 ? "ALL"
@@ -193,12 +192,11 @@ export function PrsList({
                 closedByApp: v === "ALL" ? null : v === "1",
               }));
             }}
-            className="h-9 w-full rounded-md border border-border bg-background px-2 text-sm"
           >
             <option value="ALL">Any</option>
             <option value="1">Yes</option>
             <option value="0">No</option>
-          </select>
+          </Select>
         </div>
         {qualityEnabled && (
           <>

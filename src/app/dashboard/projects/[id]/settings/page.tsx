@@ -8,6 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { SubmitButton } from "@/components/ui/submit-button";
 import { Badge } from "@/components/ui/badge";
+import { Select } from "@/components/ui/select";
 import {
   updateProjectSettings,
   addProjectWebhook,
@@ -365,15 +366,14 @@ export default async function ProjectSettings({
                     </div>
                     <div className="space-y-1">
                       <Label htmlFor={`kind-${ep.id}`}>Type</Label>
-                      <select
+                      <Select
                         id={`kind-${ep.id}`}
                         name="kind"
                         defaultValue={ep.kind}
-                        className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm"
                       >
                         <option value="generic">Generic JSON</option>
                         <option value="discord">Discord</option>
-                      </select>
+                      </Select>
                     </div>
                     <div className="space-y-1 md:col-span-2">
                       <Label htmlFor={`url-${ep.id}`}>URL</Label>
@@ -464,15 +464,14 @@ export default async function ProjectSettings({
             </div>
             <div className="space-y-1">
               <Label htmlFor="new-kind">Type</Label>
-              <select
+              <Select
                 id="new-kind"
                 name="kind"
                 defaultValue="generic"
-                className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm"
               >
                 <option value="generic">Generic JSON</option>
                 <option value="discord">Discord</option>
-              </select>
+              </Select>
             </div>
             <div className="space-y-1 md:col-span-2">
               <Label htmlFor="new-url">URL</Label>
