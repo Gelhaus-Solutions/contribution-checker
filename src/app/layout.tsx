@@ -8,10 +8,14 @@ import {
   setSentryUser,
   userFromSession,
 } from "@/lib/observability/sentry-user";
+import { BuiltBy } from "@/components/built-by";
 import { RuntimeEnvScript } from "./runtime-env";
 import { SentryUserClient } from "./sentry-user-client";
 
 export const metadata: Metadata = {
+  authors: [{ name: "Enno Gelhaus", url: "https://ennogelhaus.de" }],
+  creator: "Enno Gelhaus",
+  publisher: "Gelhaus Solutions",
   title: "Contribution Checker",
   description: "Gate PRs behind a contributor application form.",
 };
@@ -44,6 +48,7 @@ export default async function RootLayout({
     <>
       <SentryUserClient user={user} />
       {children}
+      <BuiltBy />
     </>
   );
 

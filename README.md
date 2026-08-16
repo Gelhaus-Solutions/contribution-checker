@@ -340,4 +340,7 @@ src/
 
 ## License
 
-MIT.
+AGPL-3.0-or-later. See [LICENSE](./LICENSE) for the full text and
+[COPYRIGHT](./COPYRIGHT) for the notice.
+
+Built and maintained by [Gelhaus Solutions](https://ennogelhaus.de) (Enno Gelhaus).

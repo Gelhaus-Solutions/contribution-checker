@@ -1,6 +1,13 @@
 {
   "name": "contribution-checker",
   "version": "0.1.0",
+  "author": "Gelhaus Solutions (Enno Gelhaus) <egelhaus@ennogelhaus.de> (https://ennogelhaus.de)",
+  "license": "AGPL-3.0-or-later",
+  "homepage": "https://ennogelhaus.de",
+  "repository": {
+    "type": "git",
+    "url": "https://gitlab.ennogelhaus.de/gelhaus-corp/contribution-checker.git"
+  },
   "private": true,
   "scripts": {
     "dev": "next dev",
