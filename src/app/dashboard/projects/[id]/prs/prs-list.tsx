@@ -8,6 +8,16 @@ import { useActionFeedback } from "@/components/ui/use-action-feedback";
 import { StatusBadge } from "@/components/status-badge";
 import { Select } from "@/components/ui/select";
 import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Alert } from "@/components/ui/alert";
+import { SkeletonRows } from "@/components/ui/skeleton";
+import {
   getPrOverview,
   rescanPrQuality,
   reEvaluatePrs,
@@ -408,14 +418,6 @@ function PrOverviewDialog({
     };
   }, [projectId, prCheckId]);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
   const onRescan = () => {
     if (!data || feedback.isAnyLoading) return;
     setFlash(null);
@@ -460,44 +462,35 @@ function PrOverviewDialog({
   };
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-      onClick={onClose}
-    >
-      <div
-        className="w-full max-w-3xl max-h-[90vh] overflow-y-auto rounded-md border border-border bg-background p-6 shadow-lg"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between gap-2">
-          <h2 className="text-lg font-semibold">
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent width="xl">
+        <DialogHeader>
+          <DialogTitle>
             {data ? (
               <a
                 href={data.ghUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="font-mono underline"
+                className="font-mono underline underline-offset-2"
               >
                 {data.repoFullName}#{data.prNumber}
               </a>
             ) : (
               "PR overview"
             )}
-          </h2>
-          <Button size="sm" variant="ghost" onClick={onClose}>
-            Close
-          </Button>
-        </div>
+          </DialogTitle>
+          <DialogDescription>
+            Gate decision, quality score and the actions available for this
+            pull request.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogBody>
+        {error && <Alert variant="destructive">Error: {error}</Alert>}
 
-        {error && (
-          <p className="mt-4 text-sm text-destructive">Error: {error}</p>
-        )}
-
-        {!data && !error && (
-          <p className="mt-4 text-sm text-muted-foreground">Loading…</p>
-        )}
+        {!data && !error && <SkeletonRows rows={4} />}
 
         {data && (
-          <div className="mt-4 space-y-5">
+          <div className="space-y-5">
             <section>
               <div className="flex flex-wrap items-center gap-2 text-sm">
                 <StatusBadge status={data.status} />
@@ -692,8 +685,9 @@ function PrOverviewDialog({
             </div>
           </div>
         )}
-      </div>
-    </div>
+        </DialogBody>
+      </DialogContent>
+    </Dialog>
   );
 }
 

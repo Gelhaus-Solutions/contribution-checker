@@ -10,6 +10,16 @@ import { useActionFeedback } from "@/components/ui/use-action-feedback";
 import { StatusBadge } from "@/components/status-badge";
 import { Select } from "@/components/ui/select";
 import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Alert } from "@/components/ui/alert";
+import { SkeletonRows } from "@/components/ui/skeleton";
+import {
   removeManualDecision,
   getUserOverview,
   setApplicationStatus,
@@ -413,47 +423,28 @@ function UserOverviewDialog({
       .catch((e) => setError(e instanceof Error ? e.message : String(e)));
   };
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
   // Mirror approveApplication's CLA gate so forcing APPROVED can't throw an
   // unhandled gate error. record-only CLAs (required=false) never block.
   const claBlocksApproval =
     !!data?.cla && data.cla.required && !data.cla.satisfied;
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-      onClick={onClose}
-    >
-      <div
-        className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-md border border-border bg-background p-6 shadow-lg"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between gap-2">
-          <h2 className="text-lg font-semibold">
-            <span className="font-mono">{ghLogin}</span>
-          </h2>
-          <Button size="sm" variant="ghost" onClick={onClose}>
-            Close
-          </Button>
-        </div>
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent width="lg">
+        <DialogHeader>
+          <DialogTitle className="font-mono">{ghLogin}</DialogTitle>
+          <DialogDescription>
+            Decisions, CLA status and pull request activity for this
+            contributor.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogBody>
+        {error && <Alert variant="destructive">Error: {error}</Alert>}
 
-        {error && (
-          <p className="mt-4 text-sm text-destructive">Error: {error}</p>
-        )}
-
-        {!data && !error && (
-          <p className="mt-4 text-sm text-muted-foreground">Loading…</p>
-        )}
+        {!data && !error && <SkeletonRows rows={4} />}
 
         {data && (
-          <div className="mt-4 space-y-5">
+          <div className="space-y-5">
             {data.application && (
               <section>
                 <h3 className="text-sm font-medium">Application</h3>
@@ -760,8 +751,9 @@ function UserOverviewDialog({
             </div>
           </div>
         )}
-      </div>
-    </div>
+        </DialogBody>
+      </DialogContent>
+    </Dialog>
   );
 }
 
