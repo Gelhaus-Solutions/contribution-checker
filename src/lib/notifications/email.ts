@@ -89,6 +89,18 @@ export function applyUrl(slug: string): string {
   return `${env.PUBLIC_BASE_URL.replace(/\/$/, "")}/p/${slug}`;
 }
 
+/**
+ * The public contributor explainer, linked from the PR comment a stranger sees
+ * when the bot closes their pull request.
+ *
+ * Once this ships, the URL is quoted in comments across other people's
+ * repositories indefinitely, so the route must not move, 404, or sit behind
+ * auth. It reads no database, which is what makes that safe.
+ */
+export function contributorInfoUrl(): string {
+  return `${env.PUBLIC_BASE_URL.replace(/\/$/, "")}/for-contributors`;
+}
+
 export function dashboardUrl(path = ""): string {
   return `${env.PUBLIC_BASE_URL.replace(/\/$/, "")}${path.startsWith("/") ? path : `/${path}`}`;
 }

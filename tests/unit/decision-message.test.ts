@@ -85,3 +85,65 @@ describe("buildDecisionMessage", () => {
     expect(msg).not.toContain("re-apply");
   });
 });
+
+describe("infoUrl (contributor explainer link)", () => {
+  const infoUrl = "https://checker.example.com/for-contributors";
+  const base = { projectName, applyUrl, ghLogin, infoUrl };
+
+  it("is added to the no-application message", () => {
+    // The one comment that reaches a stranger whose PR just disappeared.
+    const msg = buildDecisionMessage({
+      decision: { status: "PENDING", reason: "no-application" },
+      ...base,
+    });
+    expect(msg).toContain(infoUrl);
+  });
+
+  it("is added to the cooldown-elapsed message, which also invites applying", () => {
+    const msg = buildDecisionMessage({
+      decision: { status: "PENDING", reason: "cooldown-elapsed" },
+      ...base,
+    });
+    expect(msg).toContain(infoUrl);
+  });
+
+  it("is NOT added to the submitted message", () => {
+    // That reader has already applied, so a second link is noise.
+    const msg = buildDecisionMessage({
+      decision: { status: "PENDING", reason: "submitted" },
+      ...base,
+    });
+    expect(msg).not.toContain(infoUrl);
+  });
+
+  it("is NOT added to a denial", () => {
+    const msg = buildDecisionMessage({
+      decision: { status: "DENIED", reason: "spam", cooldownUntil: null },
+      ...base,
+    });
+    expect(msg).not.toContain(infoUrl);
+  });
+
+  it("is NOT added to the CLA or DCO gates", () => {
+    // These already carry a signing link or inline commands; a competing
+    // second link lowers the click rate on the one that matters.
+    for (const reason of ["cla_required", "cla_stale", "dco_missing"] as const) {
+      const msg = buildDecisionMessage({
+        decision: { status: "CHECK_REQUIRED", reason },
+        ...base,
+      });
+      expect(msg).not.toContain(infoUrl);
+    }
+  });
+
+  it("is omitted entirely when the caller does not pass it", () => {
+    const msg = buildDecisionMessage({
+      decision: { status: "PENDING", reason: "no-application" },
+      projectName,
+      applyUrl,
+      ghLogin,
+    });
+    expect(msg).not.toContain("for-contributors");
+    expect(msg).not.toContain("Not sure what just happened");
+  });
+});

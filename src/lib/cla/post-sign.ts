@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { env } from "@/lib/env";
-import { applyUrl as buildApplyUrl } from "@/lib/notifications/email";
+import { applyUrl as buildApplyUrl, contributorInfoUrl } from "@/lib/notifications/email";
 import {
   decideForRepo,
   decisionRepoInclude,
@@ -435,6 +435,7 @@ export async function reapplyClaGateForApprovedAuthor(args: {
             applyUrl,
             ghLogin: check.authorGhLogin,
             claUrl,
+            infoUrl: contributorInfoUrl(),
           });
           if (body) {
             await commentOnPr(ref, check.prNumber, body).catch(() => undefined);

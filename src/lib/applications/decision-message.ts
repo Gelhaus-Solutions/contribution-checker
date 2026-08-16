@@ -40,18 +40,35 @@ export function buildDecisionMessage(args: {
    * the CLA is signed), so it's surfaced on GitHub up front.
    */
   needsCla?: boolean;
+  /**
+   * Link to the contributor explainer page (`${base}/for-contributors`).
+   *
+   * Appended to the "no application on file" message only. That is the one
+   * that reaches a stranger whose PR just disappeared, where the only other
+   * thing on offer is a form they did not ask to fill in. The other branches
+   * deliberately do not get it: the "submitted" reader has already been
+   * through it, a denial should stay short, the CLA messages already carry a
+   * signing link that must not compete with a second one, and the DCO message
+   * is self-contained.
+   *
+   * Passed in rather than read from env so this function stays pure.
+   */
+  infoUrl?: string;
 }): string | null {
   const { decision, projectName, applyUrl, ghLogin } = args;
   const claUrl = args.claUrl ?? `${applyUrl}/cla`;
   if (decision.status === "PENDING") {
-    const base =
-      decision.reason === "submitted"
-        ? `Hi @${ghLogin}! Your application for **${projectName}** is awaiting review. ` +
-          `We'll reopen this PR once it's approved. Status: ${applyUrl}`
-        : // "no-application" or "cooldown-elapsed" → invite the user to apply.
-          `Hi @${ghLogin}! Thanks for the PR. ` +
-          `Contributions to **${projectName}** are gated behind an application. ` +
-          `Please apply at ${applyUrl} and we'll reopen this PR once you're approved.`;
+    const submitted = decision.reason === "submitted";
+    let base = submitted
+      ? `Hi @${ghLogin}! Your application for **${projectName}** is awaiting review. ` +
+        `We'll reopen this PR once it's approved. Status: ${applyUrl}`
+      : // "no-application" or "cooldown-elapsed" → invite the user to apply.
+        `Hi @${ghLogin}! Thanks for the PR. ` +
+        `Contributions to **${projectName}** are gated behind an application. ` +
+        `Please apply at ${applyUrl} and we'll reopen this PR once you're approved.`;
+    if (!submitted && args.infoUrl) {
+      base += `\n\nNot sure what just happened? ${args.infoUrl}`;
+    }
     return args.needsCla ? base + claPendingReminderNote(claUrl) : base;
   }
   if (decision.status === "DENIED") {

@@ -19,6 +19,7 @@ import { runQualityFromContext } from "@/lib/quality/run";
 import { computeScore } from "@/lib/quality/score";
 import { parseQualityConfig } from "@/lib/quality/registry";
 import type { FetchedPrContext } from "@/lib/quality/fetch";
+import { contributorInfoUrl } from "@/lib/notifications/email";
 
 const fileSchema = z.object({
   filename: z.string(),
@@ -252,6 +253,9 @@ export async function computeCiCheckPr(input: {
     applyUrl,
     ghLogin: body.pull_request.user.login,
     claUrl,
+    // Must match App mode: otherwise the same project produces different
+    // comments depending on which path ingested the event.
+    infoUrl: contributorInfoUrl(),
   });
 
   let labels: { add: string[]; remove: string[] } | null = null;
