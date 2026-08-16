@@ -5,6 +5,7 @@ import { unreadCount } from "@/lib/notifications/inbox";
 import { SubmitButton } from "@/components/ui/submit-button";
 import { BrandMark } from "@/components/brand-mark";
 import { UserCluster } from "@/components/user-cluster";
+import { ThemeToggle } from "@/components/theme-toggle";
 
 export async function SiteHeader() {
   const session = await auth();
@@ -24,9 +25,16 @@ export async function SiteHeader() {
           </span>
         </Link>
         <nav className="flex items-center gap-3 text-sm">
+          {/* Outside the session branch on purpose: signed-out visitors and
+              deployments with no Hexclave config (where UserCluster renders
+              nothing) still get a theme switcher. */}
+          <ThemeToggle />
           {session?.user ? (
             <>
-              <Link href="/dashboard" className="hover:underline">
+              <Link
+                href="/dashboard"
+                className="text-muted-foreground transition-colors hover:text-foreground"
+              >
                 Dashboard
               </Link>
               {/* Inbox (bell), account settings, Admin (super-admins), and sign

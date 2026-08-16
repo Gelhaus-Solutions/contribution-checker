@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { cookies } from "next/headers";
 import { StackProvider, StackTheme } from "@hexclave/next";
 import { GeistSans } from "geist/font/sans";
 import { GeistMono } from "geist/font/mono";
@@ -14,6 +15,7 @@ import {
 import { BuiltBy } from "@/components/built-by";
 import { RuntimeEnvScript } from "./runtime-env";
 import { SentryUserClient } from "./sentry-user-client";
+import { ThemeScript, THEME_COOKIE } from "./theme-script";
 
 export const metadata: Metadata = {
   authors: [{ name: "Enno Gelhaus", url: "https://ennogelhaus.de" }],
@@ -47,6 +49,12 @@ export default async function RootLayout({
   // deploys and the build phase don't require a live instance.
   const stackApp = env.stackConfigured ? await getStackServerApp() : null;
 
+  // Free: the app is already force-dynamic, so reading a cookie costs nothing
+  // and it keeps the theme server-readable. Stamping "dark" here is what makes
+  // a pinned dark theme flash-free; "system" is resolved by ThemeScript before
+  // paint, which is why <html> needs suppressHydrationWarning.
+  const theme = (await cookies()).get(THEME_COOKIE)?.value;
+
   const content = (
     <>
       <SentryUserClient user={user} />
@@ -61,9 +69,15 @@ export default async function RootLayout({
     // and the image is built in environments that may have no network.
     <html
       lang="en"
-      className={cn(GeistSans.variable, GeistMono.variable)}
+      suppressHydrationWarning
+      className={cn(
+        GeistSans.variable,
+        GeistMono.variable,
+        theme === "dark" && "dark",
+      )}
     >
       <head>
+        <ThemeScript />
         <RuntimeEnvScript />
       </head>
       <body className="min-h-screen font-sans antialiased">
