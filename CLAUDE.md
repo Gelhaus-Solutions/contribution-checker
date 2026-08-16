@@ -13,13 +13,19 @@ application form. When an unapproved user opens a PR on a linked repo:
 2. If approved/bypassed, the PR is left open and labeled.
 3. If pending (no application), the PR is closed with a comment linking to the
    apply page, labeled "pending".
-4. If denied, the PR is closed with the denial reason and a "denied" label.
-5. A GitHub Check Run is published mirroring the decision (success /
-   action_required / failure / skipped) so branch protection sees the gate.
-6. If PR Quality scoring is enabled, a 0–100% heuristic score is computed and
+4. If denied, the PR is closed with a "denied" label. The denial reason is
+   **not** posted on GitHub; the applicant reads it on their status page.
+5. If a CLA or DCO gate fires (`CHECK_REQUIRED`), the PR is **left open**, a
+   comment explains what to sign or add, and the check fails.
+6. A GitHub Check Run is published mirroring the decision (success /
+   action_required / failure) so branch protection sees the gate. There is no
+   `skipped` conclusion: the fourth state is "no check published at all", when
+   `checksEnabled` is false, the payload has no head SHA, or the installation
+   lacks `checks:write`.
+7. If PR Quality scoring is enabled, a 0–100% heuristic score is computed and
    stored. Scores are admin-only by default, with a public warning comment when
    the score falls below the project's threshold.
-7. When the application is later approved, all closed-by-app PRs from that user
+8. When the application is later approved, all closed-by-app PRs from that user
    are reopened.
 
 The bot runs in two modes per repo:
@@ -43,8 +49,13 @@ The bot runs in two modes per repo:
 ## Critical files
 
 Decision pipeline:
-- `src/lib/applications/decide-pr.ts`: precedence is disable switch → manual →
-  bypass → collaborator → application
+- `src/lib/applications/decide-pr.ts`: precedence is repo active → disable
+  switch → manual **DENIED** → bypass list → manual **APPROVED** →
+  collaborator → application, then the CLA layer on top. Note the asymmetry:
+  a manual denial short-circuits *before* the bypass list, while a manual
+  approval is evaluated *after* it, which is what makes bots exempt from the
+  CLA. Returns six statuses: `APPROVED`, `BYPASSED`, `PENDING`,
+  `CHECK_REQUIRED`, `DENIED`, `IGNORED`.
 - `src/lib/github/webhook.ts`: App webhook entrypoint; orchestrates close/
   label/comment + Check Run + Quality
 - `src/app/api/github/webhook/route.ts`: signature verification + dispatch
@@ -113,6 +124,36 @@ Audit, notifications, jobs:
 - **Never add AI attribution to commits.** Do not include a `Co-Authored-By:
   Claude` trailer, any other AI/Claude co-author, or a "Generated with" line in
   commit messages or PR descriptions.
+
+## UI and design system
+
+- **Tokens live in `src/app/globals.css`.** OKLCH values under `:root` and
+  `.dark`, exposed to Tailwind through `@theme inline`. Because utilities
+  compile to `var(--x)`, palette values can change without touching a single
+  className. Add a token in both blocks *and* in `@theme inline`.
+- **The accent is cobalt** (OKLCH hue 256). It is for links, focus rings, the
+  primary button and active nav only. Green/amber/red are reserved for meaning.
+- **Use the `-strong` label tokens on tonal surfaces.** `bg-success/12` with
+  `text-success` fails WCAG AA; `text-success-strong` is the same hue moved to
+  a lightness that passes. Badge and Alert already do this.
+- **Dark mode is a `.dark` class**, set from the `cc-theme` cookie by the root
+  layout and resolved for `system` by `src/app/theme-script.tsx` before paint.
+  There is no `@media (prefers-color-scheme)` block; do not add one.
+- **Status strings go through `src/lib/ui/status.ts`** (`<StatusBadge>`), and
+  dates through `src/lib/ui/format.ts`. Do not write a local variant map or
+  `.toISOString().slice(0, 10)` in a page. Both modules are JSX-free so they
+  stay testable under the node-environment vitest config.
+- **Selects and checkboxes stay native.** Nearly every one is inside a
+  `<form action={serverAction}>` or the public application form, which must
+  work with JS disabled. `ui/switch` is Radix and is only for booleans that
+  apply immediately.
+- **Marketing pages generate their artifacts from the real modules**:
+  `buildDecisionMessage`, `buildDecisionCheckPayload` and `ALL_HEURISTICS`.
+  Do not retype a bot comment or a heuristic list into a page; if the copy
+  changes, the page should follow for free.
+- `/for-contributors` is **load-bearing**: its URL is quoted in PR comments
+  across other people's repositories. It must not move, 404, require auth, or
+  depend on the database.
 
 ## Auth & roles
 
