@@ -1,7 +1,10 @@
 import type { Metadata } from "next";
 import { StackProvider, StackTheme } from "@hexclave/next";
+import { GeistSans } from "geist/font/sans";
+import { GeistMono } from "geist/font/mono";
 import "./globals.css";
 import { auth } from "@/auth";
+import { cn } from "@/lib/cn";
 import { getStackServerApp } from "@/lib/stack";
 import { env } from "@/lib/env";
 import {
@@ -53,11 +56,17 @@ export default async function RootLayout({
   );
 
   return (
-    <html lang="en">
+    // Geist ships its woff2 inside the package rather than fetching from a CDN,
+    // which is what this deployment needs: the CSP is `font-src 'self' data:`,
+    // and the image is built in environments that may have no network.
+    <html
+      lang="en"
+      className={cn(GeistSans.variable, GeistMono.variable)}
+    >
       <head>
         <RuntimeEnvScript />
       </head>
-      <body className="min-h-screen antialiased">
+      <body className="min-h-screen font-sans antialiased">
         {stackApp ? (
           <StackProvider app={stackApp}>
             <StackTheme>{content}</StackTheme>
