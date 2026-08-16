@@ -17,6 +17,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SearchInput } from "@/components/ui/search-input";
 import { parsePageParams, type SearchParamRecord } from "@/lib/pagination";
+import { CodeBlock } from "@/components/code-block";
 import { addRepoByName, removeRepo } from "./actions";
 
 function ciGateYaml(baseUrl: string, slug: string): string {
@@ -343,23 +344,15 @@ export default async function ProjectRepos({
             <li>Push. PR gating activates on the next opened PR.</li>
           </ol>
 
-          <div className="space-y-2">
-            <div className="text-xs font-medium text-muted-foreground">
-              .github/workflows/contribution-check-gate.yml
-            </div>
-            <pre className="overflow-x-auto rounded-md border bg-muted p-3 text-xs">
-              <code>{gateYaml}</code>
-            </pre>
-          </div>
+          <CodeBlock
+            filename=".github/workflows/contribution-check-gate.yml"
+            code={gateYaml}
+          />
 
-          <div className="space-y-2">
-            <div className="text-xs font-medium text-muted-foreground">
-              .github/workflows/contribution-check-reconcile.yml
-            </div>
-            <pre className="overflow-x-auto rounded-md border bg-muted p-3 text-xs">
-              <code>{reconcileYaml}</code>
-            </pre>
-          </div>
+          <CodeBlock
+            filename=".github/workflows/contribution-check-reconcile.yml"
+            code={reconcileYaml}
+          />
 
           <p className="text-xs text-muted-foreground">
             Reopen-on-approval has up to ~10 minutes of latency (matches the

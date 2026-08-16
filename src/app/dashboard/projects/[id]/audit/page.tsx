@@ -13,6 +13,21 @@ import { SearchInput } from "@/components/ui/search-input";
 import { Pagination } from "@/components/ui/pagination";
 import { parsePageParams, type SearchParamRecord } from "@/lib/pagination";
 import { formatDateTimeSeconds } from "@/lib/ui/format";
+import { CodeBlock } from "@/components/code-block";
+
+/**
+ * Pretty-print an audit payload for display. The column is a plain JSON string
+ * with no schema, so a malformed row must not take the page down: this used to
+ * be a bare JSON.parse inside JSX, which throws during render.
+ */
+function prettyPayload(payload: string): string {
+  try {
+    return JSON.stringify(JSON.parse(payload), null, 2);
+  } catch {
+    return payload;
+  }
+}
+
 
 export default async function AuditLog({
   params,
@@ -88,9 +103,12 @@ export default async function AuditLog({
                   </time>
                 </div>
                 {e.payload !== "{}" && (
-                  <pre className="mt-2 overflow-x-auto rounded bg-muted px-3 py-2 text-xs">
-                    {JSON.stringify(JSON.parse(e.payload), null, 2)}
-                  </pre>
+                  <CodeBlock
+                    className="mt-2"
+                    language="payload"
+                    maxHeight="16rem"
+                    code={prettyPayload(e.payload)}
+                  />
                 )}
               </li>
             ))}

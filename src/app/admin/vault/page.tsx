@@ -16,6 +16,7 @@ import {
   VaultResolutionError,
 } from "@/lib/vault/resolver";
 import { getSecretStatus } from "@/lib/vault/status";
+import { CodeBlock } from "@/components/code-block";
 
 export const dynamic = "force-dynamic";
 
@@ -183,7 +184,7 @@ export default async function VaultStatusPage() {
             <CardTitle className="text-base">Env example</CardTitle>
           </CardHeader>
           <CardContent>
-            <pre className="overflow-x-auto rounded bg-muted px-3 py-2 text-xs">{`# Vault connection
+            <CodeBlock language=".env" code={`# Vault connection
 VAULT_ADDR="https://vault.example.com"
 VAULT_AUTH_METHOD="approle"           # or "token"
 VAULT_APPROLE_ROLE_ID="..."
@@ -206,7 +207,7 @@ VAULT_GITHUB_APP_CLIENT_ID_PATH="secret/data/cc/github#client_id"
 VAULT_GITHUB_APP_CLIENT_SECRET_PATH="secret/data/cc/github#client_secret"
 VAULT_SMTP_USER_PATH="secret/data/cc/smtp#user"
 VAULT_SMTP_PASS_PATH="secret/data/cc/smtp#password"
-`}</pre>
+`} />
           </CardContent>
         </Card>
       </main>

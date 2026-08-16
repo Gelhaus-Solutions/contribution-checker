@@ -11,6 +11,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { env } from "@/lib/env";
 import { getAppSlug } from "@/lib/github/app";
+import { CodeBlock } from "@/components/code-block";
 
 // Public on purpose: the URLs aren't sensitive, and operators need to see
 // them BEFORE sign-in is configured (chicken-and-egg in single-App mode).
@@ -100,11 +101,11 @@ export default async function GitHubAppSetup() {
               </li>
               <li>
                 Fill in your <code>.env</code>:
-                <pre className="mt-2 overflow-x-auto rounded bg-muted px-3 py-2 text-xs">{`STACK_PROJECT_ID="<project id>"
+                <CodeBlock className="mt-2" language=".env" code={`STACK_PROJECT_ID="<project id>"
 STACK_PUBLISHABLE_CLIENT_KEY="<publishable client key>"
 STACK_SECRET_SERVER_KEY="<secret server key>"   # may live in Vault
 STACK_API_URL="${stackBackend}"
-STACK_WEBHOOK_SECRET="<svix signing secret>"`}</pre>
+STACK_WEBHOOK_SECRET="<svix signing secret>"`} />
               </li>
               <li>
                 Migrate existing users:{" "}
@@ -215,7 +216,7 @@ STACK_WEBHOOK_SECRET="<svix signing secret>"`}</pre>
               </li>
               <li>
                 Fill in your <code>.env</code>:
-                <pre className="mt-2 overflow-x-auto rounded bg-muted px-3 py-2 text-xs">{`GITHUB_APP_ID="<the App ID>"
+                <CodeBlock className="mt-2" language=".env" code={`GITHUB_APP_ID="<the App ID>"
 GITHUB_APP_SLUG="<the slug: last segment of the app's URL>"
 GITHUB_APP_CLIENT_ID="<Client ID>"
 GITHUB_APP_CLIENT_SECRET="<Client secret>"
@@ -224,7 +225,7 @@ GITHUB_APP_WEBHOOK_SECRET="<the random secret you generated>"
 GITHUB_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\\n...\\n-----END RSA PRIVATE KEY-----\\n"
 
 # These Client ID/Secret are also what you paste into Hexclave's GitHub
-# sign-in provider (see the Hexclave card above).`}</pre>
+# sign-in provider (see the Hexclave card above).`} />
               </li>
               <li>
                 Restart the server. Confirm this page shows the green
