@@ -9,8 +9,15 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
       type={type}
       ref={ref}
       className={cn(
-        "flex h-9 w-full rounded-md border border-border bg-background px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
-        className
+        // bg-background rather than bg-card: on a card the field reads as
+        // recessed, which is what tells you it is an input before you click it.
+        "flex h-8 w-full rounded-md border border-input bg-background px-2.5 py-1 text-sm shadow-xs transition-colors",
+        "placeholder:text-muted-foreground",
+        "focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background",
+        "aria-invalid:border-destructive aria-invalid:ring-destructive/25",
+        "disabled:cursor-not-allowed disabled:opacity-50",
+        "file:border-0 file:bg-transparent file:text-sm file:font-medium",
+        className,
       )}
       {...props}
     />

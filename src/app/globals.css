@@ -49,6 +49,16 @@
     --success-foreground: oklch(0.985 0 0);
     --warning: oklch(0.689 0.162 69);
     --warning-foreground: oklch(0.208 0.04 266);
+
+    /* Label colors for tonal surfaces (badges, alerts), where the fill is a
+       10-15% tint of the same hue. The base semantic colors are tuned to carry
+       white on a solid fill, so on a pale tint they land near 2.5:1 and fail
+       AA. These are the same hues pushed to a lightness that clears 4.5:1
+       against their own tint. */
+    --primary-strong: oklch(0.478 0.191 256);
+    --destructive-strong: oklch(0.505 0.191 27);
+    --success-strong: oklch(0.448 0.106 154);
+    --warning-strong: oklch(0.475 0.105 62);
   }
 
   /* Written once, not duplicated under a media query. The server stamps this
@@ -88,6 +98,13 @@
     --success-foreground: oklch(0.182 0.014 259);
     --warning: oklch(0.769 0.165 70);
     --warning-foreground: oklch(0.182 0.014 259);
+
+    /* Same role as in light mode, mirrored: on a dark card the tint is dark,
+       so the label has to move up in lightness rather than down. */
+    --primary-strong: oklch(0.762 0.132 256);
+    --destructive-strong: oklch(0.763 0.148 25);
+    --success-strong: oklch(0.792 0.145 159);
+    --warning-strong: oklch(0.849 0.14 76);
   }
 
   /* Tailwind v4 dropped v3's preflight rule that defaulted every border to the
@@ -161,6 +178,10 @@
   --color-success-foreground: var(--success-foreground);
   --color-warning: var(--warning);
   --color-warning-foreground: var(--warning-foreground);
+  --color-primary-strong: var(--primary-strong);
+  --color-destructive-strong: var(--destructive-strong);
+  --color-success-strong: var(--success-strong);
+  --color-warning-strong: var(--warning-strong);
 
   --font-sans:
     var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system, "Segoe UI",
