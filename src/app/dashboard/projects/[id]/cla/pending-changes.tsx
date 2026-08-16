@@ -13,6 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { SubmitButton } from "@/components/ui/submit-button";
 import { Markdown } from "@/components/markdown";
+import { formatDateTime } from "@/lib/ui/format";
 import { approvePendingChange, rejectPendingChange, getClaVersionBody } from "./actions";
 import {
   PriorVersionResignList,
@@ -71,7 +72,7 @@ function PendingCard({
                 ? ` · ${item.detectedCommitSha.slice(0, 10)}`
                 : ""}
               {" · detected "}
-              {item.detectedAt.replace("T", " ").slice(0, 16)}
+              {formatDateTime(item.detectedAt)}
             </CardDescription>
           </div>
         </div>

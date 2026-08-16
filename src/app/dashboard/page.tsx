@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { StatusBadge } from "@/components/status-badge";
+import { formatDate } from "@/lib/ui/format";
 import {
   listAppliedProjectsForUser,
   listProjectsForUser,
@@ -116,7 +117,7 @@ export default async function DashboardHome() {
                       </Link>
                       <div className="flex items-center gap-3">
                         <span className="text-xs text-muted-foreground">
-                          {app.createdAt.toISOString().slice(0, 10)}
+                          {formatDate(app.createdAt)}
                         </span>
                         <StatusBadge status={app.status} />
                       </div>

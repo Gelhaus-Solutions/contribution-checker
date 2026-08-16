@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { fetchRecentNotifications } from "@/app/dashboard/notifications/actions";
 import type { RecentNotification } from "@/lib/notifications/inbox";
+import { formatDateTime } from "@/lib/ui/format";
 
 /**
  * Header notification bell: unread badge + a dropdown preview of the most recent
@@ -67,7 +68,7 @@ export function NotificationBell({ initialUnread }: { initialUnread: number }) {
                     <div className="flex items-center justify-between gap-2">
                       <span className="font-medium">{n.label}</span>
                       <time className="shrink-0 text-xs text-muted-foreground">
-                        {n.createdAt.replace("T", " ").slice(0, 16)}
+                        {formatDateTime(n.createdAt)}
                       </time>
                     </div>
                   </>

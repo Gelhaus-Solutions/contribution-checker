@@ -1,6 +1,7 @@
 import { Badge } from "@/components/ui/badge";
 import { Markdown } from "@/components/markdown";
 import { SubmitButton } from "@/components/ui/submit-button";
+import { formatDateTime } from "@/lib/ui/format";
 import { dismissReviewAction } from "../actions";
 
 export type ReviewListItem = {
@@ -70,7 +71,7 @@ export function ReviewsList({
                 </Badge>
                 <span className="font-medium">@{r.author.ghLogin ?? "unknown"}</span>
                 <span className="text-muted-foreground">
-                  {r.submittedAt.toISOString().replace("T", " ").slice(0, 16)}
+                  {formatDateTime(r.submittedAt)}
                 </span>
                 {r.visibility === "APPLICANT" && !isDismissed && (
                   <Badge variant="warning" className="text-[10px]">

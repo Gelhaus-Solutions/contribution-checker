@@ -21,11 +21,8 @@ import {
   type SearchParamRecord,
 } from "@/lib/pagination";
 import { parseFormSchema } from "@/lib/applications/schema";
+import { formatDateTimeSeconds } from "@/lib/ui/format";
 import { revokeSignature, grantWaiver, revokeWaiver } from "../actions";
-
-function fmt(d: Date): string {
-  return d.toISOString().replace("T", " ").slice(0, 19);
-}
 
 /** Safely parse the customFields JSON column into [id, value] entries. */
 function parseCustomAnswers(json: string | null): [string, unknown][] {
@@ -213,7 +210,7 @@ export default async function ClaSignatureLog({
                       )}
                     </div>
                     <time className="text-xs text-muted-foreground">
-                      {fmt(s.signedAt)}
+                      {formatDateTimeSeconds(s.signedAt)}
                     </time>
                   </div>
                   <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
@@ -413,7 +410,7 @@ export default async function ClaSignatureLog({
                       {w.reason}
                     </span>
                     <span className="text-xs text-muted-foreground">
-                      · {fmt(w.grantedAt)}
+                      · {formatDateTimeSeconds(w.grantedAt)}
                     </span>
                   </div>
                   {w.status === "ACTIVE" && (
@@ -468,7 +465,7 @@ export default async function ClaSignatureLog({
                       </span>
                     </div>
                     <time className="text-xs text-muted-foreground">
-                      {fmt(e.createdAt)}
+                      {formatDateTimeSeconds(e.createdAt)}
                     </time>
                   </div>
                 </li>

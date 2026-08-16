@@ -17,6 +17,7 @@ import { SearchInput } from "@/components/ui/search-input";
 import { Pagination } from "@/components/ui/pagination";
 import { parsePageParams, type SearchParamRecord } from "@/lib/pagination";
 import { parseFormSchema } from "@/lib/applications/schema";
+import { formatDate } from "@/lib/ui/format";
 import { createTemplate, deleteTemplate } from "./actions";
 
 export default async function TemplatesPage({
@@ -112,7 +113,7 @@ export default async function TemplatesPage({
                           <div className="font-medium">{t.name}</div>
                           <div className="text-xs text-muted-foreground">
                             {fields.length} field{fields.length === 1 ? "" : "s"} ·{" "}
-                            {t.createdAt.toISOString().slice(0, 10)}
+                            {formatDate(t.createdAt)}
                           </div>
                         </div>
                         <div className="flex gap-2">

@@ -12,6 +12,7 @@ import { SubmitButton } from "@/components/ui/submit-button";
 import { SearchInput } from "@/components/ui/search-input";
 import { Pagination } from "@/components/ui/pagination";
 import { parsePageParams, type SearchParamRecord } from "@/lib/pagination";
+import { formatDateTime } from "@/lib/ui/format";
 import { markAllReadAction } from "./actions";
 
 export default async function NotificationsPage({
@@ -84,10 +85,7 @@ export default async function NotificationsPage({
                           {KIND_LABELS[n.kind] ?? n.kind}
                         </div>
                         <time className="text-xs text-muted-foreground">
-                          {n.createdAt
-                            .toISOString()
-                            .replace("T", " ")
-                            .slice(0, 16)}
+                          {formatDateTime(n.createdAt)}
                         </time>
                       </div>
                       <div className="mt-1 text-muted-foreground">

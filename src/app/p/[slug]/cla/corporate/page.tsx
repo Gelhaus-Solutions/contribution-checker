@@ -17,6 +17,7 @@ import { SignCclaForm } from "./sign-ccla-form";
 import { RosterManager, type RosterMember } from "./roster";
 import { signCcla, addRosterMembers, revokeRosterMember } from "../actions";
 import { parseFormSchema, type FormSchema } from "@/lib/applications/schema";
+import { formatDate } from "@/lib/ui/format";
 
 export default async function CorporateClaPage({
   params,
@@ -165,7 +166,7 @@ async function CorporateSurface({
           ghId: m.ghId,
           status: m.status,
           disputeNote: m.disputeNote,
-          addedAt: m.addedAt.toISOString().slice(0, 10),
+          addedAt: formatDate(m.addedAt),
         }));
         return (
           <Card key={c.id}>

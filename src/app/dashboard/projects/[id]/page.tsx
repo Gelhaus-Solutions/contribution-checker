@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { StatusBadge } from "@/components/status-badge";
+import { formatDate } from "@/lib/ui/format";
 
 
 export default async function ProjectOverview({
@@ -65,7 +66,7 @@ export default async function ProjectOverview({
                     <span className="font-medium">{a.user.ghLogin ?? "(unknown)"}</span>
                     <div className="flex items-center gap-3">
                       <span className="text-xs text-muted-foreground">
-                        {a.createdAt.toISOString().slice(0, 10)}
+                        {formatDate(a.createdAt)}
                       </span>
                       <StatusBadge status={a.status} />
                     </div>

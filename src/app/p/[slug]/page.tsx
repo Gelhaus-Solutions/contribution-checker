@@ -23,6 +23,7 @@ import { getClaStatus } from "@/lib/cla/status";
 import type { FormValue } from "@/components/form-renderer";
 import { replyToCommentAction } from "@/app/dashboard/projects/[id]/applications/[appId]/actions";
 import { StatusBadge } from "@/components/status-badge";
+import { formatDate } from "@/lib/ui/format";
 
 
 export default async function PublicProjectPage({
@@ -329,7 +330,7 @@ function ApplicantReviewBlock({
         </Badge>
         <span className="font-medium">@{review.author.ghLogin ?? "reviewer"}</span>
         <span className="text-muted-foreground">
-          {review.submittedAt.toISOString().slice(0, 10)}
+          {formatDate(review.submittedAt)}
         </span>
       </div>
       {review.body && <Markdown source={review.body} />}
@@ -348,7 +349,7 @@ function ApplicantReviewBlock({
               <div className="rounded-md border border-border bg-background p-2 text-sm">
                 <div className="mb-1 text-xs text-muted-foreground">
                   @{c.author.ghLogin ?? "reviewer"} ·{" "}
-                  {c.createdAt.toISOString().slice(0, 10)}
+                  {formatDate(c.createdAt)}
                 </div>
                 <Markdown source={c.body} />
               </div>
@@ -359,7 +360,7 @@ function ApplicantReviewBlock({
                 >
                   <div className="mb-1 text-xs text-muted-foreground">
                     @{rp.author.ghLogin ?? "you"} ·{" "}
-                    {rp.createdAt.toISOString().slice(0, 10)}
+                    {formatDate(rp.createdAt)}
                   </div>
                   <Markdown source={rp.body} />
                 </div>
@@ -493,7 +494,7 @@ function deriveApplicantView(
       info: (
         <p className="text-sm">
           Your application was submitted on{" "}
-          {existing.createdAt.toISOString().slice(0, 10)} and is awaiting review.
+          {formatDate(existing.createdAt)} and is awaiting review.
         </p>
       ),
       canApply: false,
@@ -588,7 +589,7 @@ function deriveApplicantView(
           {appealRejectedNode}
           <p>
             You can re-apply on{" "}
-            {existing.cooldownUntil.toISOString().slice(0, 10)}.
+            {formatDate(existing.cooldownUntil)}.
           </p>
         </div>
       ),

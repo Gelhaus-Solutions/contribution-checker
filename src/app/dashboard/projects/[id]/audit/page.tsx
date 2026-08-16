@@ -12,6 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { SearchInput } from "@/components/ui/search-input";
 import { Pagination } from "@/components/ui/pagination";
 import { parsePageParams, type SearchParamRecord } from "@/lib/pagination";
+import { formatDateTimeSeconds } from "@/lib/ui/format";
 
 export default async function AuditLog({
   params,
@@ -83,7 +84,7 @@ export default async function AuditLog({
                     </span>
                   </div>
                   <time className="text-xs text-muted-foreground">
-                    {e.createdAt.toISOString().replace("T", " ").slice(0, 19)}
+                    {formatDateTimeSeconds(e.createdAt)}
                   </time>
                 </div>
                 {e.payload !== "{}" && (

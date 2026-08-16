@@ -13,6 +13,7 @@ import { SearchInput } from "@/components/ui/search-input";
 import { Pagination } from "@/components/ui/pagination";
 import { parsePageParams, type SearchParamRecord } from "@/lib/pagination";
 import { StatusBadge } from "@/components/status-badge";
+import { formatDate } from "@/lib/ui/format";
 
 const STATUS_OPTIONS = [
   { value: "SUBMITTED", label: "Submitted" },
@@ -142,7 +143,7 @@ export default async function ProjectApplications({
                   </div>
                   <div className="flex items-center gap-3">
                     <span className="text-xs text-muted-foreground">
-                      {a.createdAt.toISOString().slice(0, 10)}
+                      {formatDate(a.createdAt)}
                     </span>
                     <StatusBadge status={a.status} />
                   </div>
