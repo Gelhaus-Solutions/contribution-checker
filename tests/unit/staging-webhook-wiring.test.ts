@@ -104,6 +104,12 @@ function payload(overrides: Record<string, unknown> = {}) {
   };
 }
 
+/** The default payload with a different PR number, for fuse isolation. */
+function prNumbered(number: number) {
+  const p = payload();
+  return { ...p, pull_request: { ...p.pull_request, number } };
+}
+
 beforeEach(() => {
   for (const fn of [
     repoFindUnique,
@@ -127,7 +133,7 @@ beforeEach(() => {
 
 describe("staging routing wiring in handlePullRequestEvent", () => {
   it("retargets a PR opened against the default branch", async () => {
-    await handlePullRequestEvent(payload() as never);
+    const res = await handlePullRequestEvent(payload() as never);
     expect(setPullRequestBase).toHaveBeenCalledWith(
       expect.anything(),
       42,
@@ -136,6 +142,38 @@ describe("staging routing wiring in handlePullRequestEvent", () => {
     expect(signalStagingBatch).toHaveBeenCalledWith(
       expect.objectContaining({ repoId: "repo1", reason: "pr_retargeted" }),
     );
+    expect(res.staging).toEqual({ retargeted: true, outcome: "retargeted" });
+  });
+
+  // gitroomhq/postiz-app#1908: the same branch had already been merged into
+  // staging by an earlier PR, so GitHub refused the base change and the PR
+  // stayed on main, where merging it bypassed the batch entirely. Nothing can
+  // retarget it, but the outcome must be named rather than a bare stack trace.
+  // Distinct PR numbers: the ping-pong fuse is keyed per PR and module-level,
+  // so reusing 42 would spend the budget the later tests rely on.
+  it("names the case where the head branch is already merged into staging", async () => {
+    setPullRequestBase.mockRejectedValueOnce(
+      Object.assign(
+        new Error(
+          `Validation Failed: {"message":"There are no new commits between ` +
+            `base branch 'staging' and head branch 'feat/x'"}`,
+        ),
+        { status: 422 },
+      ),
+    );
+    const res = await handlePullRequestEvent(prNumbered(43) as never);
+    expect(res.staging).toEqual({
+      retargeted: false,
+      outcome: "already_in_staging",
+    });
+  });
+
+  it("reports an unexpected retarget failure as an error, not a skip", async () => {
+    setPullRequestBase.mockRejectedValueOnce(
+      Object.assign(new Error("boom"), { status: 500 }),
+    );
+    const res = await handlePullRequestEvent(prNumbered(44) as never);
+    expect(res.staging).toEqual({ retargeted: false, outcome: "error" });
   });
 
   it("does not retarget the echo of its own base change", async () => {
@@ -198,6 +236,7 @@ describe("staging routing wiring in handlePullRequestEvent", () => {
     expect(decideForPR).not.toHaveBeenCalled();
     expect(setPullRequestBase).not.toHaveBeenCalled();
   });
+
 
   it("recognizes an untracked staging -> default PR as the aggregate PR", async () => {
     await handlePullRequestEvent(

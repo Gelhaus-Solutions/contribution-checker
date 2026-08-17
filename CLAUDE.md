@@ -115,6 +115,16 @@ Staging routing (`src/lib/github/staging.ts`, App mode only):
   gate would close the bot's own release PR). `isAggregatePr` matches it by the
   tracked `Repo.stagingBatchPrNumber` and structurally (same-repo head ==
   staging, base == default), so the pre-tracking window is covered.
+- **Every routing outcome is named** (`StagingRoutingOutcome`) and returned on
+  `PrEventResult.staging`, so it lands in the `convergePrEvent` activity result
+  and is readable from Temporal workflow history when logs are not. `retargeted:
+  false` alone cannot answer "why is this PR still on the default branch?".
+- `already_in_staging`: GitHub rejects a base change that would leave the PR
+  with an empty diff (422, "no new commits between"), which happens when the
+  head branch was already merged into staging by an earlier PR. Such a PR can
+  never be retargeted and will bypass the batch if merged. Nothing in the bot
+  can prevent that, so it is logged as a named warning rather than a stack
+  trace.
 - The two staging labels live **outside** the `contribution:` namespace on
   purpose: `setLabels` strips every `contribution:*` label the gate did not just
   set, so a staging label there would be wiped by the next converge.

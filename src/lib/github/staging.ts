@@ -243,6 +243,14 @@ export function isAggregatePr(args: {
  * Should this PR be retargeted to staging? Pure so every exemption is testable
  * without a database or GitHub. Returns the reason to skip, or null to proceed.
  */
+export type StagingRetargetSkipReason =
+  | "staging_is_default"
+  | "aggregate_pr"
+  | "head_is_staging"
+  | "opt_out_label"
+  | "bypass_handle"
+  | "base_not_default";
+
 export function stagingRetargetSkipReason(args: {
   baseRef: string;
   head: PrHead;
@@ -255,7 +263,7 @@ export function stagingRetargetSkipReason(args: {
   optOutLabel: string;
   authorGhLogin: string;
   bypassHandles: string[];
-}): string | null {
+}): StagingRetargetSkipReason | null {
   if (args.stagingBranch === args.defaultBranch) return "staging_is_default";
   // The bot's own aggregate PR: retargeting it would make it staging -> staging.
   if (
@@ -338,25 +346,25 @@ export function selectBatchEntries(args: {
   prs: PrSummary[];
   stagingBranch: string;
   since: Date | null;
+  /** Commits in `default...staging`, or null when membership is unknowable. */
+  batchShas: Set<string> | null;
   excludePrNumber: number | null;
 }): BatchEntry[] {
   const kept = args.prs.filter((pr) => {
     if (pr.number === args.excludePrNumber) return false;
     if (pr.baseRef !== args.stagingBranch) return false;
     if (!pr.merged) return false; // open, or closed without merging
+    if (args.batchShas && pr.mergeCommitSha) {
+      return args.batchShas.has(pr.mergeCommitSha);
+    }
     if (!args.since) return true;
     return pr.mergedAt != null && new Date(pr.mergedAt) > args.since;
-  /** Commits in `default...staging`, or null when membership is unknowable. */
-  batchShas: Set<string> | null;
   });
   // Ascending PR number reads as chronological and keeps the body stable
   // across reconciles (the list endpoint sorts by updated-at, which churns).
   kept.sort((a, b) => a.number - b.number);
   return kept.map((pr) => ({
     number: pr.number,
-    if (args.batchShas && pr.mergeCommitSha) {
-      return args.batchShas.has(pr.mergeCommitSha);
-    }
     title: pr.title,
     author: pr.authorLogin,
   }));
@@ -443,6 +451,25 @@ async function ensureStagingBranch(args: {
 
 // --- half one: retargeting ---------------------------------------------------
 
+/**
+ * Every way routing can end. Carried on the result rather than only logged,
+ * because the result becomes the Temporal activity result and is therefore
+ * readable from workflow history when the logs are unavailable. "Why did this
+ * PR not get retargeted?" is the question that gets asked after the fact, and
+ * a `retargeted: false` boolean cannot answer it.
+ */
+export type StagingRoutingOutcome =
+  | "retargeted"
+  | "not_managed"
+  | "pr_closed"
+  | "default_branch_unknown"
+  | "retarget_disabled"
+  | "staging_branch_unavailable"
+  | "fuse_tripped"
+  | "already_in_staging"
+  | "error"
+  | StagingRetargetSkipReason;
+
 /** What the caller in webhook.ts needs to know after routing ran. */
 export type StagingRoutingResult = {
   /** Local Repo.id, or null when the repo is not managed here. */
@@ -453,6 +480,8 @@ export type StagingRoutingResult = {
   isAggregatePr: boolean;
   /** The PR sits on the staging branch, so the batch manifest may be stale. */
   touchesStaging: boolean;
+  /** Why routing ended the way it did. Surfaced into Temporal history. */
+  outcome: StagingRoutingOutcome;
 };
 
 const NO_ROUTING: StagingRoutingResult = {
@@ -460,6 +489,7 @@ const NO_ROUTING: StagingRoutingResult = {
   retargeted: false,
   isAggregatePr: false,
   touchesStaging: false,
+  outcome: "not_managed",
 };
 
 /**
@@ -478,7 +508,7 @@ export async function applyStagingRouting(ctx: {
   prIsClosed: boolean;
 }): Promise<StagingRoutingResult> {
   try {
-    if (ctx.prIsClosed) return NO_ROUTING;
+    if (ctx.prIsClosed) return { ...NO_ROUTING, outcome: "pr_closed" };
     const repo = await prisma.repo.findUnique({
       where: { ghRepoId: ctx.ghRepoId },
       select: {
@@ -508,7 +538,7 @@ export async function applyStagingRouting(ctx: {
         { ghRepoId: ctx.ghRepoId, prNumber: ctx.prNumber },
         "staging routing skipped: default branch unknown",
       );
-      return NO_ROUTING;
+      return { ...NO_ROUTING, outcome: "default_branch_unknown" };
     }
 
     // Recognized before the enable check: the aggregate PR must be exempt from
@@ -529,7 +559,7 @@ export async function applyStagingRouting(ctx: {
       touchesStaging: ctx.baseRef === cfg.stagingBranch,
     };
     if (!cfg.retargetEnabled) {
-      return { ...base, retargeted: false };
+      return { ...base, retargeted: false, outcome: "retarget_disabled" };
     }
 
     const skip = stagingRetargetSkipReason({
@@ -546,11 +576,14 @@ export async function applyStagingRouting(ctx: {
       bypassHandles: parseBypassHandles(project.bypassHandles),
     });
     if (skip) {
-      logger.debug(
+      // Info, not debug: this is the line that answers "why is this PR still
+      // on the default branch?", and it is worthless if it only exists at a
+      // level nobody runs in production.
+      logger.info(
         { ghRepoId: ctx.ghRepoId, prNumber: ctx.prNumber, skip },
         "staging retarget skipped",
       );
-      return { ...base, retargeted: false };
+      return { ...base, retargeted: false, outcome: skip };
     }
 
     if (fuseTripped(`${ctx.ghRepoId}#${ctx.prNumber}`)) {
@@ -560,7 +593,7 @@ export async function applyStagingRouting(ctx: {
           `default branch repeatedly. Add the staging opt-out label to settle ` +
           `it, or check for another automation enforcing the base.`,
       );
-      return { ...base, retargeted: false };
+      return { ...base, retargeted: false, outcome: "fuse_tripped" };
     }
 
     const ready = await ensureStagingBranch({
@@ -568,9 +601,36 @@ export async function applyStagingRouting(ctx: {
       stagingBranch: cfg.stagingBranch,
       defaultBranch,
     });
-    if (!ready) return { ...base, retargeted: false };
+    if (!ready) {
+      return { ...base, retargeted: false, outcome: "staging_branch_unavailable" };
+    }
 
-    await setPullRequestBase(ref, ctx.prNumber, cfg.stagingBranch);
+    try {
+      await setPullRequestBase(ref, ctx.prNumber, cfg.stagingBranch);
+    } catch (e) {
+      // The head branch is already fully contained in staging, usually because
+      // an earlier PR from the same branch was merged there. GitHub refuses a
+      // base change that would leave the PR with an empty diff, so this PR can
+      // never be retargeted. It is still pointed at the default branch, and
+      // merging it lands those commits there a second time, outside the batch.
+      // Nothing here can prevent that, so the least we owe the operator is a
+      // named outcome instead of a stack trace.
+      if (isNoNewCommitsError(e)) {
+        logger.warn(
+          {
+            ghRepoId: ctx.ghRepoId,
+            prNumber: ctx.prNumber,
+            stagingBranch: cfg.stagingBranch,
+            headRef: ctx.head.ref,
+          },
+          `staging retarget impossible: the head branch is already merged into ` +
+            `staging, so this PR has no diff against it. It remains based on ` +
+            `the default branch and will bypass the batch if merged.`,
+        );
+        return { ...base, retargeted: false, outcome: "already_in_staging" };
+      }
+      throw e;
+    }
     logger.info(
       {
         ghRepoId: ctx.ghRepoId,
@@ -580,14 +640,31 @@ export async function applyStagingRouting(ctx: {
       },
       "retargeted PR to staging",
     );
-    return { ...base, retargeted: true, touchesStaging: true };
+    return {
+      ...base,
+      retargeted: true,
+      touchesStaging: true,
+      outcome: "retargeted",
+    };
   } catch (e) {
     logger.warn(
       { err: e, ghRepoId: ctx.ghRepoId, prNumber: ctx.prNumber },
       "applyStagingRouting failed",
     );
-    return NO_ROUTING;
+    return { ...NO_ROUTING, outcome: "error" };
   }
+}
+
+/**
+ * GitHub's 422 for "you cannot point this PR there, the diff would be empty".
+ * Matched on the message because the error body carries no distinct code:
+ * `field: "base", code: "invalid"` is shared with several other rejections.
+ */
+function isNoNewCommitsError(e: unknown): boolean {
+  const status = (e as { status?: number } | null)?.status;
+  if (status !== 422) return false;
+  const message = (e as { message?: string } | null)?.message ?? "";
+  return /no new commits between/i.test(message);
 }
 
 // --- half three: keeping staging current with the default branch -------------
@@ -867,12 +944,20 @@ export async function reconcileStagingBatch(args: {
     const since = cmp.mergeBaseDate
       ? new Date(cmp.mergeBaseDate)
       : repo.stagingBatchSince;
+    const batchShas = cmp.truncated ? null : new Set(cmp.commitShas);
+    if (cmp.truncated) {
+      logger.warn(
+        { repoId: repo.id, aheadBy: cmp.aheadBy },
+        "staging batch compare truncated; falling back to the timestamp cutoff",
+      );
+    }
     const renderFor = (excludePrNumber: number | null): string =>
       renderBatchBlock(
         selectBatchEntries({
           prs,
           stagingBranch: cfg.stagingBranch,
           since,
+          batchShas,
           excludePrNumber,
         }),
       );
@@ -928,6 +1013,7 @@ export async function reconcileStagingBatch(args: {
           state: "open",
           merged: false,
           mergedAt: null,
+          mergeCommitSha: null,
           body: createdBody,
           baseRef: defaultBranch,
           headRef: cfg.stagingBranch,
@@ -944,20 +1030,12 @@ export async function reconcileStagingBatch(args: {
     if (repo.stagingBatchPrNumber !== aggregate.number) {
       await trackAggregatePr(repo.id, aggregate.number);
     }
-    const batchShas = cmp.truncated ? null : new Set(cmp.commitShas);
-    if (cmp.truncated) {
-      logger.warn(
-        { repoId: repo.id, aheadBy: cmp.aheadBy },
-        "staging batch compare truncated; falling back to the timestamp cutoff",
-      );
-    }
 
     if (!aggregate.labels.includes(project.labelStagingBatch)) {
       await ensureLabel(
         ref,
         project.labelStagingBatch,
         "0b6bcb",
-          batchShas,
         "Aggregate PR shipping the staging batch to the default branch",
       );
       await addLabel(ref, aggregate.number, project.labelStagingBatch);
@@ -1013,6 +1091,5 @@ export async function handleAggregatePrClosed(args: {
     { repoId: args.repoId, prNumber: args.prNumber, merged: args.merged },
     "aggregate staging PR closed",
   );
-          mergeCommitSha: null,
   return true;
 }

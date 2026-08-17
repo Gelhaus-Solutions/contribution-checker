@@ -31,6 +31,7 @@ import {
   stagingProjectSelect,
   stagingRepoSelect,
   type StagingRoutingResult,
+  type StagingRoutingOutcome,
 } from "@/lib/github/staging";
 import { signalStagingBatch } from "@/lib/temporal/start";
 import { runQualityForPrCheck } from "@/lib/quality/run";
@@ -373,9 +374,25 @@ async function ensureProjectLabels(args: {
 /** Result surfaced to the per-PR entity workflow (prGate): `terminal` is true
  * only when the PR has reached an end state (merged or human-closed) and the
  * workflow should complete. Every non-close event returns `terminal: false`. */
-export type PrEventResult = { terminal: boolean };
+/**
+ * `staging` is carried purely for observability. It is the return value of the
+ * `convergePrEvent` activity, so Temporal records it in workflow history: when
+ * application logs are gone or unreadable, the history still answers "did this
+ * PR get retargeted, and if not, why?".
+ */
+export type PrEventResult = {
+  terminal: boolean;
+  staging?: { retargeted: boolean; outcome: StagingRoutingOutcome };
+};
 
 const NOT_TERMINAL: PrEventResult = { terminal: false };
+
+function notTerminal(staging: StagingRoutingResult): PrEventResult {
+  return {
+    terminal: false,
+    staging: { retargeted: staging.retargeted, outcome: staging.outcome },
+  };
+}
 
 export async function handlePullRequestEvent(
   payload: WebhookPayload,
@@ -462,17 +479,18 @@ export async function handlePullRequestEvent(
   // It has no application, so the gate would find it PENDING, close the
   // release PR and comment an apply link on it; even when bypassed it would
   // strip the batch label and quality-score a several-hundred-file diff.
+  //
   if (staging.isAggregatePr) {
     logger.debug(
       { ghRepoId, prNumber },
       "skipping gate: PR is the aggregate staging PR",
     );
-    return NOT_TERMINAL;
+    return notTerminal(staging);
   }
 
   // A title edit changes nothing the gate cares about: the batch manifest was
   // already refreshed above, so stop before the decision pipeline.
-  if (isEdited) return NOT_TERMINAL;
+  if (isEdited) return notTerminal(staging);
 
   await convergePr({
     ghRepoId,
@@ -486,7 +504,7 @@ export async function handlePullRequestEvent(
     prIsClosed: payload.pull_request.state === "closed",
     isReEval: isReEvalLabel,
   });
-  return NOT_TERMINAL;
+  return notTerminal(staging);
 }
 
 /**
@@ -504,6 +522,7 @@ const NO_STAGING_ROUTING: StagingRoutingResult = {
   retargeted: false,
   isAggregatePr: false,
   touchesStaging: false,
+  outcome: "not_managed",
 };
 
 async function runStagingRouting(args: {
