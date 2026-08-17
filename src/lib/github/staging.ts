@@ -145,7 +145,7 @@ export type BatchEntry = {
 export function renderBatchBlock(entries: BatchEntry[]): string {
   const lines =
     entries.length === 0
-      ? ["_Nothing in this batch yet._"]
+      ? ["_No merged PRs in this batch yet._"]
       : entries.map((e) => {
           const title = e.title.trim() || `PR #${e.number}`;
           const by = e.author ? ` by @${e.author}` : "";
@@ -293,9 +293,16 @@ function fuseTripped(key: string): boolean {
 }
 
 /**
- * Which PRs belong in the current batch. Open PRs based on staging always
- * count; merged ones only if they merged strictly after `since`, since
- * anything at or before it is already contained in the default branch.
+ * Which PRs belong in the current batch: only those actually merged into
+ * staging, and only those merged strictly after `since`, since anything at or
+ * before it is already contained in the default branch.
+ *
+ * Open PRs are deliberately excluded. The manifest is a record of what this
+ * batch will ship, and an open PR is a proposal: it may never merge, may merge
+ * into a later batch, or may be closed. Listing it would make the aggregate
+ * PR's description a claim about code that is not in it.
+ *
+ * Closed-without-merging PRs are excluded for the same reason.
  */
 export function selectBatchEntries(args: {
   prs: PrSummary[];
@@ -306,8 +313,7 @@ export function selectBatchEntries(args: {
   const kept = args.prs.filter((pr) => {
     if (pr.number === args.excludePrNumber) return false;
     if (pr.baseRef !== args.stagingBranch) return false;
-    if (pr.state === "open") return true;
-    if (!pr.merged) return false; // closed without merging: never shipped
+    if (!pr.merged) return false; // open, or closed without merging
     if (!args.since) return true;
     return pr.mergedAt != null && new Date(pr.mergedAt) > args.since;
   });
@@ -658,6 +664,32 @@ export async function reconcileStagingBatch(args: {
       return;
     }
 
+    // Build the manifest BEFORE find-or-create, so a PR we open is born with
+    // its real contents. GitHub fires `pull_request.opened` with whatever body
+    // the create call carried, and that is the snapshot every notification
+    // integration quotes: filling the body in afterwards leaves Slack, Discord
+    // and email announcing an empty batch that the PR itself no longer shows.
+    const prs = await listPullRequests(ref, {
+      state: "all",
+      base: cfg.stagingBranch,
+    });
+    // The merge base of default...staging is the exact point everything older
+    // is already shipped from, and it is re-derived on every run, so a dropped
+    // close webhook cannot leave the cutoff stale. `stagingBatchSince` is the
+    // fallback for the rare compare that returns no merge base.
+    const since = cmp.mergeBaseDate
+      ? new Date(cmp.mergeBaseDate)
+      : repo.stagingBatchSince;
+    const renderFor = (excludePrNumber: number | null): string =>
+      renderBatchBlock(
+        selectBatchEntries({
+          prs,
+          stagingBranch: cfg.stagingBranch,
+          since,
+          excludePrNumber,
+        }),
+      );
+
     let aggregate = await findAggregatePr({
       ref,
       repoId: repo.id,
@@ -668,11 +700,14 @@ export async function reconcileStagingBatch(args: {
     });
 
     if (!aggregate) {
+      // The aggregate PR targets the default branch, so it can never appear in
+      // a `base=staging` listing and needs no self-exclusion here.
+      const createdBody = renderFor(null);
       const created = await createPullRequest(ref, {
         title: AGGREGATE_PR_TITLE,
         head: cfg.stagingBranch,
         base: defaultBranch,
-        body: renderBatchBlock([]),
+        body: createdBody,
       });
       if ("failure" in created) {
         if (created.failure === "already_exists") {
@@ -697,9 +732,21 @@ export async function reconcileStagingBatch(args: {
         }
       } else {
         await trackAggregatePr(repo.id, created.number);
-        const fetched = await getPullRequest(ref, created.number);
-        if (!fetched) return;
-        aggregate = fetched;
+        // Synthesized rather than re-fetched: we know exactly what we just
+        // created, so this saves a call and, more importantly, makes the body
+        // diff below a guaranteed no-op instead of racing a read-back.
+        aggregate = {
+          number: created.number,
+          title: AGGREGATE_PR_TITLE,
+          state: "open",
+          merged: false,
+          mergedAt: null,
+          body: createdBody,
+          baseRef: defaultBranch,
+          headRef: cfg.stagingBranch,
+          authorLogin: null,
+          labels: [],
+        };
         logger.info(
           { repoId: repo.id, prNumber: created.number },
           "opened aggregate staging PR",
@@ -721,30 +768,17 @@ export async function reconcileStagingBatch(args: {
       await addLabel(ref, aggregate.number, project.labelStagingBatch);
     }
 
-    const prs = await listPullRequests(ref, {
-      state: "all",
-      base: cfg.stagingBranch,
-    });
-    // The merge base of default...staging is the exact point everything older
-    // is already shipped from, and it is re-derived on every run, so a dropped
-    // close webhook cannot leave the cutoff stale. `stagingBatchSince` is the
-    // fallback for the rare compare that returns no merge base.
-    const since = cmp.mergeBaseDate
-      ? new Date(cmp.mergeBaseDate)
-      : repo.stagingBatchSince;
-    const entries = selectBatchEntries({
-      prs,
-      stagingBranch: cfg.stagingBranch,
-      since,
-      excludePrNumber: aggregate.number,
-    });
-    const nextBody = applyBatchBlock(aggregate.body, renderBatchBlock(entries));
+    const nextBody = applyBatchBlock(
+      aggregate.body,
+      renderFor(aggregate.number),
+    );
     // Only write when the rendered result differs: every PATCH is a visible
-    // edit in the PR timeline, and reconciles are frequent.
+    // edit in the PR timeline, and reconciles are frequent. A PR we just
+    // created already carries this exact body, so opening one costs no edit.
     if (nextBody !== (aggregate.body ?? "")) {
       await updatePullRequestBody(ref, aggregate.number, nextBody);
       logger.debug(
-        { repoId: repo.id, prNumber: aggregate.number, entries: entries.length },
+        { repoId: repo.id, prNumber: aggregate.number },
         "refreshed aggregate PR manifest",
       );
     }

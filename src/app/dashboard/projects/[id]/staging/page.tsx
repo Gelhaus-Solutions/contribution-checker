@@ -288,9 +288,11 @@ export default async function StagingSettings({
                 </span>
                 <span className="block text-xs text-muted-foreground">
                   While staging is ahead of the default branch, one bot-owned PR
-                  stays open, ready for review, listing every PR in the batch.
-                  Merging it ships the batch; the next staging activity opens a
-                  fresh one.
+                  stays open, ready for review, listing every PR merged into
+                  staging since the last batch shipped. Open and
+                  closed-without-merging PRs are left out: the description is a
+                  record of what this batch actually ships. Merging it ships the
+                  batch; the next staging activity opens a fresh one.
                 </span>
               </span>
             </label>

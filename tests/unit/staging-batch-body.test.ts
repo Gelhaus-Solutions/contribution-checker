@@ -44,7 +44,7 @@ describe("renderBatchBlock", () => {
   });
 
   it("says so when the batch is empty rather than rendering an empty list", () => {
-    expect(renderBatchBlock([])).toContain("Nothing in this batch yet");
+    expect(renderBatchBlock([])).toContain("No merged PRs in this batch yet");
   });
 });
 
@@ -85,17 +85,32 @@ describe("applyBatchBlock", () => {
   });
 });
 
+/** A PR that actually landed on staging: the only kind the manifest lists. */
+function merged(number: number, mergedAt = "2026-08-15T00:00:00Z"): PrSummary {
+  return pr({ number, state: "closed", merged: true, mergedAt });
+}
+
 describe("selectBatchEntries", () => {
   const stagingBranch = "staging";
 
-  it("keeps open PRs based on staging and drops other bases", () => {
+  it("lists merged PRs and drops other bases", () => {
     const entries = selectBatchEntries({
-      prs: [pr({ number: 1 }), pr({ number: 2, baseRef: "main" })],
+      prs: [merged(1), { ...merged(2), baseRef: "main" }],
       stagingBranch,
       since: null,
       excludePrNumber: null,
     });
     expect(entries.map((e) => e.number)).toEqual([1]);
+  });
+
+  it("drops open PRs: a proposal is not part of the batch", () => {
+    const entries = selectBatchEntries({
+      prs: [pr({ number: 1, state: "open" }), merged(2)],
+      stagingBranch,
+      since: null,
+      excludePrNumber: null,
+    });
+    expect(entries.map((e) => e.number)).toEqual([2]);
   });
 
   it("drops PRs closed without merging", () => {
@@ -108,25 +123,21 @@ describe("selectBatchEntries", () => {
     expect(entries).toEqual([]);
   });
 
-  it("excludes PRs merged before the previous batch shipped", () => {
-    const since = new Date("2026-08-10T00:00:00Z");
+  it("is empty when staging only moved via direct pushes", () => {
     const entries = selectBatchEntries({
-      prs: [
-        pr({
-          number: 1,
-          state: "closed",
-          merged: true,
-          mergedAt: "2026-08-01T00:00:00Z",
-        }),
-        pr({
-          number: 2,
-          state: "closed",
-          merged: true,
-          mergedAt: "2026-08-12T00:00:00Z",
-        }),
-      ],
+      prs: [pr({ number: 1, state: "open" })],
       stagingBranch,
-      since,
+      since: null,
+      excludePrNumber: null,
+    });
+    expect(entries).toEqual([]);
+  });
+
+  it("excludes PRs merged before the previous batch shipped", () => {
+    const entries = selectBatchEntries({
+      prs: [merged(1, "2026-08-01T00:00:00Z"), merged(2, "2026-08-12T00:00:00Z")],
+      stagingBranch,
+      since: new Date("2026-08-10T00:00:00Z"),
       excludePrNumber: null,
     });
     expect(entries.map((e) => e.number)).toEqual([2]);
@@ -134,14 +145,7 @@ describe("selectBatchEntries", () => {
 
   it("includes every merged PR when no batch has shipped yet", () => {
     const entries = selectBatchEntries({
-      prs: [
-        pr({
-          number: 1,
-          state: "closed",
-          merged: true,
-          mergedAt: "2026-08-01T00:00:00Z",
-        }),
-      ],
+      prs: [merged(1, "2026-08-01T00:00:00Z")],
       stagingBranch,
       since: null,
       excludePrNumber: null,
@@ -151,7 +155,7 @@ describe("selectBatchEntries", () => {
 
   it("never lists the aggregate PR inside its own manifest", () => {
     const entries = selectBatchEntries({
-      prs: [pr({ number: 1 }), pr({ number: 99 })],
+      prs: [merged(1), merged(99)],
       stagingBranch,
       since: null,
       excludePrNumber: 99,
@@ -161,7 +165,7 @@ describe("selectBatchEntries", () => {
 
   it("sorts by PR number so the body is stable across reconciles", () => {
     const entries = selectBatchEntries({
-      prs: [pr({ number: 9 }), pr({ number: 3 }), pr({ number: 5 })],
+      prs: [merged(9), merged(3), merged(5)],
       stagingBranch,
       since: null,
       excludePrNumber: null,

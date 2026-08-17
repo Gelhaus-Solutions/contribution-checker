@@ -46,11 +46,12 @@ vi.mock("@/lib/github/pr-actions", () => ({
 }));
 
 import { reconcileStagingBatch, renderBatchBlock } from "@/lib/github/staging";
+import type { PrSummary } from "@/lib/github/pr-actions";
 
-const AGGREGATE = {
+const AGGREGATE: PrSummary = {
   number: 500,
   title: "Ship staging to production",
-  state: "open" as const,
+  state: "open",
   merged: false,
   mergedAt: null,
   body: null as string | null,
@@ -110,8 +111,44 @@ beforeEach(() => {
     mergeBaseDate: null,
   });
   getPullRequest.mockResolvedValue({ ...AGGREGATE });
-  listPullRequests.mockResolvedValue([]);
+  batchPrs = [];
+  openAggregatePrs = [];
+  // Keyed on the query, not the call order: the batch listing (state "all")
+  // and the aggregate lookup (state "open") are distinct questions, and
+  // order-coupled mocks break whenever the sequence shifts.
+  listPullRequests.mockImplementation(
+    (_ref: unknown, opts: { state?: string }) =>
+      Promise.resolve(opts.state === "all" ? batchPrs : openAggregatePrs),
+  );
 });
+
+/** PRs based on the staging branch, in any state. */
+let batchPrs: PrLike[] = [];
+/** Open staging -> default PRs, i.e. aggregate PR candidates. */
+let openAggregatePrs: PrLike[] = [];
+
+type PrLike = PrSummary;
+
+/** A PR merged into staging, the only kind the manifest lists. */
+function mergedPr(
+  number: number,
+  title: string,
+  author = "octocat",
+  mergedAt = "2026-08-16T00:00:00Z",
+): PrLike {
+  return {
+    ...AGGREGATE,
+    number,
+    title,
+    state: "closed",
+    merged: true,
+    mergedAt,
+    baseRef: "staging",
+    headRef: `feature-${number}`,
+    authorLogin: author,
+    labels: [],
+  };
+}
 
 describe("reconcileStagingBatch", () => {
   it("does nothing when the batch feature is off", async () => {
@@ -149,21 +186,27 @@ describe("reconcileStagingBatch", () => {
   });
 
   it("refreshes the manifest of the tracked aggregate PR", async () => {
-    listPullRequests.mockResolvedValue([
-      {
-        ...AGGREGATE,
-        number: 12,
-        title: "Fix the retry backoff",
-        baseRef: "staging",
-        headRef: "fix",
-        authorLogin: "octocat",
-        labels: [],
-      },
-    ]);
+    batchPrs = [mergedPr(12, "Fix the retry backoff")];
     await reconcileStagingBatch({ repoId: "repo1" });
     const [, prNumber, body] = updatePullRequestBody.mock.calls[0];
     expect(prNumber).toBe(500);
     expect(body).toContain("- Fix the retry backoff (#12 by @octocat)");
+  });
+
+  it("leaves an open PR on staging out of the manifest", async () => {
+    // Only what actually landed is in the batch; an open PR may never merge.
+    batchPrs = [
+      {
+        ...mergedPr(13, "Still in review"),
+        state: "open",
+        merged: false,
+        mergedAt: null,
+      },
+    ];
+    await reconcileStagingBatch({ repoId: "repo1" });
+    const body = updatePullRequestBody.mock.calls[0][2] as string;
+    expect(body).not.toContain("#13");
+    expect(body).toContain("No merged PRs in this batch yet");
   });
 
   it("does not PATCH the body when the rendered block is unchanged", async () => {
@@ -180,17 +223,7 @@ describe("reconcileStagingBatch", () => {
       ...AGGREGATE,
       body: `Ship on Friday.\n\n${renderBatchBlock([])}`,
     });
-    listPullRequests.mockResolvedValue([
-      {
-        ...AGGREGATE,
-        number: 12,
-        title: "New thing",
-        baseRef: "staging",
-        headRef: "x",
-        authorLogin: "hubot",
-        labels: [],
-      },
-    ]);
+    batchPrs = [mergedPr(12, "New thing", "hubot")];
     await reconcileStagingBatch({ repoId: "repo1" });
     const body = updatePullRequestBody.mock.calls[0][2] as string;
     expect(body.startsWith("Ship on Friday.")).toBe(true);
@@ -200,9 +233,7 @@ describe("reconcileStagingBatch", () => {
   it("falls back to a head/base search when the tracked number is stale", async () => {
     repoFindUnique.mockResolvedValue(makeRepo({ stagingBatchPrNumber: 404 }));
     getPullRequest.mockResolvedValue(null);
-    listPullRequests
-      .mockResolvedValueOnce([{ ...AGGREGATE, number: 501 }])
-      .mockResolvedValueOnce([]);
+    openAggregatePrs = [{ ...AGGREGATE, number: 501 }];
     await reconcileStagingBatch({ repoId: "repo1" });
     expect(createPullRequest).not.toHaveBeenCalled();
     expect(repoUpdate).toHaveBeenCalledWith(
@@ -214,13 +245,7 @@ describe("reconcileStagingBatch", () => {
 
   it("creates the aggregate PR when none exists, and labels it", async () => {
     repoFindUnique.mockResolvedValue(makeRepo({ stagingBatchPrNumber: null }));
-    listPullRequests.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
     createPullRequest.mockResolvedValue({ number: 600 });
-    getPullRequest.mockResolvedValue({
-      ...AGGREGATE,
-      number: 600,
-      labels: [],
-    });
     await reconcileStagingBatch({ repoId: "repo1" });
     expect(createPullRequest).toHaveBeenCalledWith(
       expect.anything(),
@@ -233,9 +258,29 @@ describe("reconcileStagingBatch", () => {
     );
   });
 
+  it("opens the aggregate PR with its manifest already filled in", async () => {
+    // GitHub fires pull_request.opened with the body the create call carried,
+    // and that snapshot is what Slack/Discord/email quote. Creating it empty
+    // and PATCHing afterwards makes every integration announce an empty batch.
+    repoFindUnique.mockResolvedValue(makeRepo({ stagingBatchPrNumber: null }));
+    batchPrs = [
+      mergedPr(12, "Fix the retry backoff"),
+      mergedPr(13, "Add German translations", "hubot"),
+    ];
+    createPullRequest.mockResolvedValue({ number: 600 });
+    await reconcileStagingBatch({ repoId: "repo1" });
+
+    const body = createPullRequest.mock.calls[0][1].body as string;
+    expect(body).toContain("- Fix the retry backoff (#12 by @octocat)");
+    expect(body).toContain("- Add German translations (#13 by @hubot)");
+    expect(body).not.toContain("No merged PRs in this batch yet");
+    // And the body it was born with is already correct, so opening one costs
+    // no follow-up edit in the PR timeline.
+    expect(updatePullRequestBody).not.toHaveBeenCalled();
+  });
+
   it("treats a no-commits 422 as an ordinary state, not an error", async () => {
     repoFindUnique.mockResolvedValue(makeRepo({ stagingBatchPrNumber: null }));
-    listPullRequests.mockResolvedValue([]);
     createPullRequest.mockResolvedValue({ failure: "no_commits" });
     await expect(
       reconcileStagingBatch({ repoId: "repo1" }),
@@ -245,10 +290,18 @@ describe("reconcileStagingBatch", () => {
 
   it("adopts the winner when a concurrent run already created the PR", async () => {
     repoFindUnique.mockResolvedValue(makeRepo({ stagingBatchPrNumber: null }));
-    listPullRequests
-      .mockResolvedValueOnce([]) // first find: nothing
-      .mockResolvedValueOnce([{ ...AGGREGATE, number: 601 }]) // after 422
-      .mockResolvedValueOnce([]); // batch listing
+    // Nothing on the first lookup; the concurrent winner appears on the retry
+    // after our own create 422s.
+    listPullRequests.mockImplementation(
+      (_ref: unknown, opts: { state?: string }) => {
+        if (opts.state === "all") return Promise.resolve([]);
+        return Promise.resolve(
+          createPullRequest.mock.calls.length === 0
+            ? []
+            : [{ ...AGGREGATE, number: 601 }],
+        );
+      },
+    );
     createPullRequest.mockResolvedValue({ failure: "already_exists" });
     await reconcileStagingBatch({ repoId: "repo1" });
     expect(repoUpdate).toHaveBeenCalledWith(
@@ -272,28 +325,10 @@ describe("reconcileStagingBatch", () => {
       behindBy: 0,
       mergeBaseDate: "2026-08-10T00:00:00Z",
     });
-    listPullRequests.mockResolvedValue([
-      {
-        ...AGGREGATE,
-        number: 1,
-        title: "Old",
-        state: "closed",
-        merged: true,
-        mergedAt: "2026-08-01T00:00:00Z",
-        baseRef: "staging",
-        labels: [],
-      },
-      {
-        ...AGGREGATE,
-        number: 2,
-        title: "New",
-        state: "closed",
-        merged: true,
-        mergedAt: "2026-08-12T00:00:00Z",
-        baseRef: "staging",
-        labels: [],
-      },
-    ]);
+    batchPrs = [
+      mergedPr(1, "Old", "octocat", "2026-08-01T00:00:00Z"),
+      mergedPr(2, "New", "octocat", "2026-08-12T00:00:00Z"),
+    ];
     await reconcileStagingBatch({ repoId: "repo1" });
     const body = updatePullRequestBody.mock.calls[0][2] as string;
     expect(body).not.toContain("#1");

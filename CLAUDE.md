@@ -78,6 +78,13 @@ Staging routing (`src/lib/github/staging.ts`, App mode only):
   of times; it PATCHes the body only when the rendered block actually changed.
   The batch cutoff is the merge base of `default...staging`, so it self-heals
   when a webhook is dropped.
+- **The manifest lists merged PRs only.** Open and closed-without-merging PRs
+  are excluded: the description is a record of what the batch ships, not of
+  what was proposed.
+- **Build the manifest before creating the aggregate PR, not after.** GitHub
+  fires `pull_request.opened` with whatever body the create call carried, and
+  that snapshot is what Slack/Discord/email quote forever. Creating it empty
+  and PATCHing afterwards left every integration announcing an empty batch.
 - The aggregate PR must **never** reach `convergePr` (no application means the
   gate would close the bot's own release PR). `isAggregatePr` matches it by the
   tracked `Repo.stagingBatchPrNumber` and structurally (same-repo head ==
