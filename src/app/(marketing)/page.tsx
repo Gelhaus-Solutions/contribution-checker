@@ -60,39 +60,74 @@ export default async function Home() {
 
   return (
     <>
-      {/* Statement */}
+      {/* Statement. Two columns on xl: a hero with an empty right half reads as
+          unfinished on a wide screen, and the gate's actual output is the most
+          useful thing to put there. These rows are the real payload, same as
+          everywhere else on the page. */}
       <section className="py-14 md:py-20">
-        <h1 className="max-w-3xl text-3xl font-semibold tracking-tight text-balance md:text-4xl">
-          Every pull request goes through a gate you control.
-        </h1>
-        <p className="mt-4 max-w-3xl text-sm leading-relaxed text-muted-foreground md:text-base">
-          contribution-checker is a self-hosted GitHub App. When someone opens a
-          pull request on a linked repository, it decides whether that author is
-          allowed to contribute. If they are not, it closes the pull request and
-          leaves a comment pointing at your application form. When you approve
-          them, it reopens the pull request.
-        </p>
-        <div className="mt-7 flex flex-wrap items-center gap-3">
-          <Button asChild>
-            <Link href="/how-it-works">Read how it works</Link>
-          </Button>
-          {session?.user ? (
-            <Button asChild variant="outline">
-              <Link href="/dashboard">Go to dashboard</Link>
-            </Button>
-          ) : (
-            <form
-              action={async () => {
-                "use server";
-                await signIn("github");
-              }}
-            >
-              <SubmitButton variant="outline">Log in</SubmitButton>
-            </form>
-          )}
-          <p className="text-xs text-muted-foreground">
-            AGPL-3.0. Runs on your own Postgres.
-          </p>
+        <div className="xl:grid xl:grid-cols-[minmax(0,1fr)_minmax(0,30rem)] xl:items-center xl:gap-x-16">
+          <div>
+            <h1 className="max-w-3xl text-3xl font-semibold tracking-tight text-balance md:text-4xl xl:text-5xl">
+              Every pull request goes through a gate you control.
+            </h1>
+            <p className="mt-5 max-w-2xl text-sm leading-relaxed text-muted-foreground md:text-base">
+              contribution-checker is a self-hosted GitHub App. When someone
+              opens a pull request on a linked repository, it decides whether
+              that author is allowed to contribute. If they are not, it closes
+              the pull request and leaves a comment pointing at your application
+              form. When you approve them, it reopens the pull request.
+            </p>
+            <div className="mt-7 flex flex-wrap items-center gap-3">
+              <Button asChild>
+                <Link href="/how-it-works">Read how it works</Link>
+              </Button>
+              {session?.user ? (
+                <Button asChild variant="outline">
+                  <Link href="/dashboard">Go to dashboard</Link>
+                </Button>
+              ) : (
+                <form
+                  action={async () => {
+                    "use server";
+                    await signIn("github");
+                  }}
+                >
+                  <SubmitButton variant="outline">Log in</SubmitButton>
+                </form>
+              )}
+              <p className="text-xs text-muted-foreground">
+                AGPL-3.0. Runs on your own Postgres.
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-12 xl:mt-0">
+            <p className="mb-2 font-mono text-xs text-muted-foreground">
+              contribution-checker / decision
+            </p>
+            <CheckRunPanel>
+              <CheckRunRow payload={check({ status: "APPROVED" })} />
+              <CheckRunRow
+                payload={check({ status: "PENDING", reason: "no-application" })}
+              />
+              <CheckRunRow
+                payload={check({
+                  status: "CHECK_REQUIRED",
+                  reason: "cla_required",
+                })}
+              />
+              <CheckRunRow
+                payload={check({
+                  status: "DENIED",
+                  cooldownUntil: new Date("2026-09-01T00:00:00Z"),
+                })}
+              />
+            </CheckRunPanel>
+            <p className="mt-2 text-xs text-muted-foreground">
+              Require this check in branch protection and an unapproved
+              contributor cannot merge.
+            </p>
+          </div>
         </div>
       </section>
 

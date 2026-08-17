@@ -21,7 +21,7 @@ export async function SiteHeader({
   width = "6xl",
 }: {
   marketing?: boolean;
-  width?: "5xl" | "6xl";
+  width?: "5xl" | "6xl" | "7xl" | "wide";
 } = {}) {
   const session = await auth();
   const unread = session?.user ? await unreadCount(session.user.id) : 0;
@@ -34,7 +34,12 @@ export async function SiteHeader({
       <div
         className={cn(
           "mx-auto flex h-14 items-center justify-between px-4",
-          width === "5xl" ? "max-w-5xl" : "max-w-6xl",
+          {
+            "5xl": "max-w-5xl",
+            "6xl": "max-w-6xl",
+            "7xl": "max-w-7xl",
+            wide: "max-w-[96rem]",
+          }[width],
         )}
       >
         <Link

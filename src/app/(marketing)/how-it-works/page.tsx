@@ -38,7 +38,7 @@ export default function HowItWorksPage() {
   ) => buildDecisionCheckPayload({ decision, ...EXAMPLE });
 
   return (
-    <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_11rem] lg:gap-10">
+    <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_12rem] lg:gap-12">
       <div className="min-w-0">
         <header className="py-14">
           <h1 className="text-3xl font-semibold tracking-tight text-balance">
@@ -53,6 +53,7 @@ export default function HowItWorksPage() {
         </header>
 
         <Section
+          rail={false}
           id="events"
           title="Events that trigger a run"
           lead="The webhook handler acts on six pull_request actions and ignores everything else."
@@ -83,7 +84,7 @@ export default function HowItWorksPage() {
               ],
             ]}
           />
-          <p className="mt-4 text-sm leading-relaxed text-muted-foreground">
+          <p className="mt-4 max-w-4xl text-sm leading-relaxed text-muted-foreground">
             Adding the evaluate label by hand is the manual re-run. The label is
             always removed afterwards, whether or not labels are enabled, so it
             does not retrigger on the next event.
@@ -91,6 +92,7 @@ export default function HowItWorksPage() {
         </Section>
 
         <Section
+          rail={false}
           id="precedence"
           title="Precedence"
           lead="decideForRepo returns one of six statuses. The checks run in this order and the first match wins."
@@ -141,7 +143,7 @@ export default function HowItWorksPage() {
               </>,
             ]}
           />
-          <p className="mt-6 text-sm leading-relaxed text-muted-foreground">
+          <p className="mt-6 max-w-4xl text-sm leading-relaxed text-muted-foreground">
             If <code>applicationRequired</code> is off, a missing or undecided
             application no longer blocks. An existing denial still does.
           </p>
@@ -164,7 +166,7 @@ export default function HowItWorksPage() {
           </div>
         </Section>
 
-        <Section id="outcomes" title="What each outcome does">
+        <Section rail={false} id="outcomes" title="What each outcome does">
           <SpecTable
             mono={[0]}
             head={[
@@ -250,6 +252,7 @@ export default function HowItWorksPage() {
         </Section>
 
         <Section
+          rail={false}
           id="checks"
           title="The status check"
           lead="One Check Run named contribution-checker / decision, published against the pull request's head SHA. Require it in branch protection and an unapproved contributor cannot merge, even if someone reopens the pull request by hand."
@@ -301,7 +304,7 @@ export default function HowItWorksPage() {
             />
           </CheckRunPanel>
 
-          <p className="mt-6 text-sm leading-relaxed text-muted-foreground">
+          <p className="mt-6 max-w-4xl text-sm leading-relaxed text-muted-foreground">
             Projects with a CLA get a second, independent check named{" "}
             <code>contribution-checker / cla</code>. It reports the
             author&apos;s signature coverage directly rather than the overall
@@ -320,6 +323,7 @@ export default function HowItWorksPage() {
         </Section>
 
         <Section
+          rail={false}
           id="order"
           title="Order of operations"
           lead="For a single pull request event, convergePr runs this sequence."
@@ -342,7 +346,7 @@ export default function HowItWorksPage() {
               "Run quality scoring, if it is enabled and a row exists.",
             ]}
           />
-          <div className="mt-6 space-y-4 text-sm leading-relaxed text-muted-foreground">
+          <div className="mt-6 max-w-4xl space-y-4 text-sm leading-relaxed text-muted-foreground">
             <p>
               Every step is idempotent, so a redelivered webhook converges to
               the same state instead of stacking duplicate comments. The gate
@@ -360,7 +364,7 @@ export default function HowItWorksPage() {
         </Section>
 
         <Section id="after" title="Approval, denial, revocation">
-          <div className="space-y-6 text-sm leading-relaxed">
+          <div className="max-w-4xl space-y-6 text-sm leading-relaxed">
             <div>
               <p className="font-medium">On approval</p>
               <p className="mt-1 text-muted-foreground">
@@ -392,11 +396,12 @@ export default function HowItWorksPage() {
         </Section>
 
         <Section
+          rail={false}
           id="ci-mode"
           title="Running it from GitHub Actions"
           lead="If you cannot install a GitHub App, two workflow files do the same job from inside the repository."
         >
-          <div className="space-y-4 text-sm leading-relaxed text-muted-foreground">
+          <div className="max-w-4xl space-y-4 text-sm leading-relaxed text-muted-foreground">
             <p>
               Requests carry the OIDC token GitHub mints for the workflow. The
               server checks its signature against GitHub&apos;s JWKS and then
@@ -421,6 +426,7 @@ export default function HowItWorksPage() {
         </Section>
 
         <Section
+          rail={false}
           id="failures"
           title="When something breaks"
           lead="The gate is built to fail open rather than trap a contributor."
@@ -448,7 +454,7 @@ export default function HowItWorksPage() {
           />
         </Section>
 
-        <Section title="Next">
+        <Section rail={false} title="Next">
           <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm">
             <Link
               href="/quality"

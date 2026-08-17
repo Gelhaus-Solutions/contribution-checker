@@ -13,6 +13,7 @@ export function Section({
   children,
   className,
   divider = true,
+  rail = true,
 }: {
   id?: string;
   eyebrow?: string;
@@ -21,18 +22,19 @@ export function Section({
   children?: React.ReactNode;
   className?: string;
   divider?: boolean;
+  /**
+   * Put the heading and lead in a sticky left rail and the content beside it,
+   * on xl and up. This is how the page uses a wide viewport: simply widening a
+   * single column would push body text past a readable measure, and leaving it
+   * narrow stranded ~400px of empty margin on each side of a 1900px screen.
+   *
+   * Pages that already have their own left or right rail (how-it-works and its
+   * table of contents) pass `rail={false}` so the columns do not stack up.
+   */
+  rail?: boolean;
 }) {
-  return (
-    <section
-      id={id}
-      className={cn(
-        "py-9 md:py-12",
-        divider && "border-t border-border",
-        // Anchored headings should not land under a sticky header.
-        id && "scroll-mt-20",
-        className,
-      )}
-    >
+  const head = (
+    <>
       {eyebrow ? (
         <p className="mb-2 font-mono text-xs tracking-wide text-muted-foreground uppercase">
           {eyebrow}
@@ -48,7 +50,35 @@ export function Section({
           {lead}
         </p>
       ) : null}
-      {children ? <div className={cn(title && "mt-6")}>{children}</div> : null}
+    </>
+  );
+
+  const railed = rail && Boolean(title);
+
+  return (
+    <section
+      id={id}
+      className={cn(
+        "py-9 md:py-12",
+        divider && "border-t border-border",
+        // Anchored headings should not land under a sticky header.
+        id && "scroll-mt-20",
+        className,
+      )}
+    >
+      {railed ? (
+        <div className="xl:grid xl:grid-cols-[18rem_minmax(0,1fr)] xl:gap-x-16">
+          <div className="xl:sticky xl:top-20 xl:self-start">{head}</div>
+          {children ? <div className="mt-6 xl:mt-0">{children}</div> : null}
+        </div>
+      ) : (
+        <>
+          {head}
+          {children ? (
+            <div className={cn(title && "mt-6")}>{children}</div>
+          ) : null}
+        </>
+      )}
     </section>
   );
 }
@@ -70,7 +100,7 @@ export function Steps({
   start?: number;
 }) {
   return (
-    <ol className="space-y-3.5">
+    <ol className="max-w-4xl space-y-3.5">
       {items.map((item, i) => (
         <li
           key={i}
@@ -98,7 +128,7 @@ export function Note({
   children: React.ReactNode;
 }) {
   return (
-    <aside className="rounded-md border border-border bg-muted/30 px-4 py-3 text-sm leading-relaxed">
+    <aside className="max-w-4xl rounded-md border border-border bg-muted/30 px-4 py-3 text-sm leading-relaxed">
       {title ? <p className="mb-1 font-medium">{title}</p> : null}
       <div className="text-muted-foreground">{children}</div>
     </aside>
