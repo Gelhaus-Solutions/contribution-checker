@@ -21,6 +21,7 @@ export const WF = {
   processMergeGroup: "processMergeGroup",
   processPush: "processPush",
   processInstallation: "processInstallation",
+  stagingBatch: "stagingBatch",
   ciCheckPr: "ciCheckPr",
   ciReconcile: "ciReconcile",
   outboundWebhookDelivery: "outboundWebhookDelivery",
@@ -49,6 +50,9 @@ export const SIG = {
   configChanged: "configChanged",
   runBackfill: "runBackfill",
   sweepTick: "sweepTick",
+  // stagingBatch signal: the repo's staging batch may have changed, re-derive
+  // the aggregate PR. Carries no state; the reconcile reads live GitHub.
+  stagingReconcile: "stagingReconcile",
 } as const;
 
 /** Query names for reading an entity workflow's durable state (ops/debugging).
@@ -58,6 +62,7 @@ export const QRY = {
   prGateState: "prGateState",
   contributorGateState: "contributorGateState",
   projectGateState: "projectGateState",
+  stagingBatchState: "stagingBatchState",
 } as const;
 
 /** Temporal patch ids (workflow versioning via patched()/deprecatePatch).
@@ -285,6 +290,37 @@ export type ProjectGateState = {
   /** Tasks drained so far in THIS run. */
   processed: number;
 };
+
+/** A request to re-derive a repo's staging batch. `reason` is observability
+ * only: the reconcile always reads live GitHub state, so no request carries
+ * data the next one would not subsume. */
+export type StagingReconcilePayload = { reason: string };
+
+/** Per-repo staging batch entity input, keyed by the local `Repo.id`. A single
+ * `dirty` flag rather than a queue: N signals collapse into one reconcile
+ * because reconciling is a full re-derivation, not an increment. Carried across
+ * Continue-As-New so a roll never drops a pending request. */
+export type StagingBatchInput = {
+  repoId: string;
+  dirty?: boolean;
+  lastReason?: string | null;
+};
+
+/** stagingBatch durable state, exposed via QRY.stagingBatchState. */
+export type StagingBatchState = {
+  repoId: string;
+  /** A reconcile has been requested but not yet run. */
+  dirty: boolean;
+  /** Reason of the most recent request, for at-a-glance triage. */
+  lastReason: string | null;
+  /** Reconciles run so far in THIS run. */
+  reconciles: number;
+};
+
+/** Debounce before a reconcile so a burst (a PR retargeted, then labeled, then
+ * its batch signalled again) costs one pass over the GitHub API instead of
+ * three. Short enough that the aggregate PR still feels live. */
+export const STAGING_RECONCILE_DEBOUNCE = "5 seconds";
 
 export type ProcessMergeGroupInput = { payload: unknown };
 export type ProcessPushInput = { payload: unknown };

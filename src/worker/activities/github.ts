@@ -7,6 +7,7 @@ import {
   reGatePr,
   type PrEventResult,
 } from "@/lib/github/webhook";
+import { reconcileStagingBatch } from "@/lib/github/staging";
 import { classifyGithubError } from "@/lib/github/errors";
 import type { GithubEventEnvelope } from "@/lib/temporal/contracts";
 
@@ -49,6 +50,21 @@ export async function convergePrReGate(args: {
 }): Promise<void> {
   try {
     await reGatePr({ ghRepoId: Number(args.repoId), prNumber: args.prNumber });
+  } catch (e) {
+    throw classifyGithubError(e);
+  }
+}
+
+/**
+ * stagingBatch's converge: re-derive the repo's aggregate staging PR from live
+ * GitHub state. A full re-derivation, so a retry is always safe and never
+ * double-posts.
+ */
+export async function convergeStagingBatch(args: {
+  repoId: string;
+}): Promise<void> {
+  try {
+    await reconcileStagingBatch({ repoId: args.repoId });
   } catch (e) {
     throw classifyGithubError(e);
   }

@@ -166,6 +166,35 @@ export async function signalPrReGate(
   });
 }
 
+/**
+ * Ask a repo's staging batch entity to re-derive its aggregate PR.
+ * signalWithStart so a repo whose entity has idled out still reconciles.
+ * `repoId` here is the local `Repo.id`, unlike the prGate ids which key on the
+ * GitHub repo id.
+ *
+ * Best-effort by contract: every caller is a webhook handler or a settings
+ * action for which a missed reconcile is a stale manifest, not a broken gate.
+ */
+export async function signalStagingBatch(args: {
+  repoId: string;
+  reason: string;
+}): Promise<void> {
+  try {
+    await signalWithStartTolerant(WF.stagingBatch, {
+      workflowId: workflowIds.stagingBatch(args.repoId),
+      taskQueue: TASK_QUEUE,
+      signal: SIG.stagingReconcile,
+      signalArgs: [{ reason: args.reason }],
+      args: [{ repoId: args.repoId }],
+    });
+  } catch (e) {
+    logger.warn(
+      { err: e, repoId: args.repoId, reason: args.reason },
+      "signalStagingBatch failed"
+    );
+  }
+}
+
 export async function dispatchMergeGroupEvent(
   repoId: string,
   headSha: string,
