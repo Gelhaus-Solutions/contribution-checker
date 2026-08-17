@@ -6,6 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { FormRenderer, type FormValue } from "@/components/form-renderer";
 import type { FormSchema } from "@/lib/applications/schema";
+import { Alert } from "@/components/ui/alert";
 
 type FormValues = Record<string, FormValue>;
 
@@ -56,9 +57,9 @@ export function AppealForm({
 
   if (state.status === "ok") {
     return (
-      <div className="rounded-md border border-success/40 bg-success/10 p-4 text-sm">
+      <Alert variant="success">
         Your appeal was submitted. The project&apos;s reviewers will be notified.
-      </div>
+      </Alert>
     );
   }
 
@@ -88,7 +89,7 @@ export function AppealForm({
         </div>
       )}
       {state.status === "error" && (
-        <p className="text-sm text-destructive">{state.reason}</p>
+        <Alert variant="destructive">{state.reason}</Alert>
       )}
       <Button type="submit" loading={pending}>
         Submit appeal

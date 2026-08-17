@@ -29,6 +29,7 @@ import { getInstallationOctokit } from "@/lib/github/app";
 import { verifyDco } from "@/lib/cla/dco";
 import { getClaStatus } from "@/lib/cla/status";
 import { syncRepoFileClaForPush } from "@/lib/cla/repo-source";
+import { contributorInfoUrl } from "@/lib/notifications/email";
 
 type WebhookPayload = {
   action?: string;
@@ -797,6 +798,7 @@ export async function convergePr(ctx: {
           applyUrl,
           ghLogin: author.login,
           claUrl,
+          infoUrl: contributorInfoUrl(),
         });
         if (body) {
           await commentOnPr(ref, prNumber, body).catch((e) =>
@@ -870,6 +872,7 @@ export async function convergePr(ctx: {
       // CLA they haven't signed, surface it on the PR now so they can sign in
       // parallel (claState is "required"/"stale" exactly when uncovered/stale).
       needsCla: claState === "required" || claState === "stale",
+      infoUrl: contributorInfoUrl(),
     }) ?? "";
 
   try {

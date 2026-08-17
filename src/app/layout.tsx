@@ -1,24 +1,54 @@
 import type { Metadata } from "next";
+import { cookies } from "next/headers";
 import { StackProvider, StackTheme } from "@hexclave/next";
+import { GeistSans } from "geist/font/sans";
+import { GeistMono } from "geist/font/mono";
 import "./globals.css";
 import { auth } from "@/auth";
+import { cn } from "@/lib/cn";
 import { getStackServerApp } from "@/lib/stack";
 import { env } from "@/lib/env";
 import {
   setSentryUser,
   userFromSession,
 } from "@/lib/observability/sentry-user";
-import { BuiltBy } from "@/components/built-by";
 import { RuntimeEnvScript } from "./runtime-env";
 import { SentryUserClient } from "./sentry-user-client";
+import { ThemeScript, THEME_COOKIE } from "./theme-script";
 
-export const metadata: Metadata = {
-  authors: [{ name: "Enno Gelhaus", url: "https://ennogelhaus.de" }],
-  creator: "Enno Gelhaus",
-  publisher: "Gelhaus Solutions",
-  title: "Contribution Checker",
-  description: "Gate PRs behind a contributor application form.",
-};
+const DESCRIPTION =
+  "Self-hosted GitHub App that gates pull requests behind a contributor application form.";
+
+/**
+ * Generated rather than exported as a constant, on purpose. PUBLIC_BASE_URL
+ * falls back to http://localhost:3000 and the image is built generic with no
+ * runtime env, so a statically evaluated metadataBase would bake localhost
+ * into every absolute Open Graph URL in every deployment. The root layout is
+ * already force-dynamic, so evaluating this per request costs nothing.
+ */
+export async function generateMetadata(): Promise<Metadata> {
+  const base = env.PUBLIC_BASE_URL.replace(/\/$/, "");
+  return {
+    metadataBase: new URL(base),
+    title: {
+      default: "contribution-checker",
+      template: "%s · contribution-checker",
+    },
+    description: DESCRIPTION,
+    applicationName: "contribution-checker",
+    authors: [{ name: "Enno Gelhaus", url: "https://ennogelhaus.de" }],
+    creator: "Enno Gelhaus",
+    publisher: "Gelhaus Solutions",
+    openGraph: {
+      type: "website",
+      siteName: "contribution-checker",
+      url: base,
+      title: "contribution-checker",
+      description: DESCRIPTION,
+    },
+    twitter: { card: "summary_large_image" },
+  };
+}
 
 // Force every route to render at request time. The app is built into a generic
 // image with NO Hexclave env (STACK_*), so at build time auth() short-circuits
@@ -44,20 +74,37 @@ export default async function RootLayout({
   // deploys and the build phase don't require a live instance.
   const stackApp = env.stackConfigured ? await getStackServerApp() : null;
 
+  // Free: the app is already force-dynamic, so reading a cookie costs nothing
+  // and it keeps the theme server-readable. Stamping "dark" here is what makes
+  // a pinned dark theme flash-free; "system" is resolved by ThemeScript before
+  // paint, which is why <html> needs suppressHydrationWarning.
+  const theme = (await cookies()).get(THEME_COOKIE)?.value;
+
   const content = (
     <>
       <SentryUserClient user={user} />
       {children}
-      <BuiltBy />
     </>
   );
 
   return (
-    <html lang="en">
+    // Geist ships its woff2 inside the package rather than fetching from a CDN,
+    // which is what this deployment needs: the CSP is `font-src 'self' data:`,
+    // and the image is built in environments that may have no network.
+    <html
+      lang="en"
+      suppressHydrationWarning
+      className={cn(
+        GeistSans.variable,
+        GeistMono.variable,
+        theme === "dark" && "dark",
+      )}
+    >
       <head>
+        <ThemeScript />
         <RuntimeEnvScript />
       </head>
-      <body className="min-h-screen antialiased">
+      <body className="min-h-screen font-sans antialiased">
         {stackApp ? (
           <StackProvider app={stackApp}>
             <StackTheme>{content}</StackTheme>

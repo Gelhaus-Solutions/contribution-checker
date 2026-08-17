@@ -14,6 +14,7 @@ import { SubmitButton } from "@/components/ui/submit-button";
 import { SearchInput } from "@/components/ui/search-input";
 import { Pagination } from "@/components/ui/pagination";
 import { parsePageParams, type SearchParamRecord } from "@/lib/pagination";
+import { formatDateTimeSeconds } from "@/lib/ui/format";
 import {
   revokeRosterMember,
   revokeCorporateCla,
@@ -50,10 +51,6 @@ function corporateBadgeVariant(
       // REVOKED and any future states.
       return "secondary";
   }
-}
-
-function fmt(d: Date): string {
-  return d.toISOString().replace("T", " ").slice(0, 19);
 }
 
 export default async function CorporateClaPage({
@@ -215,12 +212,12 @@ export default async function CorporateClaPage({
                       <span className="block text-xs">
                         Signed
                         {c.signatureText ? ` “${c.signatureText}”` : ""} on{" "}
-                        {fmt(c.createdAt)}
+                        {formatDateTimeSeconds(c.createdAt)}
                         {revoked && c.revokedAt
-                          ? ` · revoked ${fmt(c.revokedAt)}`
+                          ? ` · revoked ${formatDateTimeSeconds(c.revokedAt)}`
                           : ""}
                         {rejected && c.rejectedAt
-                          ? ` · rejected ${fmt(c.rejectedAt)}`
+                          ? ` · rejected ${formatDateTimeSeconds(c.rejectedAt)}`
                           : ""}
                       </span>
                       {rejected && c.rejectReason && (
@@ -298,7 +295,7 @@ export default async function CorporateClaPage({
                           </div>
                           <div className="flex items-center gap-3">
                             <time className="text-xs text-muted-foreground">
-                              added {fmt(m.addedAt)}
+                              added {formatDateTimeSeconds(m.addedAt)}
                             </time>
                             {m.status === "ACTIVE" && (
                               <form action={revokeRosterMember}>

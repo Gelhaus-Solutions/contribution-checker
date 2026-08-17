@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Markdown } from "@/components/markdown";
+import { formatDateTime } from "@/lib/ui/format";
 import { getClaVersionBody, setVersionResign } from "./actions";
 
 export type HistoryVersion = {
@@ -88,7 +89,7 @@ function Row({ projectId, v }: { projectId: string; v: HistoryVersion }) {
           {v.isCurrent && <Badge variant="success">current</Badge>}
         </button>
         <span className="text-muted-foreground">
-          {v.publishedAt.replace("T", " ").slice(0, 16)}
+          {formatDateTime(v.publishedAt)}
         </span>
       </div>
 

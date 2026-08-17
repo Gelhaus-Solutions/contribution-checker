@@ -2,6 +2,7 @@ import { Markdown } from "@/components/markdown";
 import { SubmitButton } from "@/components/ui/submit-button";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+import { formatDate, formatDateTime } from "@/lib/ui/format";
 import { editNoteAction, deleteNoteAction } from "../actions";
 
 export type NoteCardData = {
@@ -50,7 +51,7 @@ export function NoteCard({
             @{note.author.ghLogin ?? "unknown"}
           </span>
           <span>·</span>
-          <span>{note.createdAt.toISOString().replace("T", " ").slice(0, 16)}</span>
+          <span>{formatDateTime(note.createdAt)}</span>
           {isEdited(note) && !isDeleted && (
             <span title={`edited ${note.updatedAt.toISOString()}`}>(edited)</span>
           )}
@@ -101,7 +102,7 @@ export function NoteCard({
       </div>
       {isDeleted ? (
         <div className="text-muted-foreground italic">
-          [deleted{note.deletedAt ? ` ${note.deletedAt.toISOString().slice(0, 10)}` : ""}]
+          [deleted{note.deletedAt ? ` ${formatDate(note.deletedAt)}` : ""}]
         </div>
       ) : (
         <Markdown source={note.body} />

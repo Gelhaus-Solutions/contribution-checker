@@ -16,6 +16,8 @@ import {
   VaultResolutionError,
 } from "@/lib/vault/resolver";
 import { getSecretStatus } from "@/lib/vault/status";
+import { CodeBlock } from "@/components/code-block";
+import { PageHeader } from "@/components/page-header";
 
 export const dynamic = "force-dynamic";
 
@@ -101,12 +103,10 @@ export default async function VaultStatusPage() {
     <>
       <SiteHeader />
       <main className="mx-auto max-w-3xl space-y-6 px-4 py-10">
-        <div>
-          <h1 className="text-2xl font-semibold">HashiCorp Vault</h1>
-          <p className="text-sm text-muted-foreground">
-            Per-secret resolution status. No secret values are displayed.
-          </p>
-        </div>
+        <PageHeader
+          title="HashiCorp Vault"
+          description="Per-secret resolution status. No secret values are displayed."
+        />
 
         <Card>
           <CardHeader>
@@ -183,7 +183,7 @@ export default async function VaultStatusPage() {
             <CardTitle className="text-base">Env example</CardTitle>
           </CardHeader>
           <CardContent>
-            <pre className="overflow-x-auto rounded bg-muted px-3 py-2 text-xs">{`# Vault connection
+            <CodeBlock language=".env" code={`# Vault connection
 VAULT_ADDR="https://vault.example.com"
 VAULT_AUTH_METHOD="approle"           # or "token"
 VAULT_APPROLE_ROLE_ID="..."
@@ -206,7 +206,7 @@ VAULT_GITHUB_APP_CLIENT_ID_PATH="secret/data/cc/github#client_id"
 VAULT_GITHUB_APP_CLIENT_SECRET_PATH="secret/data/cc/github#client_secret"
 VAULT_SMTP_USER_PATH="secret/data/cc/smtp#user"
 VAULT_SMTP_PASS_PATH="secret/data/cc/smtp#password"
-`}</pre>
+`} />
           </CardContent>
         </Card>
       </main>

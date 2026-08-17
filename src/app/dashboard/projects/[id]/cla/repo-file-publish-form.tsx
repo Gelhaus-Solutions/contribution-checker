@@ -6,6 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { SubmitButton } from "@/components/ui/submit-button";
 import { Markdown } from "@/components/markdown";
+import { Select } from "@/components/ui/select";
 import { publishClaVersion, previewRepoFile } from "./actions";
 import {
   PriorVersionResignList,
@@ -67,25 +68,23 @@ export function RepoFilePublishForm({
 
       <div className="space-y-1">
         <Label htmlFor="rf-kind">Agreement</Label>
-        <select
+        <Select
           id="rf-kind"
           name="kind"
           value={kind}
           onChange={(e) => setKind(e.target.value as "ICLA" | "CCLA")}
-          className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm"
         >
           <option value="ICLA">Individual (ICLA)</option>
           <option value="CCLA">Corporate (CCLA)</option>
-        </select>
+        </Select>
       </div>
       <div className="space-y-1">
         <Label htmlFor="rf-repo">Repository</Label>
-        <select
+        <Select
           id="rf-repo"
           name="sourceRepoId"
           value={sourceRepoId}
           onChange={(e) => setSourceRepoId(e.target.value)}
-          className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm"
         >
           {repos.map((r) => (
             <option key={r.id} value={r.id} disabled={!r.installationId}>
@@ -93,7 +92,7 @@ export function RepoFilePublishForm({
               {r.installationId ? "" : " (App not installed)"}
             </option>
           ))}
-        </select>
+        </Select>
       </div>
       <div className="space-y-1">
         <Label htmlFor="rf-path">File path</Label>

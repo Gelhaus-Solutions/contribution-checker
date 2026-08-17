@@ -1,8 +1,8 @@
 "use client";
 
 import * as Sentry from "@sentry/nextjs";
-import NextError from "next/error";
 import { useEffect } from "react";
+import "./globals.css";
 
 // Heuristic: the in-flight stale-Server-Action crash. Next.js logs this two
 // ways depending on which branch took it. Sometimes the message is "Failed
@@ -51,10 +51,37 @@ export default function GlobalError({
     }
   }, [error]);
 
+  // This boundary replaces the root layout, so it has to render its own <html>
+  // and pull in the stylesheet itself. It also cannot use the theme cookie
+  // (the layout that reads it is exactly what failed), so it renders in the
+  // light palette rather than risking an unstyled page.
   return (
-    <html>
-      <body>
-        <NextError statusCode={0} />
+    <html lang="en">
+      <body className="min-h-screen font-sans antialiased">
+        <main className="mx-auto flex min-h-screen max-w-md flex-col items-center justify-center px-4 text-center">
+          <p className="font-mono text-xs tracking-widest text-muted-foreground">
+            {isStaleServerActionError(error) ? "reloading" : "error"}
+          </p>
+          <h1 className="mt-2 text-xl font-semibold tracking-tight">
+            {isStaleServerActionError(error)
+              ? "This tab is out of date"
+              : "Something went wrong"}
+          </h1>
+          <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
+            {isStaleServerActionError(error)
+              ? "A new version was deployed while this page was open. Reloading now."
+              : "The application failed to start rendering. The error has been reported."}
+          </p>
+          {!isStaleServerActionError(error) && (
+            <button
+              type="button"
+              onClick={() => window.location.reload()}
+              className="mt-6 inline-flex h-8 items-center justify-center rounded-md bg-primary px-3.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+            >
+              Reload
+            </button>
+          )}
+        </main>
       </body>
     </html>
   );

@@ -10,6 +10,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SubmitButton } from "@/components/ui/submit-button";
+import { Select } from "@/components/ui/select";
 import { addManualDecision } from "./actions";
 import { PeopleList, type PersonRow } from "./people-list";
 
@@ -127,15 +128,14 @@ export default async function ProjectPeople({
               </div>
               <div className="space-y-2">
                 <Label htmlFor="status">Decision</Label>
-                <select
+                <Select
                   id="status"
                   name="status"
                   defaultValue="APPROVED"
-                  className="h-9 rounded-md border border-border bg-background px-3 text-sm"
                 >
                   <option value="APPROVED">Approve</option>
                   <option value="DENIED">Deny</option>
-                </select>
+                </Select>
               </div>
               <div className="flex-1 space-y-2">
                 <Label htmlFor="reason">Note (optional)</Label>

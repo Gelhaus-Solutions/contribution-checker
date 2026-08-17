@@ -12,6 +12,23 @@ import { Badge } from "@/components/ui/badge";
 import { SearchInput } from "@/components/ui/search-input";
 import { Pagination } from "@/components/ui/pagination";
 import { parsePageParams, type SearchParamRecord } from "@/lib/pagination";
+import { formatDateTimeSeconds } from "@/lib/ui/format";
+import { CodeBlock } from "@/components/code-block";
+import { EmptyState } from "@/components/empty-state";
+
+/**
+ * Pretty-print an audit payload for display. The column is a plain JSON string
+ * with no schema, so a malformed row must not take the page down: this used to
+ * be a bare JSON.parse inside JSX, which throws during render.
+ */
+function prettyPayload(payload: string): string {
+  try {
+    return JSON.stringify(JSON.parse(payload), null, 2);
+  } catch {
+    return payload;
+  }
+}
+
 
 export default async function AuditLog({
   params,
@@ -68,9 +85,13 @@ export default async function AuditLog({
           />
         </div>
         {events.length === 0 ? (
-          <div className="px-6 py-6 text-sm text-muted-foreground">
-            {q ? "No events match your search." : "No events yet."}
-          </div>
+          <EmptyState
+            variant="row"
+            query={q}
+            clearHref={basePath}
+            title="No audit events yet"
+            description="Approvals, denials and settings changes are recorded here."
+          />
         ) : (
           <ul className="divide-y divide-border">
             {events.map((e) => (
@@ -83,13 +104,16 @@ export default async function AuditLog({
                     </span>
                   </div>
                   <time className="text-xs text-muted-foreground">
-                    {e.createdAt.toISOString().replace("T", " ").slice(0, 19)}
+                    {formatDateTimeSeconds(e.createdAt)}
                   </time>
                 </div>
                 {e.payload !== "{}" && (
-                  <pre className="mt-2 overflow-x-auto rounded bg-muted px-3 py-2 text-xs">
-                    {JSON.stringify(JSON.parse(e.payload), null, 2)}
-                  </pre>
+                  <CodeBlock
+                    className="mt-2"
+                    language="payload"
+                    maxHeight="16rem"
+                    code={prettyPayload(e.payload)}
+                  />
                 )}
               </li>
             ))}

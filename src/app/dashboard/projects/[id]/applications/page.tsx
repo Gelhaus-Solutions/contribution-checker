@@ -9,10 +9,12 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { SearchInput } from "@/components/ui/search-input";
 import { Pagination } from "@/components/ui/pagination";
 import { parsePageParams, type SearchParamRecord } from "@/lib/pagination";
+import { StatusBadge } from "@/components/status-badge";
+import { formatDate } from "@/lib/ui/format";
+import { EmptyState } from "@/components/empty-state";
 
 const STATUS_OPTIONS = [
   { value: "SUBMITTED", label: "Submitted" },
@@ -22,14 +24,6 @@ const STATUS_OPTIONS = [
   { value: "APPEALED", label: "Appealed" },
 ] as const;
 
-const STATUS_VARIANT: Record<
-  string,
-  "default" | "secondary" | "success" | "warning" | "destructive"
-> = {
-  SUBMITTED: "warning",
-  APPROVED: "success",
-  DENIED: "destructive",
-};
 
 export default async function ProjectApplications({
   params,
@@ -118,9 +112,13 @@ export default async function ProjectApplications({
           />
         </div>
         {apps.length === 0 ? (
-          <div className="px-6 py-6 text-sm text-muted-foreground">
-            {q ? "No applications match your search." : "Nothing in this bucket."}
-          </div>
+          <EmptyState
+            variant="row"
+            query={q}
+            clearHref={`${basePath}?status=${filterStatus}`}
+            title="Nothing in this bucket"
+            description="Applications appear here once contributors submit them."
+          />
         ) : (
           <ul className="divide-y divide-border">
             {apps.map((a) => (
@@ -150,11 +148,9 @@ export default async function ProjectApplications({
                   </div>
                   <div className="flex items-center gap-3">
                     <span className="text-xs text-muted-foreground">
-                      {a.createdAt.toISOString().slice(0, 10)}
+                      {formatDate(a.createdAt)}
                     </span>
-                    <Badge variant={STATUS_VARIANT[a.status] ?? "secondary"}>
-                      {a.status}
-                    </Badge>
+                    <StatusBadge status={a.status} />
                   </div>
                 </Link>
               </li>

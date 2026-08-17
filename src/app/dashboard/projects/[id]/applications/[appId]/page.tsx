@@ -27,19 +27,13 @@ import { ALL_HEURISTICS, parseQualityConfig } from "@/lib/quality/registry";
 import type { SignalsRaw } from "@/lib/quality/types";
 import { countApprovingReviewers } from "@/lib/applications/decide";
 import { getClaStatus } from "@/lib/cla/status";
+import { StatusBadge } from "@/components/status-badge";
+import { formatDate } from "@/lib/ui/format";
 import { FieldThread, type FieldThreadNote } from "./_components/field-thread";
 import { NoteCard } from "./_components/note-card";
 import { ReviewComposer, type DraftComment } from "./_components/review-composer";
 import { ReviewsList, type ReviewListItem } from "./_components/reviews-list";
 
-const STATUS_VARIANT: Record<
-  string,
-  "default" | "secondary" | "success" | "warning" | "destructive"
-> = {
-  SUBMITTED: "warning",
-  APPROVED: "success",
-  DENIED: "destructive",
-};
 
 export default async function ApplicationDetail({
   params,
@@ -333,9 +327,7 @@ export default async function ApplicationDetail({
         >
           ← Back to queue
         </Link>
-        <Badge variant={STATUS_VARIANT[app.status] ?? "secondary"}>
-          {app.status}
-        </Badge>
+        <StatusBadge status={app.status} />
       </div>
 
       <Card>
@@ -358,12 +350,12 @@ export default async function ApplicationDetail({
             </div>
           </div>
           <div className="text-right text-xs text-muted-foreground">
-            <div>Submitted {app.createdAt.toISOString().slice(0, 10)}</div>
+            <div>Submitted {formatDate(app.createdAt)}</div>
             {app.decidedAt && (
               <div>
                 {app.status === "APPROVED" ? "Approved" : "Denied"} by{" "}
                 {app.decidedBy?.ghLogin ?? "system"} on{" "}
-                {app.decidedAt.toISOString().slice(0, 10)}
+                {formatDate(app.decidedAt)}
               </div>
             )}
           </div>
@@ -512,7 +504,7 @@ export default async function ApplicationDetail({
                       <>
                         Resubmitting is allowed. Cooldown until{" "}
                         <span className="font-medium text-foreground">
-                          {app.cooldownUntil.toISOString().slice(0, 10)}
+                          {formatDate(app.cooldownUntil)}
                         </span>
                         .
                       </>
@@ -679,7 +671,7 @@ export default async function ApplicationDetail({
               <p className="text-xs text-muted-foreground">
                 Resolved by {appeal.resolvedBy.ghLogin}
                 {appeal.resolvedAt
-                  ? ` on ${appeal.resolvedAt.toISOString().slice(0, 10)}`
+                  ? ` on ${formatDate(appeal.resolvedAt)}`
                   : ""}
                 .
               </p>

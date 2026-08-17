@@ -9,6 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { FormRenderer } from "@/components/form-renderer";
 import type { Field, FormSchema } from "@/lib/applications/schema";
+import { Select } from "@/components/ui/select";
 
 type FieldType = Field["type"];
 
@@ -240,8 +241,7 @@ export function FormBuilder({
                     </div>
                     <div className="space-y-1">
                       <Label className="text-xs text-muted-foreground">Mode</Label>
-                      <select
-                        className="flex h-9 w-full rounded-md border border-border bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
+                      <Select
                         value={f.urlPattern?.mode ?? "must-match"}
                         disabled={!f.urlPattern?.pattern}
                         onChange={(e) => {
@@ -258,7 +258,7 @@ export function FormBuilder({
                       >
                         <option value="must-match">Must match</option>
                         <option value="must-not-match">Must not match</option>
-                      </select>
+                      </Select>
                     </div>
                   </div>
                   <div className="space-y-1">

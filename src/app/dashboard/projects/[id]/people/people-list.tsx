@@ -7,6 +7,18 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { SubmitButton } from "@/components/ui/submit-button";
 import { useActionFeedback } from "@/components/ui/use-action-feedback";
+import { StatusBadge } from "@/components/status-badge";
+import { Select } from "@/components/ui/select";
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Alert } from "@/components/ui/alert";
+import { SkeletonRows } from "@/components/ui/skeleton";
 import {
   removeManualDecision,
   getUserOverview,
@@ -42,11 +54,6 @@ export type PersonRow = {
   latestDecidedByLogin: string | null;
 };
 
-const STATUS_VARIANT = {
-  APPROVED: "success",
-  DENIED: "destructive",
-  PENDING: "warning",
-} as const;
 
 const PAGE_SIZE = 25;
 
@@ -119,17 +126,20 @@ export function PeopleList({
     <div className="space-y-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
         <div className="flex flex-1 gap-2 sm:max-w-md">
-          <select
-            value={searchField}
-            onChange={(e) => setSearchField(e.target.value as SearchField)}
-            className="h-9 rounded-md border border-border bg-background px-2 text-sm"
-            aria-label="Search field"
-          >
-            <option value="ALL">All fields</option>
-            <option value="login">Login</option>
-            <option value="reason">Reason</option>
-            <option value="reviewer">Reviewer</option>
-          </select>
+          {/* Select fills its container, so the container is what caps it and
+              leaves the search input the rest of the row. */}
+          <div className="w-32 shrink-0">
+            <Select
+              value={searchField}
+              onChange={(e) => setSearchField(e.target.value as SearchField)}
+              aria-label="Search field"
+            >
+              <option value="ALL">All fields</option>
+              <option value="login">Login</option>
+              <option value="reason">Reason</option>
+              <option value="reviewer">Reviewer</option>
+            </Select>
+          </div>
           <Input
             placeholder={
               searchField === "ALL"
@@ -197,7 +207,7 @@ export function PeopleList({
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="font-mono">{d.ghLogin}</span>
-                  <Badge variant={STATUS_VARIANT[d.status]}>{d.status}</Badge>
+                  <StatusBadge status={d.status} />
                   {d.manual && (
                     <Badge variant="outline" className="text-xs">
                       Manual
@@ -413,47 +423,28 @@ function UserOverviewDialog({
       .catch((e) => setError(e instanceof Error ? e.message : String(e)));
   };
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
   // Mirror approveApplication's CLA gate so forcing APPROVED can't throw an
   // unhandled gate error. record-only CLAs (required=false) never block.
   const claBlocksApproval =
     !!data?.cla && data.cla.required && !data.cla.satisfied;
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-      onClick={onClose}
-    >
-      <div
-        className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-md border border-border bg-background p-6 shadow-lg"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between gap-2">
-          <h2 className="text-lg font-semibold">
-            <span className="font-mono">{ghLogin}</span>
-          </h2>
-          <Button size="sm" variant="ghost" onClick={onClose}>
-            Close
-          </Button>
-        </div>
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent width="lg">
+        <DialogHeader>
+          <DialogTitle className="font-mono">{ghLogin}</DialogTitle>
+          <DialogDescription>
+            Decisions, CLA status and pull request activity for this
+            contributor.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogBody>
+        {error && <Alert variant="destructive">Error: {error}</Alert>}
 
-        {error && (
-          <p className="mt-4 text-sm text-destructive">Error: {error}</p>
-        )}
-
-        {!data && !error && (
-          <p className="mt-4 text-sm text-muted-foreground">Loading…</p>
-        )}
+        {!data && !error && <SkeletonRows rows={4} />}
 
         {data && (
-          <div className="mt-4 space-y-5">
+          <div className="space-y-5">
             {data.application && (
               <section>
                 <h3 className="text-sm font-medium">Application</h3>
@@ -760,8 +751,9 @@ function UserOverviewDialog({
             </div>
           </div>
         )}
-      </div>
-    </div>
+        </DialogBody>
+      </DialogContent>
+    </Dialog>
   );
 }
 

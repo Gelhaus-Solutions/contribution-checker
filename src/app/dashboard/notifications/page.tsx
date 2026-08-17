@@ -12,6 +12,8 @@ import { SubmitButton } from "@/components/ui/submit-button";
 import { SearchInput } from "@/components/ui/search-input";
 import { Pagination } from "@/components/ui/pagination";
 import { parsePageParams, type SearchParamRecord } from "@/lib/pagination";
+import { formatDateTime } from "@/lib/ui/format";
+import { PageHeader } from "@/components/page-header";
 import { markAllReadAction } from "./actions";
 
 export default async function NotificationsPage({
@@ -34,14 +36,17 @@ export default async function NotificationsPage({
     <>
       <SiteHeader />
       <main className="mx-auto max-w-3xl space-y-4 px-4 py-10">
-        <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-semibold">Notifications</h1>
-          <form action={markAllReadAction}>
-            <SubmitButton size="sm" variant="outline">
-              Mark all read
-            </SubmitButton>
-          </form>
-        </div>
+        <PageHeader
+          title="Notifications"
+          back={{ href: "/dashboard", label: "Dashboard" }}
+          actions={
+            <form action={markAllReadAction}>
+              <SubmitButton size="sm" variant="outline">
+                Mark all read
+              </SubmitButton>
+            </form>
+          }
+        />
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Inbox</CardTitle>
@@ -84,10 +89,7 @@ export default async function NotificationsPage({
                           {KIND_LABELS[n.kind] ?? n.kind}
                         </div>
                         <time className="text-xs text-muted-foreground">
-                          {n.createdAt
-                            .toISOString()
-                            .replace("T", " ")
-                            .slice(0, 16)}
+                          {formatDateTime(n.createdAt)}
                         </time>
                       </div>
                       <div className="mt-1 text-muted-foreground">

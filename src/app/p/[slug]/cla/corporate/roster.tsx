@@ -6,6 +6,8 @@ import { SubmitButton } from "@/components/ui/submit-button";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import { StatusBadge } from "@/components/status-badge";
+import { Alert } from "@/components/ui/alert";
 import type { ClaActionState } from "../actions";
 
 // The corporate roster server actions (`addRosterMembers`,
@@ -23,14 +25,6 @@ export type RosterMember = {
   addedAt: string; // ISO date (YYYY-MM-DD)
 };
 
-const STATUS_VARIANT: Record<
-  string,
-  "default" | "secondary" | "success" | "warning" | "destructive"
-> = {
-  ACTIVE: "success",
-  REVOKED: "secondary",
-  DISPUTED: "warning",
-};
 
 export function RosterManager({
   corporateId,
@@ -173,7 +167,7 @@ function AddRosterForm({
         </p>
       </div>
       {state.status === "error" && (
-        <p className="text-sm text-destructive">{state.reason}</p>
+        <Alert variant="destructive">{state.reason}</Alert>
       )}
       {state.status === "ok" && (
         <p className="text-sm text-success">Roster updated.</p>
@@ -202,9 +196,7 @@ function ActiveRow({
 
   return (
     <li className="flex flex-wrap items-center gap-2 px-3 py-2 text-sm">
-      <Badge variant={STATUS_VARIANT[member.status] ?? "secondary"} className="text-[10px]">
-        {member.status}
-      </Badge>
+      <StatusBadge status={member.status} />
       <span className="font-mono">@{member.ghLogin}</span>
       <span className="text-xs text-muted-foreground">
         added {member.addedAt}
@@ -222,7 +214,7 @@ function ActiveRow({
         </Button>
       </form>
       {state.status === "error" && (
-        <p className="w-full text-xs text-destructive">{state.reason}</p>
+        <Alert variant="destructive" className="w-full">{state.reason}</Alert>
       )}
     </li>
   );

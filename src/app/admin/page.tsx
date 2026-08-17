@@ -11,6 +11,7 @@ import {
 import { SubmitButton } from "@/components/ui/submit-button";
 import { env } from "@/lib/env";
 import { getAppSlug } from "@/lib/github/app";
+import { PageHeader } from "@/components/page-header";
 import { provisionStackAuthAction } from "./actions";
 
 export default async function AdminHome() {
@@ -21,7 +22,10 @@ export default async function AdminHome() {
     <>
       <SiteHeader />
       <main className="mx-auto max-w-4xl space-y-6 px-4 py-10">
-        <h1 className="text-2xl font-semibold">Super-admin</h1>
+        <PageHeader
+          title="Super-admin"
+          description="Instance-wide settings and integration status."
+        />
 
         <Card>
           <CardHeader>

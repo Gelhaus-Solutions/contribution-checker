@@ -429,6 +429,9 @@ export async function reapplyClaGateForApprovedAuthor(args: {
           claUrl,
         );
         if (!alreadyPosted) {
+          // No infoUrl: this path only ever carries a CLA gate, and those
+          // messages deliberately keep the signing link as the single call to
+          // action.
           const body = buildDecisionMessage({
             decision,
             projectName: project.name,
