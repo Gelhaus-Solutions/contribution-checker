@@ -4,6 +4,7 @@ import { SiteHeader } from "@/components/site-header";
 import { getProjectPermissions, requireSession } from "@/lib/authz";
 import { prisma } from "@/lib/db";
 import { getProjectForViewer } from "@/lib/projects";
+import { SHELL } from "@/lib/ui/layout";
 import { ProjectNav } from "./nav";
 
 export default async function ProjectLayout({
@@ -43,7 +44,7 @@ export default async function ProjectLayout({
     <>
       <SiteHeader />
       <div className="border-b border-border bg-muted/30">
-        <div className="mx-auto max-w-6xl px-4 py-4">
+        <div className={`${SHELL} py-4`}>
           <div className="flex items-baseline justify-between gap-4">
             <div>
               <Link href="/dashboard" className="text-xs text-muted-foreground hover:underline">
@@ -57,8 +58,8 @@ export default async function ProjectLayout({
           </div>
         </div>
       </div>
-      <div className="mx-auto max-w-6xl px-4 py-6">
-        <div className="grid gap-6 md:grid-cols-[180px_1fr]">
+      <div className={`${SHELL} py-6`}>
+        <div className="grid gap-6 md:grid-cols-[190px_minmax(0,1fr)]">
           <ProjectNav id={id} perms={perms} />
           <div>{children}</div>
         </div>

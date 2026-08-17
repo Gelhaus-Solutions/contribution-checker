@@ -19,6 +19,7 @@ import { Pagination } from "@/components/ui/pagination";
 import { parsePageParams, type SearchParamRecord } from "@/lib/pagination";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
+import { SHELL_MEDIUM } from "@/lib/ui/layout";
 import {
   grantCreatorByGhLogin,
   revokeCreator,
@@ -73,7 +74,7 @@ export default async function AllowlistPage({
   return (
     <>
       <SiteHeader />
-      <main className="mx-auto max-w-3xl space-y-6 px-4 py-10">
+      <main className={`${SHELL_MEDIUM} space-y-6 py-10`}>
         <PageHeader
           title="Allowlist"
           description="Users with project-creation rights or super-admin role."

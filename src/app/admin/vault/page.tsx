@@ -18,6 +18,7 @@ import {
 import { getSecretStatus } from "@/lib/vault/status";
 import { CodeBlock } from "@/components/code-block";
 import { PageHeader } from "@/components/page-header";
+import { SHELL_MEDIUM } from "@/lib/ui/layout";
 
 export const dynamic = "force-dynamic";
 
@@ -102,7 +103,7 @@ export default async function VaultStatusPage() {
   return (
     <>
       <SiteHeader />
-      <main className="mx-auto max-w-3xl space-y-6 px-4 py-10">
+      <main className={`${SHELL_MEDIUM} space-y-6 py-10`}>
         <PageHeader
           title="HashiCorp Vault"
           description="Per-secret resolution status. No secret values are displayed."

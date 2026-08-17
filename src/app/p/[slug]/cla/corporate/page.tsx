@@ -18,6 +18,7 @@ import { RosterManager, type RosterMember } from "./roster";
 import { signCcla, addRosterMembers, revokeRosterMember } from "../actions";
 import { parseFormSchema, type FormSchema } from "@/lib/applications/schema";
 import { formatDate } from "@/lib/ui/format";
+import { SHELL_NARROW } from "@/lib/ui/layout";
 
 export default async function CorporateClaPage({
   params,
@@ -47,7 +48,7 @@ export default async function CorporateClaPage({
   return (
     <>
       <SiteHeader />
-      <main className="mx-auto max-w-2xl space-y-6 px-4 py-10">
+      <main className={`${SHELL_NARROW} space-y-6 py-10`}>
         <div>
           <h1 className="text-3xl font-bold tracking-tight">
             Corporate CLA: {project.name}

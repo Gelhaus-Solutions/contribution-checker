@@ -30,7 +30,7 @@ const COLUMNS: { title: string; links: { href: string; label: string }[] }[] = [
 export function MarketingFooter() {
   return (
     <footer className="mt-auto border-t border-border">
-      <div className="mx-auto max-w-[96rem] px-5 py-12 sm:px-14">
+      <div className="mx-auto max-w-[110rem] px-5 py-12 sm:px-14">
         <div className="grid gap-8 sm:grid-cols-2 md:grid-cols-4">
           <div className="space-y-3">
             <Link

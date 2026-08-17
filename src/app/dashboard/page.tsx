@@ -15,6 +15,7 @@ import { Badge } from "@/components/ui/badge";
 import { StatusBadge } from "@/components/status-badge";
 import { formatDate } from "@/lib/ui/format";
 import { EmptyState } from "@/components/empty-state";
+import { SHELL } from "@/lib/ui/layout";
 import {
   listAppliedProjectsForUser,
   listProjectsForUser,
@@ -36,7 +37,7 @@ export default async function DashboardHome() {
   return (
     <>
       <SiteHeader />
-      <main className="mx-auto max-w-6xl space-y-10 px-4 py-10">
+      <main className={`${SHELL} space-y-10 py-10`}>
         <section>
           <div className="mb-4 flex items-center justify-between">
             <div>
@@ -65,7 +66,7 @@ export default async function DashboardHome() {
               />
             </Card>
           ) : (
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
               {memberships.map(({ project, role }) => (
                 <Link
                   key={project.id}

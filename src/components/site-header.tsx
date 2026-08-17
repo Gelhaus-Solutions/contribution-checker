@@ -18,10 +18,10 @@ export async function SiteHeader({
   /** Show the marketing nav. The dashboard and admin pass nothing. */
   marketing = false,
   /** Widen the container to match a wide page shell. */
-  width = "6xl",
+  width = "app",
 }: {
   marketing?: boolean;
-  width?: "5xl" | "6xl" | "7xl" | "wide";
+  width?: "app" | "wide";
 } = {}) {
   const session = await auth();
   const unread = session?.user ? await unreadCount(session.user.id) : 0;
@@ -33,13 +33,10 @@ export async function SiteHeader({
     <header className="sticky top-0 z-40 border-b border-border bg-background/90 backdrop-blur-md supports-[backdrop-filter]:bg-background/75">
       <div
         className={cn(
-          "mx-auto flex h-14 items-center justify-between px-4",
-          {
-            "5xl": "max-w-5xl",
-            "6xl": "max-w-6xl",
-            "7xl": "max-w-7xl",
-            wide: "max-w-[96rem]",
-          }[width],
+          "mx-auto flex h-14 w-full items-center justify-between",
+          width === "wide"
+            ? "max-w-[110rem] px-5 sm:px-8 lg:px-14"
+            : "max-w-[110rem] px-5 sm:px-8 lg:px-12",
         )}
       >
         <Link

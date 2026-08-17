@@ -22,7 +22,7 @@ export default function MarketingLayout({
     // numbers hang into.
     <div className="flex min-h-screen flex-col">
       <SiteHeader marketing width="wide" />
-      <main className="mx-auto w-full max-w-[96rem] flex-1 border-x border-border bg-background px-5 sm:pr-10 sm:pl-14">
+      <main className="mx-auto w-full max-w-[110rem] flex-1 border-x border-border bg-background px-5 sm:pr-10 sm:pl-14">
         {children}
       </main>
       <MarketingFooter />

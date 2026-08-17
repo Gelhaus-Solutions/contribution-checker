@@ -1,4 +1,5 @@
 import { Skeleton } from "@/components/ui/skeleton";
+import { SHELL } from "@/lib/ui/layout";
 
 /**
  * Suspense fallback for the dashboard. Every page here is force-dynamic and
@@ -7,7 +8,7 @@ import { Skeleton } from "@/components/ui/skeleton";
  */
 export default function DashboardLoading() {
   return (
-    <div className="mx-auto max-w-6xl px-4 py-10">
+    <div className={`${SHELL} py-10`}>
       <Skeleton className="h-7 w-48" />
       <Skeleton className="mt-2 h-4 w-72" />
       <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">

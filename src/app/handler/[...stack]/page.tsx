@@ -3,6 +3,7 @@ import Link from "next/link";
 import { StackHandler } from "@hexclave/next";
 import { SiteHeader } from "@/components/site-header";
 import { getStackServerApp } from "@/lib/stack";
+import { SHELL } from "@/lib/ui/layout";
 
 /**
  * Hexclave (Stack Auth) catch-all handler: renders sign-in, sign-up,
@@ -28,7 +29,7 @@ export default async function Handler(props: {
     return (
       <>
         <SiteHeader />
-        <main className="mx-auto max-w-6xl px-4 py-6">
+        <main className={`${SHELL} py-6`}>
           <Link
             href="/dashboard"
             className="text-xs text-muted-foreground hover:underline"

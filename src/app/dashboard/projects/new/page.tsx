@@ -2,6 +2,7 @@ import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import { SiteHeader } from "@/components/site-header";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { SHELL_NARROW } from "@/lib/ui/layout";
 import { createProjectAction } from "./actions";
 import { CreateProjectForm } from "./form";
 
@@ -16,7 +17,7 @@ export default async function NewProject() {
   return (
     <>
       <SiteHeader />
-      <main className="mx-auto max-w-2xl px-4 py-10">
+      <main className={`${SHELL_NARROW} py-10`}>
         <Card>
           <CardHeader>
             <CardTitle>Create project</CardTitle>

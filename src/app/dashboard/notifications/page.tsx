@@ -14,6 +14,7 @@ import { Pagination } from "@/components/ui/pagination";
 import { parsePageParams, type SearchParamRecord } from "@/lib/pagination";
 import { formatDateTime } from "@/lib/ui/format";
 import { PageHeader } from "@/components/page-header";
+import { SHELL_MEDIUM } from "@/lib/ui/layout";
 import { markAllReadAction } from "./actions";
 
 export default async function NotificationsPage({
@@ -35,7 +36,7 @@ export default async function NotificationsPage({
   return (
     <>
       <SiteHeader />
-      <main className="mx-auto max-w-3xl space-y-4 px-4 py-10">
+      <main className={`${SHELL_MEDIUM} space-y-4 py-10`}>
         <PageHeader
           title="Notifications"
           back={{ href: "/dashboard", label: "Dashboard" }}

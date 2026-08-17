@@ -7,6 +7,7 @@ import { parseFormSchema } from "@/lib/applications/schema";
 import { SiteHeader } from "@/components/site-header";
 import { SubmitButton } from "@/components/ui/submit-button";
 import { Badge } from "@/components/ui/badge";
+import { SHELL_NARROW } from "@/lib/ui/layout";
 import {
   Card,
   CardContent,
@@ -44,7 +45,7 @@ export default async function ClaSignPage({
   return (
     <>
       <SiteHeader />
-      <main className="mx-auto max-w-2xl space-y-6 px-4 py-10">
+      <main className={`${SHELL_NARROW} space-y-6 py-10`}>
         <div>
           <h1 className="text-3xl font-bold tracking-tight">
             {project.name}: Contributor License Agreement

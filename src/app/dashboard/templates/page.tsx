@@ -19,6 +19,7 @@ import { parsePageParams, type SearchParamRecord } from "@/lib/pagination";
 import { parseFormSchema } from "@/lib/applications/schema";
 import { formatDate } from "@/lib/ui/format";
 import { PageHeader } from "@/components/page-header";
+import { SHELL_MEDIUM } from "@/lib/ui/layout";
 import { createTemplate, deleteTemplate } from "./actions";
 
 export default async function TemplatesPage({
@@ -50,7 +51,7 @@ export default async function TemplatesPage({
   return (
     <>
       <SiteHeader />
-      <main className="mx-auto max-w-3xl space-y-6 px-4 py-10">
+      <main className={`${SHELL_MEDIUM} space-y-6 py-10`}>
         <PageHeader
           title="Form templates"
           description="Reusable form schemas that you can apply to any of your projects."

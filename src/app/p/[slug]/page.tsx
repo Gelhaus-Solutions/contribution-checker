@@ -24,6 +24,7 @@ import type { FormValue } from "@/components/form-renderer";
 import { replyToCommentAction } from "@/app/dashboard/projects/[id]/applications/[appId]/actions";
 import { StatusBadge } from "@/components/status-badge";
 import { formatDate } from "@/lib/ui/format";
+import { SHELL_NARROW } from "@/lib/ui/layout";
 
 
 export default async function PublicProjectPage({
@@ -186,7 +187,7 @@ export default async function PublicProjectPage({
   return (
     <>
       <SiteHeader />
-      <main className="mx-auto max-w-2xl space-y-6 px-4 py-10">
+      <main className={`${SHELL_NARROW} space-y-6 py-10`}>
         <div>
           <h1 className="text-3xl font-bold tracking-tight">{project.name}</h1>
           {project.description && (
