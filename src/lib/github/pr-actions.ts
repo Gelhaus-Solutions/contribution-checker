@@ -399,6 +399,72 @@ export async function createBranch(
   }
 }
 
+/**
+ * Fast-forward a branch to `sha`. Never forced: GitHub rejects the update with
+ * 422 when it would not be a fast-forward, which is the guard that keeps this
+ * from ever discarding commits. Returns false on a rejected or forbidden
+ * update so the caller can fall back to a merge.
+ */
+export async function fastForwardBranch(
+  ref: RepoRef,
+  branch: string,
+  sha: string,
+): Promise<boolean> {
+  const octokit = await getInstallationOctokit(ref.installationId);
+  try {
+    await octokit.request("PATCH /repos/{owner}/{repo}/git/refs/{ref}", {
+      owner: ref.owner,
+      repo: ref.repo,
+      ref: `heads/${branch}`,
+      sha,
+      force: false,
+    });
+    recordGithubMetric("git.update_ref", "ok", ref);
+    return true;
+  } catch (e) {
+    const status = statusOf(e);
+    recordGithubMetric("git.update_ref", "error", ref, status);
+    if (status === 422 || status === 403 || status === 404) return false;
+    throw e;
+  }
+}
+
+/** Why a mergeBranch call did not produce a merge. */
+export type MergeFailure = "conflict" | "forbidden" | "missing";
+
+/**
+ * Merge `head` into `base` server-side, with no PR. Creates a merge commit, so
+ * it never rewrites history. GitHub's 204 means "already up to date", which is
+ * success with nothing to do rather than an error.
+ */
+export async function mergeBranch(
+  ref: RepoRef,
+  base: string,
+  head: string,
+  commitMessage: string,
+): Promise<{ merged: boolean } | { failure: MergeFailure }> {
+  const octokit = await getInstallationOctokit(ref.installationId);
+  try {
+    const res = await octokit.request("POST /repos/{owner}/{repo}/merges", {
+      owner: ref.owner,
+      repo: ref.repo,
+      base,
+      head,
+      commit_message: commitMessage,
+    });
+    recordGithubMetric("repo.merge", "ok", ref);
+    // 204 = nothing to merge; 201 = a merge commit was created.
+    return { merged: res.status === 201 };
+  } catch (e) {
+    const status = statusOf(e);
+    recordGithubMetric("repo.merge", "error", ref, status);
+    if (status === 409) return { failure: "conflict" };
+    if (status === 403) return { failure: "forbidden" };
+    if (status === 404) return { failure: "missing" };
+    throw e;
+  }
+}
+
 const defaultBranchCache = new Map<string, { value: string; expiresAt: number }>();
 const DEFAULT_BRANCH_TTL_MS = 5 * 60 * 1000;
 

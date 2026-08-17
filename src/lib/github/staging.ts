@@ -7,7 +7,9 @@ import {
   createBranch,
   createPullRequest,
   ensureLabel,
+  fastForwardBranch,
   getBranchSha,
+  mergeBranch,
   getPullRequest,
   getRepoDefaultBranch,
   installationHasContentsWrite,
@@ -49,6 +51,7 @@ export type StagingProject = {
   bypassHandles: string;
   stagingRetargetEnabled: boolean;
   stagingBatchPrEnabled: boolean;
+  stagingSyncEnabled: boolean;
   stagingBranch: string;
   labelStagingBatch: string;
   labelStagingOptOut: string;
@@ -58,6 +61,7 @@ export type StagingProject = {
 export type StagingRepoOverrides = {
   stagingRetargetEnabled: boolean | null;
   stagingBatchPrEnabled: boolean | null;
+  stagingSyncEnabled: boolean | null;
   stagingBranch: string | null;
 };
 
@@ -66,6 +70,7 @@ export const stagingProjectSelect = {
   bypassHandles: true,
   stagingRetargetEnabled: true,
   stagingBatchPrEnabled: true,
+  stagingSyncEnabled: true,
   stagingBranch: true,
   labelStagingBatch: true,
   labelStagingOptOut: true,
@@ -74,6 +79,7 @@ export const stagingProjectSelect = {
 export const stagingRepoSelect = {
   stagingRetargetEnabled: true,
   stagingBatchPrEnabled: true,
+  stagingSyncEnabled: true,
   stagingBranch: true,
 } as const;
 
@@ -81,11 +87,18 @@ export const stagingRepoSelect = {
 export type ResolvedStagingConfig = {
   retargetEnabled: boolean;
   batchPrEnabled: boolean;
+  /** Keep staging current with the default branch, with no PR. */
+  syncEnabled: boolean;
   stagingBranch: string;
+  /** Staging routing does anything at all for this repo. `syncEnabled` alone
+   * does not qualify: syncing a branch nothing routes through is a write to
+   * someone's repo for no reason. */
+  anyEnabled: boolean;
   /** Which fields the repo overrode, for the settings UI to show. */
   overridden: {
     retargetEnabled: boolean;
     batchPrEnabled: boolean;
+    syncEnabled: boolean;
     stagingBranch: boolean;
   };
 };
@@ -99,20 +112,30 @@ export type ResolvedStagingConfig = {
 export function resolveStagingConfig(
   project: Pick<
     StagingProject,
-    "stagingRetargetEnabled" | "stagingBatchPrEnabled" | "stagingBranch"
+    | "stagingRetargetEnabled"
+    | "stagingBatchPrEnabled"
+    | "stagingSyncEnabled"
+    | "stagingBranch"
   >,
   repo: StagingRepoOverrides | null,
 ): ResolvedStagingConfig {
   const branch = repo?.stagingBranch?.trim();
+  const retargetEnabled =
+    repo?.stagingRetargetEnabled ?? project.stagingRetargetEnabled;
+  const batchPrEnabled =
+    repo?.stagingBatchPrEnabled ?? project.stagingBatchPrEnabled;
+  const anyEnabled = retargetEnabled || batchPrEnabled;
   return {
-    retargetEnabled:
-      repo?.stagingRetargetEnabled ?? project.stagingRetargetEnabled,
-    batchPrEnabled:
-      repo?.stagingBatchPrEnabled ?? project.stagingBatchPrEnabled,
+    retargetEnabled,
+    batchPrEnabled,
+    syncEnabled:
+      anyEnabled && (repo?.stagingSyncEnabled ?? project.stagingSyncEnabled),
     stagingBranch: branch || project.stagingBranch,
+    anyEnabled,
     overridden: {
       retargetEnabled: repo?.stagingRetargetEnabled != null,
       batchPrEnabled: repo?.stagingBatchPrEnabled != null,
+      syncEnabled: repo?.stagingSyncEnabled != null,
       stagingBranch: !!branch,
     },
   };
@@ -555,6 +578,113 @@ export async function applyStagingRouting(ctx: {
   }
 }
 
+// --- half three: keeping staging current with the default branch -------------
+
+/** What a sync attempt did, for logging and for the caller's next decision. */
+export type StagingSyncResult =
+  | "up_to_date"
+  | "fast_forwarded"
+  | "merged"
+  | "conflict"
+  | "forbidden"
+  | "failed";
+
+/**
+ * Bring the staging branch up to date with the default branch, with no PR.
+ *
+ * Without this, staging only ever moves when something merges into it, so a
+ * default branch that keeps advancing leaves staging stale and every
+ * contributor retargeted onto it is working from an old base. The named case
+ * is the simplest one: nothing has merged into staging yet, the default branch
+ * moved, and staging should just follow it.
+ *
+ * Two strategies, picked by what staging actually contains:
+ *  - staging has no commits of its own: fast-forward the ref. No merge commit,
+ *    no conflict possible, and the branches end up identical.
+ *  - staging has unmerged work: server-side merge, which creates a merge commit
+ *    and never rewrites history, so the batch keeps its commits and its
+ *    aggregate PR keeps showing an honest diff.
+ *
+ * Never throws. A conflict is a real state a human has to resolve, not an
+ * error to retry, so it is logged and reported rather than raised.
+ */
+async function syncStagingWithDefault(args: {
+  ref: RepoRef;
+  repoId: string;
+  stagingBranch: string;
+  defaultBranch: string;
+  aheadBy: number;
+}): Promise<StagingSyncResult> {
+  try {
+    if (!(await installationHasContentsWrite(args.ref.installationId))) {
+      logger.warn(
+        { ref: args.ref, stagingBranch: args.stagingBranch },
+        "staging sync skipped: installation missing contents:write",
+      );
+      return "forbidden";
+    }
+
+    // Fast-forward path: staging is a strict ancestor of the default branch,
+    // so moving the ref cannot lose anything. GitHub rejects a non-fast-forward
+    // update (we never pass force), which is the safety net if `aheadBy` is
+    // stale by the time we get here.
+    if (args.aheadBy === 0) {
+      const sha = await getBranchSha(args.ref, args.defaultBranch);
+      if (!sha) return "failed";
+      if (await fastForwardBranch(args.ref, args.stagingBranch, sha)) {
+        logger.info(
+          {
+            repoId: args.repoId,
+            from: args.defaultBranch,
+            to: args.stagingBranch,
+          },
+          "fast-forwarded staging to the default branch",
+        );
+        return "fast_forwarded";
+      }
+      // Raced with a push to staging: fall through and merge instead.
+    }
+
+    const res = await mergeBranch(
+      args.ref,
+      args.stagingBranch,
+      args.defaultBranch,
+      `Merge ${args.defaultBranch} into ${args.stagingBranch}`,
+    );
+    if ("failure" in res) {
+      if (res.failure === "conflict") {
+        logger.warn(
+          {
+            repoId: args.repoId,
+            stagingBranch: args.stagingBranch,
+            defaultBranch: args.defaultBranch,
+          },
+          "staging sync hit a merge conflict; resolve it on the staging branch",
+        );
+      }
+      return res.failure === "conflict" ? "conflict" : "failed";
+    }
+    if (res.merged) {
+      logger.info(
+        {
+          repoId: args.repoId,
+          from: args.defaultBranch,
+          to: args.stagingBranch,
+        },
+        "merged the default branch into staging",
+      );
+      return "merged";
+    }
+    return "up_to_date";
+  } catch (e) {
+    logger.warn(
+      { err: e, repoId: args.repoId },
+      "syncStagingWithDefault failed",
+    );
+    return "failed";
+  }
+}
+
 // --- half two: the aggregate PR ----------------------------------------------
 
 /**
@@ -599,6 +729,19 @@ async function trackAggregatePr(repoId: string, prNumber: number | null) {
     );
 }
 
+/** What one reconcile pass did, so the entity can pace the next one. */
+export type StagingReconcileResult = {
+  /** Staging was moved onto the default branch this pass. */
+  synced: boolean;
+  /** A sync is wanted but the batching window has not elapsed yet. */
+  syncDeferred: boolean;
+};
+
+const NOTHING_DONE: StagingReconcileResult = {
+  synced: false,
+  syncDeferred: false,
+};
+
 /**
  * Re-derive a repo's aggregate staging PR from live GitHub state: ensure it
  * exists while staging is ahead, and keep its manifest block accurate. Called
@@ -607,7 +750,11 @@ async function trackAggregatePr(repoId: string, prNumber: number | null) {
  */
 export async function reconcileStagingBatch(args: {
   repoId: string;
-}): Promise<void> {
+  /** False while the sync batching window is still open: the reconcile then
+   * refreshes the manifest as usual but reports the sync as deferred instead
+   * of writing to the branch. */
+  allowSync: boolean;
+}): Promise<StagingReconcileResult> {
   try {
     const repo = await prisma.repo.findUnique({
       where: { id: args.repoId },
@@ -623,10 +770,13 @@ export async function reconcileStagingBatch(args: {
         project: { select: stagingProjectSelect },
       },
     });
-    if (!repo || !repo.active || repo.installationId == null) return;
+    if (!repo || !repo.active || repo.installationId == null) return NOTHING_DONE;
     const project = repo.project;
     const cfg = resolveStagingConfig(project, repo);
-    if (!cfg.batchPrEnabled) return;
+    // Keeping staging current is useful even for a repo that only retargets,
+    // so the guard is "staging routing does anything here", not "the aggregate
+    // PR is on". The two halves are gated individually below.
+    if (!cfg.anyEnabled) return NOTHING_DONE;
 
     const ref = repoRef(repo.fullName, repo.installationId);
     const defaultBranch = await resolveDefaultBranch({
@@ -635,13 +785,13 @@ export async function reconcileStagingBatch(args: {
       hint: null,
       cached: repo.defaultBranch,
     });
-    if (!defaultBranch) return;
+    if (!defaultBranch) return NOTHING_DONE;
     if (defaultBranch === cfg.stagingBranch) {
       logger.warn(
         { repoId: repo.id, branch: defaultBranch },
         "staging batch skipped: staging branch is the default branch",
       );
-      return;
+      return NOTHING_DONE;
     }
 
     const ready = await ensureStagingBranch({
@@ -649,11 +799,36 @@ export async function reconcileStagingBatch(args: {
       stagingBranch: cfg.stagingBranch,
       defaultBranch,
     });
-    if (!ready) return;
+    if (!ready) return NOTHING_DONE;
+
+    const cmp = await compareBranches(ref, defaultBranch, cfg.stagingBranch);
+
+    // Bring staging up to date with the default branch first, so the batch is
+    // measured and shipped against current code. Syncing writes commits, so it
+    // is rate-limited by the caller: when the window has not elapsed we report
+    // the deferral and the entity comes back for it.
+    let synced = false;
+    let syncDeferred = false;
+    if (cfg.syncEnabled && cmp && cmp.behindBy > 0) {
+      if (!args.allowSync) {
+        syncDeferred = true;
+      } else {
+        const result = await syncStagingWithDefault({
+          ref,
+          repoId: repo.id,
+          stagingBranch: cfg.stagingBranch,
+          defaultBranch,
+          aheadBy: cmp.aheadBy,
+        });
+        synced = result === "fast_forwarded" || result === "merged";
+      }
+    }
+
+    if (!cfg.batchPrEnabled) return { synced, syncDeferred };
 
     // Nothing to ship: do not open an empty PR, and drop a tracked number whose
-    // PR has already been merged or closed.
-    const cmp = await compareBranches(ref, defaultBranch, cfg.stagingBranch);
+    // PR has already been merged or closed. A fast-forward lands here too, and
+    // correctly: staging now equals the default branch, so there is no batch.
     if (!cmp || cmp.aheadBy === 0) {
       if (repo.stagingBatchPrNumber != null) {
         const tracked = await getPullRequest(ref, repo.stagingBatchPrNumber);
@@ -661,7 +836,7 @@ export async function reconcileStagingBatch(args: {
           await trackAggregatePr(repo.id, null);
         }
       }
-      return;
+      return { synced, syncDeferred };
     }
 
     // Build the manifest BEFORE find-or-create, so a PR we open is born with
@@ -728,7 +903,7 @@ export async function reconcileStagingBatch(args: {
             { repoId: repo.id, failure: created.failure },
             "aggregate PR not created",
           );
-          return;
+          return { synced, syncDeferred };
         }
       } else {
         await trackAggregatePr(repo.id, created.number);
@@ -782,8 +957,10 @@ export async function reconcileStagingBatch(args: {
         "refreshed aggregate PR manifest",
       );
     }
+    return { synced, syncDeferred };
   } catch (e) {
     logger.warn({ err: e, repoId: args.repoId }, "reconcileStagingBatch failed");
+    return NOTHING_DONE;
   }
 }
 

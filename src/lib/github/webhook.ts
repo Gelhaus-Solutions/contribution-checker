@@ -1425,8 +1425,17 @@ export async function handlePushEvent(payload: PushPayload) {
         data: { defaultBranch: payload.repository.default_branch },
       });
     }
-    if (cfg.batchPrEnabled && branch === cfg.stagingBranch) {
-      await signalStagingBatch({ repoId: repo.id, reason: "push_to_staging" });
+    // A push to staging changes the batch. A push to the DEFAULT branch is
+    // what leaves staging behind, and is the only trigger for syncing it back
+    // up: without this, a repo whose default branch keeps moving while nothing
+    // merges into staging would never sync at all.
+    const onStaging = branch === cfg.stagingBranch;
+    const onDefault = branch === defaultBranch && branch !== cfg.stagingBranch;
+    if (cfg.anyEnabled && (onStaging || onDefault)) {
+      await signalStagingBatch({
+        repoId: repo.id,
+        reason: onStaging ? "push_to_staging" : "push_to_default",
+      });
     }
   } catch (e) {
     logger.warn({ err: e }, "handlePushEvent failed");

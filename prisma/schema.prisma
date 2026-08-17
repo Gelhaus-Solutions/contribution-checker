@@ -149,6 +149,12 @@ model Project {
   stagingRetargetEnabled Boolean @default(false)
   stagingBatchPrEnabled  Boolean @default(false)
   stagingBranch          String  @default("staging")
+  // Keep the staging branch current with the default branch, with no PR:
+  // fast-forwarded when staging has no commits of its own, merged otherwise.
+  // Defaults on because a staging branch that silently falls behind gives
+  // every contributor a stale base. Inert until one of the two switches above
+  // is on, so it cannot touch a repo that is not using staging routing.
+  stagingSyncEnabled     Boolean @default(true)
 
   // Disable switch: when checkerEnabled=false, every PR is treated as APPROVED.
   // Tracking (PrCheck rows + quality scoring) only runs if trackWhenDisabled=true.
@@ -351,6 +357,7 @@ model Repo {
   // never read these three columns directly.
   stagingRetargetEnabled Boolean?
   stagingBatchPrEnabled  Boolean?
+  stagingSyncEnabled     Boolean?
   stagingBranch          String?
   // Staging routing state. `stagingBatchPrNumber` is the open aggregate PR
   // (null = no batch in flight). `stagingBatchSince` is when the previous

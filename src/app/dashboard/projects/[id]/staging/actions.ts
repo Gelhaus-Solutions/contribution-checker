@@ -45,6 +45,7 @@ const defaultsSchema = z.object({
   projectId: z.string().min(1),
   stagingRetargetEnabled: z.string().optional(),
   stagingBatchPrEnabled: z.string().optional(),
+  stagingSyncEnabled: z.string().optional(),
   stagingBranch: branchName,
   labelStagingBatch: stagingLabel,
   labelStagingOptOut: stagingLabel,
@@ -56,6 +57,7 @@ export async function updateStagingDefaults(formData: FormData) {
     stagingRetargetEnabled:
       formData.get("stagingRetargetEnabled") ?? undefined,
     stagingBatchPrEnabled: formData.get("stagingBatchPrEnabled") ?? undefined,
+    stagingSyncEnabled: formData.get("stagingSyncEnabled") ?? undefined,
     stagingBranch: formData.get("stagingBranch"),
     labelStagingBatch: formData.get("labelStagingBatch"),
     labelStagingOptOut: formData.get("labelStagingOptOut"),
@@ -67,6 +69,7 @@ export async function updateStagingDefaults(formData: FormData) {
     select: {
       stagingRetargetEnabled: true,
       stagingBatchPrEnabled: true,
+      stagingSyncEnabled: true,
       stagingBranch: true,
       labelStagingBatch: true,
       labelStagingOptOut: true,
@@ -97,6 +100,7 @@ export async function updateStagingDefaults(formData: FormData) {
   const after = {
     stagingRetargetEnabled: !!parsed.stagingRetargetEnabled,
     stagingBatchPrEnabled: !!parsed.stagingBatchPrEnabled,
+    stagingSyncEnabled: !!parsed.stagingSyncEnabled,
     stagingBranch: parsed.stagingBranch,
     labelStagingBatch: parsed.labelStagingBatch,
     labelStagingOptOut: parsed.labelStagingOptOut,
@@ -123,6 +127,10 @@ export async function updateStagingDefaults(formData: FormData) {
             before.stagingBatchPrEnabled,
             after.stagingBatchPrEnabled,
           ],
+          stagingSyncEnabled: [
+            before.stagingSyncEnabled,
+            after.stagingSyncEnabled,
+          ],
           stagingBranch: [before.stagingBranch, after.stagingBranch],
           labelStagingBatch: [
             before.labelStagingBatch,
@@ -145,6 +153,7 @@ export async function updateStagingDefaults(formData: FormData) {
     retargetNowOn: after.stagingRetargetEnabled,
     batchAffecting:
       before.stagingBatchPrEnabled !== after.stagingBatchPrEnabled ||
+      before.stagingSyncEnabled !== after.stagingSyncEnabled ||
       before.stagingBranch !== after.stagingBranch,
   });
 
@@ -160,6 +169,7 @@ const repoSchema = z.object({
   repoId: z.string().min(1),
   stagingRetargetEnabled: triState,
   stagingBatchPrEnabled: triState,
+  stagingSyncEnabled: triState,
   stagingBranch: z.union([z.string().length(0), branchName]),
 });
 
@@ -173,6 +183,7 @@ export async function updateRepoStagingSettings(formData: FormData) {
     repoId: formData.get("repoId"),
     stagingRetargetEnabled: formData.get("stagingRetargetEnabled"),
     stagingBatchPrEnabled: formData.get("stagingBatchPrEnabled"),
+    stagingSyncEnabled: formData.get("stagingSyncEnabled"),
     stagingBranch: formData.get("stagingBranch") ?? "",
   });
   const { session } = await requireProjectRole(parsed.projectId, "ADMIN");
@@ -184,6 +195,7 @@ export async function updateRepoStagingSettings(formData: FormData) {
       fullName: true,
       stagingRetargetEnabled: true,
       stagingBatchPrEnabled: true,
+      stagingSyncEnabled: true,
       stagingBranch: true,
     },
   });
@@ -196,6 +208,7 @@ export async function updateRepoStagingSettings(formData: FormData) {
   const after = {
     stagingRetargetEnabled: toOverride(parsed.stagingRetargetEnabled),
     stagingBatchPrEnabled: toOverride(parsed.stagingBatchPrEnabled),
+    stagingSyncEnabled: toOverride(parsed.stagingSyncEnabled),
     stagingBranch: parsed.stagingBranch || null,
   };
 
@@ -217,6 +230,10 @@ export async function updateRepoStagingSettings(formData: FormData) {
           stagingBatchPrEnabled: [
             before.stagingBatchPrEnabled,
             after.stagingBatchPrEnabled,
+          ],
+          stagingSyncEnabled: [
+            before.stagingSyncEnabled,
+            after.stagingSyncEnabled,
           ],
           stagingBranch: [before.stagingBranch, after.stagingBranch],
         }).filter(([, [a, b]]) => a !== b),

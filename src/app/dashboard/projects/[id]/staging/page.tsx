@@ -36,12 +36,14 @@ import {
 type RepoLiveState = {
   stagingExists: boolean | null;
   aheadBy: number | null;
+  behindBy: number | null;
   contentsWrite: boolean | null;
 };
 
 const UNKNOWN: RepoLiveState = {
   stagingExists: null,
   aheadBy: null,
+  behindBy: null,
   contentsWrite: null,
 };
 
@@ -72,6 +74,7 @@ async function probeRepo(args: {
   return {
     stagingExists: cmp !== null,
     aheadBy: cmp?.aheadBy ?? null,
+    behindBy: cmp?.behindBy ?? null,
     contentsWrite: contentsWrite ?? null,
   };
 }
@@ -146,7 +149,7 @@ export default async function StagingSettings({
     ({ repo, cfg }) =>
       repo.active &&
       repo.installationId != null &&
-      (cfg.retargetEnabled || cfg.batchPrEnabled),
+      cfg.anyEnabled,
   );
   const probed = probeTargets.slice(0, LIVE_PROBE_LIMIT);
   const liveByRepoId = new Map<string, RepoLiveState>();
@@ -296,6 +299,29 @@ export default async function StagingSettings({
                 </span>
               </span>
             </label>
+            <label className="flex items-start gap-3 text-sm">
+              <input
+                type="checkbox"
+                name="stagingSyncEnabled"
+                value="1"
+                defaultChecked={project.stagingSyncEnabled}
+                className="mt-0.5 h-4 w-4 rounded border-border"
+              />
+              <span>
+                <span className="font-medium">
+                  Keep staging up to date with the default branch
+                </span>
+                <span className="block text-xs text-muted-foreground">
+                  When the default branch moves ahead, staging follows it with
+                  no PR: fast-forwarded when nothing has merged into staging
+                  yet, merged otherwise. Updates are batched, so a burst of
+                  commits on the default branch costs one merge commit rather
+                  than one per push. Needs Contents: Read &amp; write, and does
+                  nothing unless one of the two switches above is on. A merge
+                  conflict is left for a human to resolve on the staging branch.
+                </span>
+              </span>
+            </label>
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="labelStagingBatch">Batch label</Label>
@@ -381,6 +407,11 @@ export default async function StagingSettings({
                   ) : (
                     <Badge variant="secondary">no batch</Badge>
                   )}
+                  {cfg.syncEnabled ? (
+                    <Badge variant="success">syncing</Badge>
+                  ) : (
+                    <Badge variant="secondary">no sync</Badge>
+                  )}
                 </div>
 
                 <dl className="grid gap-x-6 gap-y-1 text-xs sm:grid-cols-2">
@@ -407,6 +438,18 @@ export default async function StagingSettings({
                       {live?.aheadBy == null
                         ? "unknown"
                         : `${live.aheadBy} commit${live.aheadBy === 1 ? "" : "s"}`}
+                    </dd>
+                  </div>
+                  <div className="flex gap-2">
+                    <dt className="text-muted-foreground">
+                      Staging is behind by
+                    </dt>
+                    <dd>
+                      {live?.behindBy == null
+                        ? "unknown"
+                        : live.behindBy === 0
+                          ? "up to date"
+                          : `${live.behindBy} commit${live.behindBy === 1 ? "" : "s"}`}
                     </dd>
                   </div>
                   <div className="flex gap-2">
@@ -448,7 +491,7 @@ export default async function StagingSettings({
 
                 <form
                   action={updateRepoStagingSettings}
-                  className="grid items-end gap-3 sm:grid-cols-4"
+                  className="grid items-end gap-3 sm:grid-cols-5"
                 >
                   <input type="hidden" name="projectId" value={id} />
                   <input type="hidden" name="repoId" value={repo.id} />
@@ -474,6 +517,16 @@ export default async function StagingSettings({
                       inheritedLabel={
                         project.stagingBatchPrEnabled ? "on" : "off"
                       }
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor={`sync-${repo.id}`} className="text-xs">
+                      Sync from default
+                    </Label>
+                    <TriStateSelect
+                      name="stagingSyncEnabled"
+                      value={repo.stagingSyncEnabled}
+                      inheritedLabel={project.stagingSyncEnabled ? "on" : "off"}
                     />
                   </div>
                   <div className="space-y-1.5">
@@ -534,6 +587,14 @@ export default async function StagingSettings({
             The aggregate PR is exempt from the gate and from retargeting, and
             the bot owns only the block between its markers, so anything you
             write above or below it in the description survives.
+          </p>
+          <p>
+            Staging is kept level with the default branch without a PR, so a
+            contributor retargeted onto it is never working from a stale base.
+            When staging has nothing of its own the branch is fast-forwarded;
+            once it does, the default branch is merged in, which is a merge
+            commit on staging. If that merge conflicts the bot stops and leaves
+            it for you.
           </p>
           <p>
             If your default branch is protected by required reviews or a merge

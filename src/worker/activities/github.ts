@@ -7,7 +7,10 @@ import {
   reGatePr,
   type PrEventResult,
 } from "@/lib/github/webhook";
-import { reconcileStagingBatch } from "@/lib/github/staging";
+import {
+  reconcileStagingBatch,
+  type StagingReconcileResult,
+} from "@/lib/github/staging";
 import { classifyGithubError } from "@/lib/github/errors";
 import type { GithubEventEnvelope } from "@/lib/temporal/contracts";
 
@@ -62,9 +65,13 @@ export async function convergePrReGate(args: {
  */
 export async function convergeStagingBatch(args: {
   repoId: string;
-}): Promise<void> {
+  allowSync: boolean;
+}): Promise<StagingReconcileResult> {
   try {
-    await reconcileStagingBatch({ repoId: args.repoId });
+    return await reconcileStagingBatch({
+      repoId: args.repoId,
+      allowSync: args.allowSync,
+    });
   } catch (e) {
     throw classifyGithubError(e);
   }

@@ -13,6 +13,7 @@ import {
   QRY,
   SIG,
   STAGING_RECONCILE_DEBOUNCE,
+  STAGING_SYNC_WINDOW_MS,
 } from "../../lib/temporal/contracts";
 import { SA, type GateStatusValue } from "../../lib/temporal/search-attributes";
 import type {
@@ -66,6 +67,8 @@ const IDLE_TIMEOUT = "2 minutes";
 export async function stagingBatch(input: StagingBatchInput): Promise<void> {
   let dirty = input.dirty ?? false;
   let lastReason: string | null = input.lastReason ?? null;
+  let lastSyncMs: number | null = input.lastSyncMs ?? null;
+  let syncDeferred = false;
   let reconciles = 0;
 
   setHandler(stagingReconcile, (payload) => {
@@ -77,31 +80,60 @@ export async function stagingBatch(input: StagingBatchInput): Promise<void> {
     dirty,
     lastReason,
     reconciles,
+    lastSyncMs,
+    syncDeferred,
   }));
 
   setGateStatus("active");
 
+  /** Epoch ms at which a sync is allowed again, or null when one may run now. */
+  const syncNotBefore = (): number | null =>
+    lastSyncMs == null ? null : lastSyncMs + STAGING_SYNC_WINDOW_MS;
+
   while (!shouldContinueAsNew(reconciles)) {
-    const hasWork = await condition(() => dirty, IDLE_TIMEOUT);
+    // With a sync waiting on the batching window, wake when the window closes
+    // rather than idling out, so the deferred sync actually happens instead of
+    // waiting for whatever event happens to come next.
+    const notBefore = syncNotBefore();
+    const waitMs =
+      syncDeferred && notBefore != null
+        ? Math.max(0, notBefore - Date.now())
+        : null;
+    const hasWork = await condition(
+      () => dirty,
+      waitMs == null ? IDLE_TIMEOUT : waitMs,
+    );
     if (!hasWork) {
-      setGateStatus("idle");
-      return;
+      if (!syncDeferred) {
+        setGateStatus("idle");
+        return;
+      }
+      // The window closed: run the sync we held back.
+      dirty = true;
     }
 
     // Debounce a burst into one pass. Requests that land during the wait are
     // absorbed by the flag we are about to clear, so nothing is lost.
     await sleep(STAGING_RECONCILE_DEBOUNCE);
     dirty = false;
-    await acts.convergeStagingBatch({ repoId: input.repoId });
+    const now = Date.now();
+    const allowSync = notBefore == null || now >= notBefore;
+    const res = await acts.convergeStagingBatch({
+      repoId: input.repoId,
+      allowSync,
+    });
     reconciles += 1;
+    if (res.synced) lastSyncMs = Date.now();
+    syncDeferred = res.syncDeferred;
   }
 
-  if (dirty) {
+  if (dirty || syncDeferred) {
     setGateStatus("continued");
     await continueAsNew<typeof stagingBatch>({
       repoId: input.repoId,
       dirty,
       lastReason,
+      lastSyncMs,
     });
   }
 

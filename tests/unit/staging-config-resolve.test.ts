@@ -4,12 +4,14 @@ import { resolveStagingConfig } from "@/lib/github/staging";
 const PROJECT = {
   stagingRetargetEnabled: true,
   stagingBatchPrEnabled: true,
+  stagingSyncEnabled: true,
   stagingBranch: "staging",
 };
 
 const NO_OVERRIDES = {
   stagingRetargetEnabled: null,
   stagingBatchPrEnabled: null,
+  stagingSyncEnabled: null,
   stagingBranch: null,
 };
 
@@ -22,6 +24,7 @@ describe("resolveStagingConfig", () => {
     expect(cfg.overridden).toEqual({
       retargetEnabled: false,
       batchPrEnabled: false,
+      syncEnabled: false,
       stagingBranch: false,
     });
   });
@@ -81,13 +84,49 @@ describe("resolveStagingConfig", () => {
     expect(cfg.stagingBranch).toBe("next");
   });
 
-  it("resolves the two halves independently", () => {
+  it("resolves the halves independently", () => {
     const cfg = resolveStagingConfig(PROJECT, {
+      ...NO_OVERRIDES,
       stagingRetargetEnabled: true,
       stagingBatchPrEnabled: false,
-      stagingBranch: null,
     });
     expect(cfg.retargetEnabled).toBe(true);
     expect(cfg.batchPrEnabled).toBe(false);
+  });
+
+  it("keeps syncing for a repo that only retargets", () => {
+    // Staging still needs to track the default branch when the aggregate PR is
+    // off, or every retargeted contributor works from a stale base.
+    const cfg = resolveStagingConfig(
+      { ...PROJECT, stagingBatchPrEnabled: false },
+      NO_OVERRIDES,
+    );
+    expect(cfg.syncEnabled).toBe(true);
+    expect(cfg.anyEnabled).toBe(true);
+  });
+
+  it("never syncs a repo that staging routing does not touch", () => {
+    // Syncing a branch nothing routes through would be a write to someone's
+    // repo for no reason, so the sync default cannot act on its own.
+    const cfg = resolveStagingConfig(
+      {
+        ...PROJECT,
+        stagingRetargetEnabled: false,
+        stagingBatchPrEnabled: false,
+      },
+      NO_OVERRIDES,
+    );
+    expect(cfg.anyEnabled).toBe(false);
+    expect(cfg.syncEnabled).toBe(false);
+  });
+
+  it("lets a repo opt out of syncing while still retargeting", () => {
+    const cfg = resolveStagingConfig(PROJECT, {
+      ...NO_OVERRIDES,
+      stagingSyncEnabled: false,
+    });
+    expect(cfg.retargetEnabled).toBe(true);
+    expect(cfg.syncEnabled).toBe(false);
+    expect(cfg.overridden.syncEnabled).toBe(true);
   });
 });

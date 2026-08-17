@@ -304,6 +304,9 @@ export type StagingBatchInput = {
   repoId: string;
   dirty?: boolean;
   lastReason?: string | null;
+  /** When staging was last synced with the default branch (epoch ms), carried
+   * across Continue-As-New so a roll does not reset the batching window. */
+  lastSyncMs?: number | null;
 };
 
 /** stagingBatch durable state, exposed via QRY.stagingBatchState. */
@@ -315,12 +318,26 @@ export type StagingBatchState = {
   lastReason: string | null;
   /** Reconciles run so far in THIS run. */
   reconciles: number;
+  /** When staging was last synced with the default branch (epoch ms). */
+  lastSyncMs: number | null;
+  /** A sync is wanted but is waiting for the batching window to elapse. */
+  syncDeferred: boolean;
 };
 
 /** Debounce before a reconcile so a burst (a PR retargeted, then labeled, then
  * its batch signalled again) costs one pass over the GitHub API instead of
  * three. Short enough that the aggregate PR still feels live. */
 export const STAGING_RECONCILE_DEBOUNCE = "5 seconds";
+
+/**
+ * Minimum spacing between staging syncs. Refreshing the manifest is free when
+ * nothing changed, but syncing writes to the repo: on a staging branch with
+ * unmerged work every sync is a merge commit, so a busy default branch would
+ * otherwise bury the batch under one merge commit per push. Pushes inside the
+ * window collapse into a single sync at the end of it, so staging still
+ * converges on the default branch, just in batches.
+ */
+export const STAGING_SYNC_WINDOW_MS = 10 * 60_000;
 
 export type ProcessMergeGroupInput = { payload: unknown };
 export type ProcessPushInput = { payload: unknown };

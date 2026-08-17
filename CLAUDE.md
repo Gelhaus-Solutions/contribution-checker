@@ -85,6 +85,23 @@ Staging routing (`src/lib/github/staging.ts`, App mode only):
   fires `pull_request.opened` with whatever body the create call carried, and
   that snapshot is what Slack/Discord/email quote forever. Creating it empty
   and PATCHing afterwards left every integration announcing an empty batch.
+- `syncStagingWithDefault`: keeps staging level with the default branch with no
+  PR. Fast-forwards the ref when staging has no commits of its own (`aheadBy
+  === 0`), otherwise merges via `POST /repos/../merges`, which cannot rewrite
+  history. `fastForwardBranch` never passes `force`, so GitHub's 422 is the
+  safety net against a stale `aheadBy`. A 409 conflict is a state for a human,
+  not an error to retry. The trigger is a **push to the default branch**
+  (`handlePushEvent`), without which a repo whose default branch keeps moving
+  would never sync at all.
+- **Syncs are rate-limited, manifest refreshes are not.** On a staging branch
+  with unmerged work each sync is a merge commit, so `STAGING_SYNC_WINDOW_MS`
+  (10 min) collapses a burst of default-branch pushes into one. The workflow
+  passes `allowSync`, the activity reports `syncDeferred`, and the entity wakes
+  at the end of the window to run what it held back.
+- `resolveStagingConfig` is the only place that folds per-repo overrides onto
+  project defaults; never read the `staging*` columns directly. `syncEnabled`
+  is gated on `anyEnabled`, so the sync default cannot touch a repo that is not
+  retargeting or batching.
 - The aggregate PR must **never** reach `convergePr` (no application means the
   gate would close the bot's own release PR). `isAggregatePr` matches it by the
   tracked `Repo.stagingBatchPrNumber` and structurally (same-repo head ==

@@ -26,7 +26,7 @@ async function runBatch(
   onReconcile?: (calls: number) => Promise<void>,
 ) {
   const env = await TestWorkflowEnvironment.createTimeSkipping();
-  const reconciles: Array<{ repoId: string }> = [];
+  const reconciles: Array<{ repoId: string; allowSync: boolean }> = [];
   try {
     await registerTestSearchAttributes(env);
     await seed(workflowId, env.client);
@@ -38,9 +38,13 @@ async function runBatch(
         new URL("../../src/worker/workflows/index.ts", import.meta.url),
       ),
       activities: {
-        async convergeStagingBatch(args: { repoId: string }) {
+        async convergeStagingBatch(args: {
+          repoId: string;
+          allowSync: boolean;
+        }) {
           reconciles.push(args);
           await onReconcile?.(reconciles.length);
+          return { synced: false, syncDeferred: false };
         },
       },
     });
@@ -76,7 +80,9 @@ describe("stagingBatch", () => {
     );
     // Four signals, one pass over the GitHub API.
     expect(reconciles).toHaveLength(1);
-    expect(reconciles[0]).toEqual({ repoId: "repo1" });
+    expect(reconciles[0].repoId).toBe("repo1");
+    // Nothing has synced yet, so the first pass is free to.
+    expect(reconciles[0].allowSync).toBe(true);
   });
 
   it("earns a second reconcile for a signal that arrives mid-reconcile", async () => {
@@ -84,7 +90,7 @@ describe("stagingBatch", () => {
     // ordering: `dirty` is cleared BEFORE the activity runs, so a request
     // landing during it is not swallowed.
     let env: TestWorkflowEnvironment | null = null;
-    const reconciles: Array<{ repoId: string }> = [];
+    const reconciles: Array<{ repoId: string; allowSync: boolean }> = [];
     env = await TestWorkflowEnvironment.createTimeSkipping();
     try {
       await registerTestSearchAttributes(env);
@@ -99,13 +105,17 @@ describe("stagingBatch", () => {
           new URL("../../src/worker/workflows/index.ts", import.meta.url),
         ),
         activities: {
-          async convergeStagingBatch(args: { repoId: string }) {
+          async convergeStagingBatch(args: {
+            repoId: string;
+            allowSync: boolean;
+          }) {
             reconciles.push(args);
             if (reconciles.length === 1) {
               await handle.signal(SIG.stagingReconcile, {
                 reason: "pr_merged_to_staging",
               });
             }
+            return { synced: false, syncDeferred: false };
           },
         },
       });
@@ -118,7 +128,7 @@ describe("stagingBatch", () => {
 
   it("idle-completes without reconciling when no signal ever arrives", async () => {
     const env = await TestWorkflowEnvironment.createTimeSkipping();
-    const reconciles: Array<{ repoId: string }> = [];
+    const reconciles: Array<{ repoId: string; allowSync: boolean }> = [];
     try {
       await registerTestSearchAttributes(env);
       const id = "staging:repo3";
@@ -134,8 +144,12 @@ describe("stagingBatch", () => {
           new URL("../../src/worker/workflows/index.ts", import.meta.url),
         ),
         activities: {
-          async convergeStagingBatch(args: { repoId: string }) {
+          async convergeStagingBatch(args: {
+            repoId: string;
+            allowSync: boolean;
+          }) {
             reconciles.push(args);
+            return { synced: false, syncDeferred: false };
           },
         },
       });
@@ -146,5 +160,55 @@ describe("stagingBatch", () => {
       await env.teardown();
     }
     expect(reconciles).toHaveLength(0);
+  });
+
+  it("holds the next sync back until the batching window closes", async () => {
+    // A burst of pushes to the default branch must cost one merge commit on
+    // staging, not one per push, so once a sync happens the following passes
+    // are told they may not sync until the window has elapsed. The
+    // time-skipping server fast-forwards the wait, so this is not a slow test.
+    const env = await TestWorkflowEnvironment.createTimeSkipping();
+    const calls: Array<{ allowSync: boolean }> = [];
+    try {
+      await registerTestSearchAttributes(env);
+      const id = "staging:repo4";
+      await start(env.client, id, "repo4");
+      const handle = env.client.workflow.getHandle(id);
+
+      const worker = await Worker.create({
+        connection: env.nativeConnection,
+        taskQueue: TASK_QUEUE,
+        workflowsPath: fileURLToPath(
+          new URL("../../src/worker/workflows/index.ts", import.meta.url),
+        ),
+        activities: {
+          async convergeStagingBatch(args: {
+            repoId: string;
+            allowSync: boolean;
+          }) {
+            calls.push({ allowSync: args.allowSync });
+            if (calls.length === 1) {
+              // First pass syncs, which opens the window; then another push
+              // to the default branch lands immediately.
+              await handle.signal(SIG.stagingReconcile, {
+                reason: "push_to_default",
+              });
+              return { synced: true, syncDeferred: false };
+            }
+            // Second pass is inside the window and reports the deferral; the
+            // workflow must come back a third time once it closes.
+            if (calls.length === 2) {
+              expect(args.allowSync).toBe(false);
+              return { synced: false, syncDeferred: true };
+            }
+            return { synced: true, syncDeferred: false };
+          },
+        },
+      });
+      await worker.runUntil(handle.result());
+    } finally {
+      await env.teardown();
+    }
+    expect(calls.map((c) => c.allowSync)).toEqual([true, false, true]);
   });
 });
