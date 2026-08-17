@@ -1,6 +1,12 @@
 import type { MetadataRoute } from "next";
 import { env } from "@/lib/env";
 
+// Rendered per request, not prerendered. The image is built generic with no
+// env, so a static render would bake the PUBLIC_BASE_URL fallback
+// (http://localhost:3000) into every deployment. Same reasoning as
+// generateMetadata in the root layout.
+export const dynamic = "force-dynamic";
+
 /**
  * The four public explainer routes only. Project pages under /p are
  * per-instance content and are not enumerated here.

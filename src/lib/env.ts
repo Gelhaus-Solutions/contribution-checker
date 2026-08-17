@@ -166,9 +166,23 @@ if (!parsed.success && !isBuildPhase) {
   throw new Error(`Invalid environment variables:\n${issues}`);
 }
 
+// Build-phase placeholder for the only field that is required with no default.
+// The image is built generic, with no env at all, so without this the fallback
+// below cannot run the full schema.
+const BUILD_PHASE_PLACEHOLDERS = {
+  DATABASE_URL: "postgresql://placeholder/build-phase",
+} as const;
+
+// Note the deliberate use of the FULL schema here rather than
+// `schema.partial()`. `.partial()` wraps every field in ZodOptional, which
+// short-circuits on a missing key and therefore never reaches that field's
+// `.default()`. That silently produced `PUBLIC_BASE_URL === undefined` in the
+// container build (env-less), where locally it was always defined because a
+// .env file made the strict parse succeed. Filling in the one required field
+// keeps every other default intact.
 const raw = parsed.success
   ? parsed.data
-  : (schema.partial().parse(process.env) as z.infer<typeof schema>);
+  : schema.parse({ ...BUILD_PHASE_PLACEHOLDERS, ...process.env });
 
 // Single-App mode: use the GitHub App's OAuth client credentials for sign-in
 // when no separate OAuth App is configured. These string values are only used
