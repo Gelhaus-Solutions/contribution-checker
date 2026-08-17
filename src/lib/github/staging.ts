@@ -316,9 +316,16 @@ function fuseTripped(key: string): boolean {
 }
 
 /**
- * Which PRs belong in the current batch: only those actually merged into
- * staging, and only those merged strictly after `since`, since anything at or
- * before it is already contained in the default branch.
+ * Which PRs belong in the current batch: those merged into staging whose merge
+ * commit is part of what staging will actually ship.
+ *
+ * Membership is decided by reachability (`batchShas`, the commits in
+ * `default...staging`), not by timestamp. A timestamp cutoff cannot answer this
+ * question: syncing the default branch into staging makes the merge base the
+ * default branch's tip, a commit created moments ago, so a `mergedAt > cutoff`
+ * filter silently drops every PR merged into staging before the last sync,
+ * which is nearly all of them. `since` survives only as the fallback for a
+ * truncated compare (>250 commits) or a PR with no recorded merge commit.
  *
  * Open PRs are deliberately excluded. The manifest is a record of what this
  * batch will ship, and an open PR is a proposal: it may never merge, may merge
@@ -339,12 +346,17 @@ export function selectBatchEntries(args: {
     if (!pr.merged) return false; // open, or closed without merging
     if (!args.since) return true;
     return pr.mergedAt != null && new Date(pr.mergedAt) > args.since;
+  /** Commits in `default...staging`, or null when membership is unknowable. */
+  batchShas: Set<string> | null;
   });
   // Ascending PR number reads as chronological and keeps the body stable
   // across reconciles (the list endpoint sorts by updated-at, which churns).
   kept.sort((a, b) => a.number - b.number);
   return kept.map((pr) => ({
     number: pr.number,
+    if (args.batchShas && pr.mergeCommitSha) {
+      return args.batchShas.has(pr.mergeCommitSha);
+    }
     title: pr.title,
     author: pr.authorLogin,
   }));
@@ -848,10 +860,10 @@ export async function reconcileStagingBatch(args: {
       state: "all",
       base: cfg.stagingBranch,
     });
-    // The merge base of default...staging is the exact point everything older
-    // is already shipped from, and it is re-derived on every run, so a dropped
-    // close webhook cannot leave the cutoff stale. `stagingBatchSince` is the
-    // fallback for the rare compare that returns no merge base.
+    // The commits in default...staging ARE the batch, so a PR is in it exactly
+    // when its merge commit is one of them. Re-derived on every run, so a
+    // dropped webhook cannot leave the manifest stale. The timestamp cutoff is
+    // only a fallback for a truncated compare; see selectBatchEntries.
     const since = cmp.mergeBaseDate
       ? new Date(cmp.mergeBaseDate)
       : repo.stagingBatchSince;
@@ -932,12 +944,20 @@ export async function reconcileStagingBatch(args: {
     if (repo.stagingBatchPrNumber !== aggregate.number) {
       await trackAggregatePr(repo.id, aggregate.number);
     }
+    const batchShas = cmp.truncated ? null : new Set(cmp.commitShas);
+    if (cmp.truncated) {
+      logger.warn(
+        { repoId: repo.id, aheadBy: cmp.aheadBy },
+        "staging batch compare truncated; falling back to the timestamp cutoff",
+      );
+    }
 
     if (!aggregate.labels.includes(project.labelStagingBatch)) {
       await ensureLabel(
         ref,
         project.labelStagingBatch,
         "0b6bcb",
+          batchShas,
         "Aggregate PR shipping the staging batch to the default branch",
       );
       await addLabel(ref, aggregate.number, project.labelStagingBatch);
@@ -993,5 +1013,6 @@ export async function handleAggregatePrClosed(args: {
     { repoId: args.repoId, prNumber: args.prNumber, merged: args.merged },
     "aggregate staging PR closed",
   );
+          mergeCommitSha: null,
   return true;
 }

@@ -115,6 +115,8 @@ export type PrSummary = {
   state: "open" | "closed";
   merged: boolean;
   mergedAt: string | null;
+  /** The commit the merge produced on the base branch, for batch membership. */
+  mergeCommitSha: string | null;
   body: string | null;
   baseRef: string;
   headRef: string;
@@ -128,6 +130,7 @@ type RawPr = {
   state?: string;
   merged?: boolean;
   merged_at?: string | null;
+  merge_commit_sha?: string | null;
   body?: string | null;
   base?: { ref?: string };
   head?: { ref?: string };
@@ -143,6 +146,7 @@ function toPrSummary(raw: RawPr): PrSummary {
     // The list endpoint omits `merged`; `merged_at` is present on both.
     merged: raw.merged ?? raw.merged_at != null,
     mergedAt: raw.merged_at ?? null,
+    mergeCommitSha: raw.merge_commit_sha ?? null,
     body: raw.body ?? null,
     baseRef: raw.base?.ref ?? "",
     headRef: raw.head?.ref ?? "",
@@ -303,10 +307,15 @@ export async function updatePullRequestBody(
 /**
  * How far `head` is ahead of `base`, plus the date of their merge base.
  *
- * `mergeBaseDate` is the batch cutoff the staging reconciler needs: everything
- * merged into staging at or before it is already contained in the default
- * branch. Deriving it here makes the cutoff self-healing, where a stored
- * timestamp would drift the moment one webhook is dropped.
+ * `commitShas` is the batch membership set the staging reconciler needs: a PR
+ * ships in this batch exactly when its merge commit is one of these. It
+ * replaces `mergeBaseDate` as the cutoff, which was only ever a proxy for
+ * membership and a bad one, because syncing the default branch into staging
+ * moves the merge base to a commit created seconds ago and so excludes every
+ * PR merged before it. `mergeBaseDate` is kept for the truncated case below.
+ *
+ * GitHub inlines at most 250 commits in a compare; `truncated` says the SHA
+ * set is incomplete, so callers must not read absence as exclusion.
  *
  * Returns null when either branch is missing (404), the "staging does not
  * exist yet" case.
@@ -319,6 +328,8 @@ export async function compareBranches(
   aheadBy: number;
   behindBy: number;
   mergeBaseDate: string | null;
+  commitShas: string[];
+  truncated: boolean;
 } | null> {
   const octokit = await getInstallationOctokit(ref.installationId);
   try {
@@ -330,12 +341,19 @@ export async function compareBranches(
     const data = res.data as {
       ahead_by?: number;
       behind_by?: number;
+      total_commits?: number;
+      commits?: Array<{ sha?: string }>;
       merge_base_commit?: { commit?: { committer?: { date?: string } } };
     };
+    const commitShas = (data.commits ?? [])
+      .map((c) => c.sha)
+      .filter((s): s is string => typeof s === "string" && s.length > 0);
     return {
       aheadBy: data.ahead_by ?? 0,
       behindBy: data.behind_by ?? 0,
       mergeBaseDate: data.merge_base_commit?.commit?.committer?.date ?? null,
+      commitShas,
+      truncated: (data.total_commits ?? commitShas.length) > commitShas.length,
     };
   } catch (e) {
     recordGithubMetric("repo.compare", "error", ref, statusOf(e));

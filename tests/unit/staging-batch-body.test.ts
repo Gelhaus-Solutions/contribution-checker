@@ -12,6 +12,7 @@ function pr(overrides: Partial<PrSummary> & { number: number }): PrSummary {
     state: "open",
     merged: false,
     mergedAt: null,
+    mergeCommitSha: null,
     body: null,
     baseRef: "staging",
     headRef: `feature-${overrides.number}`,
@@ -98,6 +99,7 @@ describe("selectBatchEntries", () => {
       prs: [merged(1), { ...merged(2), baseRef: "main" }],
       stagingBranch,
       since: null,
+      batchShas: null,
       excludePrNumber: null,
     });
     expect(entries.map((e) => e.number)).toEqual([1]);
@@ -108,6 +110,7 @@ describe("selectBatchEntries", () => {
       prs: [pr({ number: 1, state: "open" }), merged(2)],
       stagingBranch,
       since: null,
+      batchShas: null,
       excludePrNumber: null,
     });
     expect(entries.map((e) => e.number)).toEqual([2]);
@@ -118,6 +121,7 @@ describe("selectBatchEntries", () => {
       prs: [pr({ number: 1, state: "closed", merged: false })],
       stagingBranch,
       since: null,
+      batchShas: null,
       excludePrNumber: null,
     });
     expect(entries).toEqual([]);
@@ -128,6 +132,7 @@ describe("selectBatchEntries", () => {
       prs: [pr({ number: 1, state: "open" })],
       stagingBranch,
       since: null,
+      batchShas: null,
       excludePrNumber: null,
     });
     expect(entries).toEqual([]);
@@ -138,6 +143,7 @@ describe("selectBatchEntries", () => {
       prs: [merged(1, "2026-08-01T00:00:00Z"), merged(2, "2026-08-12T00:00:00Z")],
       stagingBranch,
       since: new Date("2026-08-10T00:00:00Z"),
+      batchShas: null,
       excludePrNumber: null,
     });
     expect(entries.map((e) => e.number)).toEqual([2]);
@@ -148,6 +154,7 @@ describe("selectBatchEntries", () => {
       prs: [merged(1, "2026-08-01T00:00:00Z")],
       stagingBranch,
       since: null,
+      batchShas: null,
       excludePrNumber: null,
     });
     expect(entries.map((e) => e.number)).toEqual([1]);
@@ -158,9 +165,58 @@ describe("selectBatchEntries", () => {
       prs: [merged(1), merged(99)],
       stagingBranch,
       since: null,
+      batchShas: null,
       excludePrNumber: 99,
     });
     expect(entries.map((e) => e.number)).toEqual([1]);
+  });
+
+  // The regression that emptied gitroomhq/postiz-app#1902. Syncing the default
+  // branch into staging makes the merge base the default branch's tip, whose
+  // date is "just now", so every PR merged into staging earlier fell outside a
+  // `mergedAt > mergeBaseDate` cutoff and the manifest rendered empty. Merge
+  // commit reachability is the question that was actually being asked.
+  it("keeps PRs merged long before the merge base when their commit is in the batch", () => {
+    const entries = selectBatchEntries({
+      prs: [
+        { ...merged(1, "2026-08-17T06:00:52Z"), mergeCommitSha: "aaa" },
+        { ...merged(2, "2026-08-17T09:01:16Z"), mergeCommitSha: "bbb" },
+      ],
+      stagingBranch,
+      // A sync merge that landed after both PRs merged.
+      since: new Date("2026-08-17T10:17:55Z"),
+      batchShas: new Set(["aaa", "bbb", "sync-merge"]),
+      excludePrNumber: null,
+    });
+    expect(entries.map((e) => e.number)).toEqual([1, 2]);
+  });
+
+  it("drops a PR whose merge commit already shipped in an earlier batch", () => {
+    const entries = selectBatchEntries({
+      prs: [
+        { ...merged(1), mergeCommitSha: "shipped" },
+        { ...merged(2), mergeCommitSha: "pending" },
+      ],
+      stagingBranch,
+      since: null,
+      batchShas: new Set(["pending"]),
+      excludePrNumber: null,
+    });
+    expect(entries.map((e) => e.number)).toEqual([2]);
+  });
+
+  it("falls back to the timestamp when a PR has no recorded merge commit", () => {
+    const entries = selectBatchEntries({
+      prs: [
+        { ...merged(1, "2026-08-01T00:00:00Z"), mergeCommitSha: null },
+        { ...merged(2, "2026-08-12T00:00:00Z"), mergeCommitSha: null },
+      ],
+      stagingBranch,
+      since: new Date("2026-08-10T00:00:00Z"),
+      batchShas: new Set(["something-else"]),
+      excludePrNumber: null,
+    });
+    expect(entries.map((e) => e.number)).toEqual([2]);
   });
 
   it("sorts by PR number so the body is stable across reconciles", () => {
@@ -168,6 +224,7 @@ describe("selectBatchEntries", () => {
       prs: [merged(9), merged(3), merged(5)],
       stagingBranch,
       since: null,
+      batchShas: null,
       excludePrNumber: null,
     });
     expect(entries.map((e) => e.number)).toEqual([3, 5, 9]);

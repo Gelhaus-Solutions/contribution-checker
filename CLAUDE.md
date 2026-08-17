@@ -76,8 +76,17 @@ Staging routing (`src/lib/github/staging.ts`, App mode only):
   `<!-- staging-batch:start/end -->` markers, preserving human text outside
   them. A full re-derivation from live GitHub, so it is safe to run any number
   of times; it PATCHes the body only when the rendered block actually changed.
-  The batch cutoff is the merge base of `default...staging`, so it self-heals
-  when a webhook is dropped.
+  Batch membership is **merge commit reachability**: a PR ships in this batch
+  when its `merge_commit_sha` is one of the commits in `default...staging`.
+  Re-derived on every run, so a dropped webhook cannot leave it stale.
+- **Never use a timestamp as the batch cutoff.** The obvious-looking
+  `mergedAt > mergeBaseDate` is wrong, and wrong in a way that empties the
+  manifest silently: `syncStagingWithDefault` merges the default branch into
+  staging, which makes the merge base the default branch's *tip*, a commit
+  created seconds ago. Every PR merged into staging before the last sync then
+  falls outside the cutoff. This shipped and blanked a live release PR. The
+  timestamp survives only as the fallback for a compare truncated at GitHub's
+  250-commit inline limit (`truncated`).
 - **The manifest lists merged PRs only.** Open and closed-without-merging PRs
   are excluded: the description is a record of what the batch ships, not of
   what was proposed.

@@ -58,6 +58,7 @@ const AGGREGATE: PrSummary = {
   state: "open",
   merged: false,
   mergedAt: null,
+  mergeCommitSha: null,
   body: null as string | null,
   baseRef: "main",
   headRef: "staging",
