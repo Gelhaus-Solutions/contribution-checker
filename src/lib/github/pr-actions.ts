@@ -329,6 +329,8 @@ export async function compareBranches(
   behindBy: number;
   mergeBaseDate: string | null;
   commitShas: string[];
+  /** sha -> parent shas, for telling a merge apart from what it merged. */
+  commitParents: Record<string, string[]>;
   truncated: boolean;
 } | null> {
   const octokit = await getInstallationOctokit(ref.installationId);
@@ -342,17 +344,26 @@ export async function compareBranches(
       ahead_by?: number;
       behind_by?: number;
       total_commits?: number;
-      commits?: Array<{ sha?: string }>;
+      commits?: Array<{ sha?: string; parents?: Array<{ sha?: string }> }>;
       merge_base_commit?: { commit?: { committer?: { date?: string } } };
     };
-    const commitShas = (data.commits ?? [])
-      .map((c) => c.sha)
-      .filter((s): s is string => typeof s === "string" && s.length > 0);
+    const commits = (data.commits ?? []).filter(
+      (c): c is { sha: string; parents?: Array<{ sha?: string }> } =>
+        typeof c.sha === "string" && c.sha.length > 0,
+    );
+    const commitShas = commits.map((c) => c.sha);
+    const commitParents: Record<string, string[]> = {};
+    for (const c of commits) {
+      commitParents[c.sha] = (c.parents ?? [])
+        .map((p) => p.sha)
+        .filter((s): s is string => typeof s === "string" && s.length > 0);
+    }
     return {
       aheadBy: data.ahead_by ?? 0,
       behindBy: data.behind_by ?? 0,
       mergeBaseDate: data.merge_base_commit?.commit?.committer?.date ?? null,
       commitShas,
+      commitParents,
       truncated: (data.total_commits ?? commitShas.length) > commitShas.length,
     };
   } catch (e) {

@@ -170,19 +170,13 @@ export function renderBatchBlock(entries: BatchEntry[]): string {
     entries.length === 0
       ? ["_No merged PRs in this batch yet._"]
       : entries.map((e) => {
+          // The title is a code span so GitHub renders it verbatim next to the
+          // `#123` reference it expands on its own.
           const title = e.title.trim() || `PR #${e.number}`;
           const by = e.author ? ` by @${e.author}` : "";
-          return `- ${title} (#${e.number}${by})`;
+          return `- \`${title}\` (#${e.number}${by})`;
         });
-  return [
-    BLOCK_START,
-    "### In this batch",
-    "",
-    ...lines,
-    "",
-    "_Updated automatically by contribution-checker._",
-    BLOCK_END,
-  ].join("\n");
+  return [BLOCK_START, "### In this batch", "", ...lines, BLOCK_END].join("\n");
 }
 
 /**
@@ -324,6 +318,32 @@ function fuseTripped(key: string): boolean {
 }
 
 /**
+ * Did this merge commit bring anything the default branch does not already
+ * have? A merge commit is unique to staging even when everything it merged is
+ * already on the default branch by another route, so "the merge commit is in
+ * `default...staging`" is not enough on its own.
+ *
+ * The named case: a maintainer merges branch X into staging, then opens a
+ * second PR from the same X against the default branch and merges that too.
+ * The staging merge commit is still only on staging, but its content shipped
+ * without it, so listing it claims the batch ships something it does not.
+ *
+ * The head-side parents of a merge are what it brought in. If none of them is
+ * in the batch, they are all already on the default branch. A single-parent
+ * merge commit is a squash or rebase merge, whose commit *is* the content, so
+ * it always counts.
+ */
+function mergeAlreadyOnDefault(args: {
+  mergeCommitSha: string;
+  batchShas: Set<string>;
+  batchParents: Record<string, string[]> | null;
+}): boolean {
+  const parents = args.batchParents?.[args.mergeCommitSha];
+  if (!parents || parents.length < 2) return false;
+  return !parents.slice(1).some((p) => args.batchShas.has(p));
+}
+
+/**
  * Which PRs belong in the current batch: those merged into staging whose merge
  * commit is part of what staging will actually ship.
  *
@@ -348,6 +368,8 @@ export function selectBatchEntries(args: {
   since: Date | null;
   /** Commits in `default...staging`, or null when membership is unknowable. */
   batchShas: Set<string> | null;
+  /** sha -> parents, for the same commit range. */
+  batchParents: Record<string, string[]> | null;
   excludePrNumber: number | null;
 }): BatchEntry[] {
   const kept = args.prs.filter((pr) => {
@@ -355,7 +377,12 @@ export function selectBatchEntries(args: {
     if (pr.baseRef !== args.stagingBranch) return false;
     if (!pr.merged) return false; // open, or closed without merging
     if (args.batchShas && pr.mergeCommitSha) {
-      return args.batchShas.has(pr.mergeCommitSha);
+      if (!args.batchShas.has(pr.mergeCommitSha)) return false;
+      return !mergeAlreadyOnDefault({
+        mergeCommitSha: pr.mergeCommitSha,
+        batchShas: args.batchShas,
+        batchParents: args.batchParents,
+      });
     }
     if (!args.since) return true;
     return pr.mergedAt != null && new Date(pr.mergedAt) > args.since;
@@ -958,6 +985,7 @@ export async function reconcileStagingBatch(args: {
           stagingBranch: cfg.stagingBranch,
           since,
           batchShas,
+          batchParents: cmp.commitParents,
           excludePrNumber,
         }),
       );

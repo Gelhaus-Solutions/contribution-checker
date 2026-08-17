@@ -90,6 +90,13 @@ Staging routing (`src/lib/github/staging.ts`, App mode only):
 - **The manifest lists merged PRs only.** Open and closed-without-merging PRs
   are excluded: the description is a record of what the batch ships, not of
   what was proposed.
+- **A merge commit in the range is not proof the batch ships it.** When a
+  branch is merged into staging *and* separately into the default branch, the
+  staging merge commit is still unique to staging while its content is already
+  shipped. `mergeAlreadyOnDefault` drops those by checking the merge's
+  head-side parents: if none is in the batch, the merge brought nothing new. A
+  single-parent merge commit is a squash or rebase merge, whose commit *is* the
+  content, so it always counts.
 - **Build the manifest before creating the aggregate PR, not after.** GitHub
   fires `pull_request.opened` with whatever body the create call carried, and
   that snapshot is what Slack/Discord/email quote forever. Creating it empty

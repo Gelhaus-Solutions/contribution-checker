@@ -28,20 +28,27 @@ describe("renderBatchBlock", () => {
       { number: 123, title: "Fix the retry backoff", author: "octocat" },
       { number: 124, title: "Add German translations", author: "hubot" },
     ]);
-    expect(block).toContain("- Fix the retry backoff (#123 by @octocat)");
-    expect(block).toContain("- Add German translations (#124 by @hubot)");
+    expect(block).toContain("- `Fix the retry backoff` (#123 by @octocat)");
+    expect(block).toContain("- `Add German translations` (#124 by @hubot)");
   });
 
   it("falls back to the PR number when a title is blank", () => {
     const block = renderBatchBlock([
       { number: 7, title: "   ", author: "octocat" },
     ]);
-    expect(block).toContain("- PR #7 (#7 by @octocat)");
+    expect(block).toContain("- `PR #7` (#7 by @octocat)");
   });
 
   it("omits the author when GitHub gave us none", () => {
     const block = renderBatchBlock([{ number: 7, title: "Thing", author: null }]);
-    expect(block).toContain("- Thing (#7)");
+    expect(block).toContain("- `Thing` (#7)");
+  });
+
+  it("carries no automation footer", () => {
+    const block = renderBatchBlock([
+      { number: 1, title: "One", author: "a" },
+    ]);
+    expect(block).not.toContain("Updated automatically");
   });
 
   it("says so when the batch is empty rather than rendering an empty list", () => {
@@ -75,7 +82,7 @@ describe("applyBatchBlock", () => {
     const out = applyBatchBlock(withNote, next);
     expect(out.startsWith("Preamble.")).toBe(true);
     expect(out).toContain("Remember to bump the changelog.");
-    expect(out).toContain("- Two (#2 by @b)");
+    expect(out).toContain("- `Two` (#2 by @b)");
     // The stale single-entry list is gone, not duplicated.
     expect(out.match(/### In this batch/g)).toHaveLength(1);
   });
@@ -100,6 +107,7 @@ describe("selectBatchEntries", () => {
       stagingBranch,
       since: null,
       batchShas: null,
+      batchParents: null,
       excludePrNumber: null,
     });
     expect(entries.map((e) => e.number)).toEqual([1]);
@@ -111,6 +119,7 @@ describe("selectBatchEntries", () => {
       stagingBranch,
       since: null,
       batchShas: null,
+      batchParents: null,
       excludePrNumber: null,
     });
     expect(entries.map((e) => e.number)).toEqual([2]);
@@ -122,6 +131,7 @@ describe("selectBatchEntries", () => {
       stagingBranch,
       since: null,
       batchShas: null,
+      batchParents: null,
       excludePrNumber: null,
     });
     expect(entries).toEqual([]);
@@ -133,6 +143,7 @@ describe("selectBatchEntries", () => {
       stagingBranch,
       since: null,
       batchShas: null,
+      batchParents: null,
       excludePrNumber: null,
     });
     expect(entries).toEqual([]);
@@ -144,6 +155,7 @@ describe("selectBatchEntries", () => {
       stagingBranch,
       since: new Date("2026-08-10T00:00:00Z"),
       batchShas: null,
+      batchParents: null,
       excludePrNumber: null,
     });
     expect(entries.map((e) => e.number)).toEqual([2]);
@@ -155,6 +167,7 @@ describe("selectBatchEntries", () => {
       stagingBranch,
       since: null,
       batchShas: null,
+      batchParents: null,
       excludePrNumber: null,
     });
     expect(entries.map((e) => e.number)).toEqual([1]);
@@ -166,6 +179,7 @@ describe("selectBatchEntries", () => {
       stagingBranch,
       since: null,
       batchShas: null,
+      batchParents: null,
       excludePrNumber: 99,
     });
     expect(entries.map((e) => e.number)).toEqual([1]);
@@ -186,9 +200,54 @@ describe("selectBatchEntries", () => {
       // A sync merge that landed after both PRs merged.
       since: new Date("2026-08-17T10:17:55Z"),
       batchShas: new Set(["aaa", "bbb", "sync-merge"]),
+      batchParents: null,
       excludePrNumber: null,
     });
     expect(entries.map((e) => e.number)).toEqual([1, 2]);
+  });
+
+  // The real gitroomhq/postiz-app graph. #1897 merged feat/tiktok-business into
+  // staging (merge commit d7acd5ac, head-side parent 306b6e94). The same branch
+  // was then merged into main by #1908, so 306b6e94 is on main and outside the
+  // batch: the staging merge commit ships nothing. #1901 and #1903 are ordinary
+  // merges whose head-side parents are still staging-only.
+  it("drops a merge whose content already reached the default branch", () => {
+    const entries = selectBatchEntries({
+      prs: [
+        { ...merged(1897), mergeCommitSha: "d7acd5ac" },
+        { ...merged(1901), mergeCommitSha: "b629fae7" },
+        { ...merged(1903), mergeCommitSha: "409fe767" },
+      ],
+      stagingBranch,
+      since: null,
+      batchShas: new Set([
+        "d7acd5ac",
+        "b629fae7",
+        "e6cc6341",
+        "409fe767",
+        "92b6b566",
+      ]),
+      batchParents: {
+        // head-side parent 306b6e94 is on main, not in the batch
+        "d7acd5ac": ["409fe767", "306b6e94"],
+        "b629fae7": ["9ddbd73c", "e6cc6341"],
+        "409fe767": ["b629fae7", "92b6b566"],
+      },
+      excludePrNumber: null,
+    });
+    expect(entries.map((e) => e.number)).toEqual([1901, 1903]);
+  });
+
+  it("keeps a squash or rebase merge, whose commit is itself the content", () => {
+    const entries = selectBatchEntries({
+      prs: [{ ...merged(5), mergeCommitSha: "squashed" }],
+      stagingBranch,
+      since: null,
+      batchShas: new Set(["squashed"]),
+      batchParents: { squashed: ["staging-tip"] },
+      excludePrNumber: null,
+    });
+    expect(entries.map((e) => e.number)).toEqual([5]);
   });
 
   it("drops a PR whose merge commit already shipped in an earlier batch", () => {
@@ -200,6 +259,7 @@ describe("selectBatchEntries", () => {
       stagingBranch,
       since: null,
       batchShas: new Set(["pending"]),
+      batchParents: null,
       excludePrNumber: null,
     });
     expect(entries.map((e) => e.number)).toEqual([2]);
@@ -214,6 +274,7 @@ describe("selectBatchEntries", () => {
       stagingBranch,
       since: new Date("2026-08-10T00:00:00Z"),
       batchShas: new Set(["something-else"]),
+      batchParents: null,
       excludePrNumber: null,
     });
     expect(entries.map((e) => e.number)).toEqual([2]);
@@ -225,6 +286,7 @@ describe("selectBatchEntries", () => {
       stagingBranch,
       since: null,
       batchShas: null,
+      batchParents: null,
       excludePrNumber: null,
     });
     expect(entries.map((e) => e.number)).toEqual([3, 5, 9]);
