@@ -342,6 +342,16 @@ model Repo {
   // Cached default branch name, refreshed opportunistically from PR/push
   // webhook payloads and, as a last resort, from GET /repos/{owner}/{repo}.
   defaultBranch String?
+
+  // Per-repo staging overrides. NULL means "inherit the project default",
+  // which is why the booleans are nullable rather than defaulted: a repo has
+  // to be able to say "off" while the project says "on", and adding a repo
+  // must not silently opt it out of a project-wide rollout.
+  // Resolve through resolveStagingConfig() in src/lib/github/staging.ts;
+  // never read these three columns directly.
+  stagingRetargetEnabled Boolean?
+  stagingBatchPrEnabled  Boolean?
+  stagingBranch          String?
   // Staging routing state. `stagingBatchPrNumber` is the open aggregate PR
   // (null = no batch in flight). `stagingBatchSince` is when the previous
   // aggregate PR merged: PRs merged into staging before it are already in the

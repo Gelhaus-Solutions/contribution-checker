@@ -27,6 +27,9 @@ import {
 import {
   applyStagingRouting,
   handleAggregatePrClosed,
+  resolveStagingConfig,
+  stagingProjectSelect,
+  stagingRepoSelect,
   type StagingRoutingResult,
 } from "@/lib/github/staging";
 import { signalStagingBatch } from "@/lib/temporal/start";
@@ -558,9 +561,14 @@ async function handlePrClosed(args: {
 }): Promise<PrEventResult> {
   const repo = await prisma.repo.findUnique({
     where: { ghRepoId: args.ghRepoId },
-    select: { id: true, project: { select: { stagingBranch: true } } },
+    select: {
+      id: true,
+      ...stagingRepoSelect,
+      project: { select: stagingProjectSelect },
+    },
   });
   if (!repo) return NOT_TERMINAL;
+  const stagingCfg = resolveStagingConfig(repo.project, repo);
 
   try {
     const wasAggregate = await handleAggregatePrClosed({
@@ -573,7 +581,7 @@ async function handlePrClosed(args: {
     // merged, staging is no longer ahead and there is nothing to open; if a
     // human closed it unmerged, immediately reopening one would override them.
     // Either way the next staging activity starts a fresh batch.
-    if (!wasAggregate && args.baseRef === repo.project.stagingBranch) {
+    if (!wasAggregate && args.baseRef === stagingCfg.stagingBranch) {
       await signalStagingBatch({
         repoId: repo.id,
         reason: args.merged ? "pr_merged_to_staging" : "pr_closed_on_staging",
@@ -1404,12 +1412,12 @@ export async function handlePushEvent(payload: PushPayload) {
       select: {
         id: true,
         defaultBranch: true,
-        project: {
-          select: { stagingBatchPrEnabled: true, stagingBranch: true },
-        },
+        ...stagingRepoSelect,
+        project: { select: stagingProjectSelect },
       },
     });
     if (!repo) return;
+    const cfg = resolveStagingConfig(repo.project, repo);
     if (payload.repository?.default_branch &&
         repo.defaultBranch !== payload.repository.default_branch) {
       await prisma.repo.update({
@@ -1417,10 +1425,7 @@ export async function handlePushEvent(payload: PushPayload) {
         data: { defaultBranch: payload.repository.default_branch },
       });
     }
-    if (
-      repo.project.stagingBatchPrEnabled &&
-      branch === repo.project.stagingBranch
-    ) {
+    if (cfg.batchPrEnabled && branch === cfg.stagingBranch) {
       await signalStagingBatch({ repoId: repo.id, reason: "push_to_staging" });
     }
   } catch (e) {

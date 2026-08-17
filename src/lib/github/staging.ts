@@ -44,7 +44,7 @@ const BLOCK_END = "<!-- staging-batch:end -->";
 const AGGREGATE_PR_TITLE = "Ship staging to production";
 
 /** The project fields both halves need. */
-type StagingProject = {
+export type StagingProject = {
   id: string;
   bypassHandles: string;
   stagingRetargetEnabled: boolean;
@@ -54,7 +54,14 @@ type StagingProject = {
   labelStagingOptOut: string;
 };
 
-const stagingProjectSelect = {
+/** The per-repo overrides. Null on any field means "inherit the project". */
+export type StagingRepoOverrides = {
+  stagingRetargetEnabled: boolean | null;
+  stagingBatchPrEnabled: boolean | null;
+  stagingBranch: string | null;
+};
+
+export const stagingProjectSelect = {
   id: true,
   bypassHandles: true,
   stagingRetargetEnabled: true,
@@ -63,6 +70,53 @@ const stagingProjectSelect = {
   labelStagingBatch: true,
   labelStagingOptOut: true,
 } as const;
+
+export const stagingRepoSelect = {
+  stagingRetargetEnabled: true,
+  stagingBatchPrEnabled: true,
+  stagingBranch: true,
+} as const;
+
+/** The settings actually in force for one repo, after overrides. */
+export type ResolvedStagingConfig = {
+  retargetEnabled: boolean;
+  batchPrEnabled: boolean;
+  stagingBranch: string;
+  /** Which fields the repo overrode, for the settings UI to show. */
+  overridden: {
+    retargetEnabled: boolean;
+    batchPrEnabled: boolean;
+    stagingBranch: boolean;
+  };
+};
+
+/**
+ * Fold the per-repo overrides onto the project defaults. The single place that
+ * decides what staging routing does for a given repo: read this, never the
+ * columns, so a repo override cannot be honored on one code path and ignored
+ * on another.
+ */
+export function resolveStagingConfig(
+  project: Pick<
+    StagingProject,
+    "stagingRetargetEnabled" | "stagingBatchPrEnabled" | "stagingBranch"
+  >,
+  repo: StagingRepoOverrides | null,
+): ResolvedStagingConfig {
+  const branch = repo?.stagingBranch?.trim();
+  return {
+    retargetEnabled:
+      repo?.stagingRetargetEnabled ?? project.stagingRetargetEnabled,
+    batchPrEnabled:
+      repo?.stagingBatchPrEnabled ?? project.stagingBatchPrEnabled,
+    stagingBranch: branch || project.stagingBranch,
+    overridden: {
+      retargetEnabled: repo?.stagingRetargetEnabled != null,
+      batchPrEnabled: repo?.stagingBatchPrEnabled != null,
+      stagingBranch: !!branch,
+    },
+  };
+}
 
 function parseBypassHandles(raw: string): string[] {
   try {
@@ -393,11 +447,13 @@ export async function applyStagingRouting(ctx: {
         active: true,
         defaultBranch: true,
         stagingBatchPrNumber: true,
+        ...stagingRepoSelect,
         project: { select: stagingProjectSelect },
       },
     });
     if (!repo || !repo.active || repo.installationId == null) return NO_ROUTING;
     const project = repo.project;
+    const cfg = resolveStagingConfig(project, repo);
 
     const ref = repoRef(repo.fullName, repo.installationId);
     const defaultBranch = await resolveDefaultBranch({
@@ -423,15 +479,15 @@ export async function applyStagingRouting(ctx: {
       head: ctx.head,
       baseRef: ctx.baseRef,
       baseRepoFullName: repo.fullName,
-      stagingBranch: project.stagingBranch,
+      stagingBranch: cfg.stagingBranch,
       defaultBranch,
     });
     const base = {
       repoId: repo.id,
-      isAggregatePr: isAggregate && project.stagingBatchPrEnabled,
-      touchesStaging: ctx.baseRef === project.stagingBranch,
+      isAggregatePr: isAggregate && cfg.batchPrEnabled,
+      touchesStaging: ctx.baseRef === cfg.stagingBranch,
     };
-    if (!project.stagingRetargetEnabled) {
+    if (!cfg.retargetEnabled) {
       return { ...base, retargeted: false };
     }
 
@@ -440,7 +496,7 @@ export async function applyStagingRouting(ctx: {
       head: ctx.head,
       baseRepoFullName: repo.fullName,
       defaultBranch,
-      stagingBranch: project.stagingBranch,
+      stagingBranch: cfg.stagingBranch,
       prNumber: ctx.prNumber,
       aggregatePrNumber: repo.stagingBatchPrNumber,
       prLabels: ctx.prLabels,
@@ -468,18 +524,18 @@ export async function applyStagingRouting(ctx: {
 
     const ready = await ensureStagingBranch({
       ref,
-      stagingBranch: project.stagingBranch,
+      stagingBranch: cfg.stagingBranch,
       defaultBranch,
     });
     if (!ready) return { ...base, retargeted: false };
 
-    await setPullRequestBase(ref, ctx.prNumber, project.stagingBranch);
+    await setPullRequestBase(ref, ctx.prNumber, cfg.stagingBranch);
     logger.info(
       {
         ghRepoId: ctx.ghRepoId,
         prNumber: ctx.prNumber,
         from: defaultBranch,
-        to: project.stagingBranch,
+        to: cfg.stagingBranch,
       },
       "retargeted PR to staging",
     );
@@ -557,12 +613,14 @@ export async function reconcileStagingBatch(args: {
         defaultBranch: true,
         stagingBatchPrNumber: true,
         stagingBatchSince: true,
+        ...stagingRepoSelect,
         project: { select: stagingProjectSelect },
       },
     });
     if (!repo || !repo.active || repo.installationId == null) return;
     const project = repo.project;
-    if (!project.stagingBatchPrEnabled) return;
+    const cfg = resolveStagingConfig(project, repo);
+    if (!cfg.batchPrEnabled) return;
 
     const ref = repoRef(repo.fullName, repo.installationId);
     const defaultBranch = await resolveDefaultBranch({
@@ -572,7 +630,7 @@ export async function reconcileStagingBatch(args: {
       cached: repo.defaultBranch,
     });
     if (!defaultBranch) return;
-    if (defaultBranch === project.stagingBranch) {
+    if (defaultBranch === cfg.stagingBranch) {
       logger.warn(
         { repoId: repo.id, branch: defaultBranch },
         "staging batch skipped: staging branch is the default branch",
@@ -582,14 +640,14 @@ export async function reconcileStagingBatch(args: {
 
     const ready = await ensureStagingBranch({
       ref,
-      stagingBranch: project.stagingBranch,
+      stagingBranch: cfg.stagingBranch,
       defaultBranch,
     });
     if (!ready) return;
 
     // Nothing to ship: do not open an empty PR, and drop a tracked number whose
     // PR has already been merged or closed.
-    const cmp = await compareBranches(ref, defaultBranch, project.stagingBranch);
+    const cmp = await compareBranches(ref, defaultBranch, cfg.stagingBranch);
     if (!cmp || cmp.aheadBy === 0) {
       if (repo.stagingBatchPrNumber != null) {
         const tracked = await getPullRequest(ref, repo.stagingBatchPrNumber);
@@ -604,7 +662,7 @@ export async function reconcileStagingBatch(args: {
       ref,
       repoId: repo.id,
       tracked: repo.stagingBatchPrNumber,
-      stagingBranch: project.stagingBranch,
+      stagingBranch: cfg.stagingBranch,
       defaultBranch,
       batchLabel: project.labelStagingBatch,
     });
@@ -612,7 +670,7 @@ export async function reconcileStagingBatch(args: {
     if (!aggregate) {
       const created = await createPullRequest(ref, {
         title: AGGREGATE_PR_TITLE,
-        head: project.stagingBranch,
+        head: cfg.stagingBranch,
         base: defaultBranch,
         body: renderBatchBlock([]),
       });
@@ -625,7 +683,7 @@ export async function reconcileStagingBatch(args: {
             ref,
             repoId: repo.id,
             tracked: null,
-            stagingBranch: project.stagingBranch,
+            stagingBranch: cfg.stagingBranch,
             defaultBranch,
             batchLabel: project.labelStagingBatch,
           });
@@ -665,7 +723,7 @@ export async function reconcileStagingBatch(args: {
 
     const prs = await listPullRequests(ref, {
       state: "all",
-      base: project.stagingBranch,
+      base: cfg.stagingBranch,
     });
     // The merge base of default...staging is the exact point everything older
     // is already shipped from, and it is re-derived on every run, so a dropped
@@ -676,7 +734,7 @@ export async function reconcileStagingBatch(args: {
       : repo.stagingBatchSince;
     const entries = selectBatchEntries({
       prs,
-      stagingBranch: project.stagingBranch,
+      stagingBranch: cfg.stagingBranch,
       since,
       excludePrNumber: aggregate.number,
     });

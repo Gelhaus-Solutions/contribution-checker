@@ -192,6 +192,11 @@ export const NAV_PERMISSION: Record<string, ProjectLeafPermission> = {
   "/form": "project_form_view",
   "/quality": "project_quality_view",
   "/cla": "project_cla_manage",
+  // Staging routing is settings, just on its own page because it carries
+  // per-repo overrides and live state. Sharing the leaf keeps every existing
+  // member's cached ProjectMember.permissions valid: a brand-new leaf would be
+  // absent from those rows until they resync, hiding the page from admins.
+  "/staging": "project_settings_manage",
   "/settings": "project_settings_manage",
   "/audit": "project_audit_view",
 };

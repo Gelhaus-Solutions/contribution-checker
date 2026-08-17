@@ -18,6 +18,7 @@ const items: { href: string; label: string }[] = [
   { href: "/form", label: "Form" },
   { href: "/quality", label: "Quality" },
   { href: "/cla", label: "CLA" },
+  { href: "/staging", label: "Staging" },
   { href: "/settings", label: "Settings" },
   { href: "/audit", label: "Audit log" },
 ];
