@@ -36,8 +36,8 @@ export default function ForContributorsPage() {
   })!;
 
   return (
-    <div className="mx-auto max-w-2xl">
-      <header className="py-16">
+    <div className="max-w-3xl">
+      <header className="py-14">
         <h1 className="text-3xl font-semibold tracking-tight text-balance">
           Your pull request was closed automatically
         </h1>

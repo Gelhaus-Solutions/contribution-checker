@@ -59,6 +59,12 @@
     --destructive-strong: oklch(0.505 0.191 27);
     --success-strong: oklch(0.448 0.106 154);
     --warning-strong: oklch(0.475 0.105 62);
+
+    /* Page texture. A flat fill reads as unfinished at this scale, and a
+       gradient would read as decoration; a fine dot grid reads as drafting
+       paper and stays out of the way. Content columns paint over it. */
+    --grid-dot: oklch(0.208 0.04 266 / 0.09);
+    --grid-size: 22px;
   }
 
   /* Written once, not duplicated under a media query. The server stamps this
@@ -105,6 +111,10 @@
     --destructive-strong: oklch(0.763 0.148 25);
     --success-strong: oklch(0.792 0.145 159);
     --warning-strong: oklch(0.849 0.14 76);
+
+    /* Slightly stronger than light mode: an equally faint dot disappears
+       entirely against a dark ground. */
+    --grid-dot: oklch(0.933 0.01 259 / 0.1);
   }
 
   /* Tailwind v4 dropped v3's preflight rule that defaulted every border to the
@@ -121,6 +131,14 @@
 
   html {
     background-color: var(--color-background);
+    /* The grid lives on <html> rather than <body> so it fills the viewport
+       even on short pages, and so an opaque content column can sit over it. */
+    background-image: radial-gradient(
+      var(--grid-dot) 1px,
+      transparent 1px
+    );
+    background-size: var(--grid-size) var(--grid-size);
+    background-position: center top;
     color: var(--color-foreground);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;

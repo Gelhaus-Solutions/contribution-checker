@@ -31,27 +31,20 @@ export default function OpengraphImage() {
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 20 }}>
-          <svg width="64" height="64" viewBox="0 0 32 32" fill="none">
-            <rect
-              x="1.5"
-              y="1.5"
-              width="29"
-              height="29"
-              rx="8"
-              fill={BRAND}
-              fillOpacity="0.14"
-              stroke={BRAND}
-              strokeOpacity="0.45"
-              strokeWidth="1.25"
-            />
+          {/* Matches components/brand-mark.tsx. Satori has no mask support, so
+              the cuts are painted in the background color instead. */}
+          <svg width="64" height="64" viewBox="0 0 32 32">
+            <rect width="32" height="32" rx="9" fill={BRAND} />
             <path
-              d="M10 16.5l4 4 8-9"
-              stroke={BRAND}
-              strokeWidth="2.25"
+              d="M9.25 16.5l4.5 4.5L21.25 12.5"
+              fill="none"
+              stroke={BG}
+              strokeWidth="3.25"
               strokeLinecap="round"
               strokeLinejoin="round"
             />
-            <circle cx="22.5" cy="9" r="2.25" fill={BRAND} />
+            <circle cx="25.25" cy="6.75" r="3.5" fill={BG} />
+            <circle cx="25.25" cy="6.75" r="1.9" fill={BRAND} />
           </svg>
           <span style={{ fontSize: 34, color: MUTED }}>
             contribution<span style={{ color: BRAND }}>/</span>checker

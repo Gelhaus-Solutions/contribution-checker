@@ -1,9 +1,14 @@
-<svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <!-- Same geometry as components/brand-mark.tsx, but with literal colors.
-       A favicon is rendered with no stylesheet, so the Tailwind classes the
-       component uses would resolve to nothing and the icon would be invisible.
-       #006be4 is the cobalt --primary token resolved to sRGB. -->
-  <rect x="1.5" y="1.5" width="29" height="29" rx="8" fill="#006be4" fill-opacity="0.12" stroke="#006be4" stroke-opacity="0.4" stroke-width="1.25"/>
-  <path d="M10 16.5l4 4 8-9" stroke="#006be4" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/>
-  <circle cx="22.5" cy="9" r="2.25" fill="#006be4"/>
+<svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <!-- Same geometry as components/brand-mark.tsx, with literal colors: a
+       favicon renders with no stylesheet, so currentColor and Tailwind classes
+       would resolve to nothing. #006be4 is the cobalt --primary token in sRGB. -->
+  <defs>
+    <mask id="m">
+      <rect width="32" height="32" rx="9" fill="white"/>
+      <path d="M9.25 16.5l4.5 4.5L21.25 12.5" fill="none" stroke="black" stroke-width="3.25" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="25.25" cy="6.75" r="3.5" fill="black"/>
+    </mask>
+  </defs>
+  <rect width="32" height="32" rx="9" fill="#006be4" mask="url(#m)"/>
+  <circle cx="25.25" cy="6.75" r="1.9" fill="#006be4"/>
 </svg>

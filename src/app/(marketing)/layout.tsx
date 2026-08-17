@@ -15,9 +15,16 @@ export default function MarketingLayout({
   children: React.ReactNode;
 }) {
   return (
+    // The column carries visible left and right hairlines and an opaque
+    // background, so the dot grid on the page shows only in the margins. That
+    // gives the content an edge to sit against instead of floating in an
+    // undifferentiated field, and the sm:pl-14 is what the hanging step
+    // numbers hang into.
     <div className="flex min-h-screen flex-col">
       <SiteHeader marketing width="5xl" />
-      <main className="mx-auto w-full max-w-5xl flex-1 px-4">{children}</main>
+      <main className="mx-auto w-full max-w-5xl flex-1 border-x border-border bg-background px-5 sm:pr-8 sm:pl-14">
+        {children}
+      </main>
       <MarketingFooter />
     </div>
   );

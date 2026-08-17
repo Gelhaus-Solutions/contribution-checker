@@ -61,18 +61,18 @@ export default async function Home() {
   return (
     <>
       {/* Statement */}
-      <section className="py-20 md:py-28">
+      <section className="py-14 md:py-20">
         <h1 className="max-w-3xl text-3xl font-semibold tracking-tight text-balance md:text-4xl">
           Every pull request goes through a gate you control.
         </h1>
-        <p className="mt-5 max-w-2xl text-sm leading-relaxed text-muted-foreground md:text-base">
+        <p className="mt-4 max-w-3xl text-sm leading-relaxed text-muted-foreground md:text-base">
           contribution-checker is a self-hosted GitHub App. When someone opens a
           pull request on a linked repository, it decides whether that author is
           allowed to contribute. If they are not, it closes the pull request and
           leaves a comment pointing at your application form. When you approve
           them, it reopens the pull request.
         </p>
-        <div className="mt-8 flex flex-wrap items-center gap-3">
+        <div className="mt-7 flex flex-wrap items-center gap-3">
           <Button asChild>
             <Link href="/how-it-works">Read how it works</Link>
           </Button>

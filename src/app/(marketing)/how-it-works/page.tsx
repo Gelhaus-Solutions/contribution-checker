@@ -38,9 +38,9 @@ export default function HowItWorksPage() {
   ) => buildDecisionCheckPayload({ decision, ...EXAMPLE });
 
   return (
-    <div className="lg:grid lg:grid-cols-[1fr_12rem] lg:gap-12">
+    <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_11rem] lg:gap-10">
       <div className="min-w-0">
-        <header className="py-16">
+        <header className="py-14">
           <h1 className="text-3xl font-semibold tracking-tight text-balance">
             The gating pipeline
           </h1>
@@ -476,7 +476,7 @@ export default function HowItWorksPage() {
           just push the article down. */}
       <nav
         aria-label="On this page"
-        className="hidden lg:sticky lg:top-24 lg:block lg:self-start lg:py-16"
+        className="hidden lg:sticky lg:top-20 lg:block lg:self-start lg:py-14"
       >
         <p className="mb-3 font-mono text-xs tracking-wide text-muted-foreground uppercase">
           On this page

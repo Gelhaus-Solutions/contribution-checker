@@ -28,7 +28,9 @@ export async function SiteHeader({
   return (
     // Sticky with a translucent ground: on a long docs page the nav has to stay
     // reachable, and the blur keeps content legible as it scrolls underneath.
-    <header className="sticky top-0 z-40 border-b border-border bg-background/80 backdrop-blur-sm">
+    // /90 plus a real blur, not /80 plus blur-sm: at the lighter setting the
+    // text scrolling underneath stayed legible through the bar.
+    <header className="sticky top-0 z-40 border-b border-border bg-background/90 backdrop-blur-md supports-[backdrop-filter]:bg-background/75">
       <div
         className={cn(
           "mx-auto flex h-14 items-center justify-between px-4",

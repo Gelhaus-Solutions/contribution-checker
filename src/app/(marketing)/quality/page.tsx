@@ -26,7 +26,7 @@ export default function QualityPage() {
 
   return (
     <>
-      <header className="py-16">
+      <header className="py-14">
         <h1 className="text-3xl font-semibold tracking-tight text-balance">
           The PR quality score
         </h1>
@@ -59,7 +59,7 @@ export default function QualityPage() {
             "Floor at 0.",
           ]}
         />
-        <div className="mt-6 max-w-xl">
+        <div className="mt-6 max-w-2xl">
           <CodeBlock code={FORMULA} language="score.ts" />
         </div>
         <p className="mt-4 text-sm leading-relaxed text-muted-foreground">

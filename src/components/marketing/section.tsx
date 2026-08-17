@@ -26,7 +26,7 @@ export function Section({
     <section
       id={id}
       className={cn(
-        "py-12 md:py-16",
+        "py-9 md:py-12",
         divider && "border-t border-border",
         // Anchored headings should not land under a sticky header.
         id && "scroll-mt-20",
@@ -39,21 +39,29 @@ export function Section({
         </p>
       ) : null}
       {title ? (
-        <h2 className="text-2xl font-semibold tracking-tight text-balance">
+        <h2 className="text-xl font-semibold tracking-tight text-balance md:text-2xl">
           {title}
         </h2>
       ) : null}
       {lead ? (
-        <p className="mt-3 max-w-2xl text-sm leading-relaxed text-muted-foreground">
+        <p className="mt-2.5 max-w-3xl text-sm leading-relaxed text-muted-foreground">
           {lead}
         </p>
       ) : null}
-      {children ? <div className={cn(title && "mt-8")}>{children}</div> : null}
+      {children ? <div className={cn(title && "mt-6")}>{children}</div> : null}
     </section>
   );
 }
 
-/** A numbered step list. Used for the decision precedence and the how-to lists. */
+/**
+ * A numbered step list.
+ *
+ * The numbers hang into the container's left padding rather than pushing the
+ * text across, so a step's body starts on exactly the same vertical line as
+ * the section heading and lead above it. Indenting the text instead (the
+ * obvious `flex gap-3` version) put every step 32px out of line with the rest
+ * of the page.
+ */
 export function Steps({
   items,
   start = 1,
@@ -62,16 +70,19 @@ export function Steps({
   start?: number;
 }) {
   return (
-    <ol className="space-y-3">
+    <ol className="space-y-3.5">
       {items.map((item, i) => (
-        <li key={i} className="flex gap-3 text-sm leading-relaxed">
+        <li
+          key={i}
+          className="relative text-sm leading-relaxed sm:pl-0"
+        >
           <span
             aria-hidden="true"
-            className="mt-px w-5 shrink-0 text-right font-mono text-xs text-muted-foreground tabular-nums"
+            className="mr-2.5 inline-block w-6 text-right align-top font-mono text-xs text-muted-foreground tabular-nums sm:absolute sm:-left-9 sm:mr-0 sm:mt-[0.2em] sm:w-6"
           >
             {String(i + start).padStart(2, "0")}
           </span>
-          <span className="min-w-0 flex-1">{item}</span>
+          <span className="min-w-0">{item}</span>
         </li>
       ))}
     </ol>
