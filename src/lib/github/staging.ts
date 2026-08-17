@@ -156,7 +156,6 @@ function parseBypassHandles(raw: string): string[] {
 /** One PR in the batch, as the manifest renders it. */
 export type BatchEntry = {
   number: number;
-  title: string;
   author: string | null;
 };
 
@@ -170,11 +169,10 @@ export function renderBatchBlock(entries: BatchEntry[]): string {
     entries.length === 0
       ? ["_No merged PRs in this batch yet._"]
       : entries.map((e) => {
-          // The title is a code span so GitHub renders it verbatim next to the
-          // `#123` reference it expands on its own.
-          const title = e.title.trim() || `PR #${e.number}`;
+          // No title: GitHub expands the `#123` reference into the PR's title
+          // when it renders, so carrying our own copy only duplicated it.
           const by = e.author ? ` by @${e.author}` : "";
-          return `- \`${title}\` (#${e.number}${by})`;
+          return `- #${e.number}${by}`;
         });
   return [BLOCK_START, "### In this batch", "", ...lines, BLOCK_END].join("\n");
 }
@@ -392,7 +390,6 @@ export function selectBatchEntries(args: {
   kept.sort((a, b) => a.number - b.number);
   return kept.map((pr) => ({
     number: pr.number,
-    title: pr.title,
     author: pr.authorLogin,
   }));
 }

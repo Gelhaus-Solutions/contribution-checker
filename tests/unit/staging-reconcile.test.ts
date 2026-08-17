@@ -365,7 +365,7 @@ describe("reconcileStagingBatch", () => {
     await reconcileStagingBatch({ repoId: "repo1", allowSync: true });
     const [, prNumber, body] = updatePullRequestBody.mock.calls[0];
     expect(prNumber).toBe(500);
-    expect(body).toContain("- `Fix the retry backoff` (#12 by @octocat)");
+    expect(body).toContain("- #12 by @octocat");
   });
 
   it("leaves an open PR on staging out of the manifest", async () => {
@@ -402,7 +402,7 @@ describe("reconcileStagingBatch", () => {
     await reconcileStagingBatch({ repoId: "repo1", allowSync: true });
     const body = updatePullRequestBody.mock.calls[0][2] as string;
     expect(body.startsWith("Ship on Friday.")).toBe(true);
-    expect(body).toContain("- `New thing` (#12 by @hubot)");
+    expect(body).toContain("- #12 by @hubot");
   });
 
   it("falls back to a head/base search when the tracked number is stale", async () => {
@@ -446,8 +446,8 @@ describe("reconcileStagingBatch", () => {
     await reconcileStagingBatch({ repoId: "repo1", allowSync: true });
 
     const body = createPullRequest.mock.calls[0][1].body as string;
-    expect(body).toContain("- `Fix the retry backoff` (#12 by @octocat)");
-    expect(body).toContain("- `Add German translations` (#13 by @hubot)");
+    expect(body).toContain("- #12 by @octocat");
+    expect(body).toContain("- #13 by @hubot");
     expect(body).not.toContain("No merged PRs in this batch yet");
     // And the body it was born with is already correct, so opening one costs
     // no follow-up edit in the PR timeline.
@@ -507,6 +507,6 @@ describe("reconcileStagingBatch", () => {
     await reconcileStagingBatch({ repoId: "repo1", allowSync: true });
     const body = updatePullRequestBody.mock.calls[0][2] as string;
     expect(body).not.toContain("#1");
-    expect(body).toContain("- `New` (#2");
+    expect(body).toContain("- #2");
   });
 });

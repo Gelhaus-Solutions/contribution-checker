@@ -25,29 +25,28 @@ function pr(overrides: Partial<PrSummary> & { number: number }): PrSummary {
 describe("renderBatchBlock", () => {
   it("renders one line per PR in the agreed format", () => {
     const block = renderBatchBlock([
-      { number: 123, title: "Fix the retry backoff", author: "octocat" },
-      { number: 124, title: "Add German translations", author: "hubot" },
+      { number: 123, author: "octocat" },
+      { number: 124, author: "hubot" },
     ]);
-    expect(block).toContain("- `Fix the retry backoff` (#123 by @octocat)");
-    expect(block).toContain("- `Add German translations` (#124 by @hubot)");
+    expect(block).toContain("- #123 by @octocat");
+    expect(block).toContain("- #124 by @hubot");
   });
 
-  it("falls back to the PR number when a title is blank", () => {
-    const block = renderBatchBlock([
-      { number: 7, title: "   ", author: "octocat" },
-    ]);
-    expect(block).toContain("- `PR #7` (#7 by @octocat)");
+  // The reference is deliberately bare: GitHub expands it to the PR title when
+  // it renders, and carrying our own copy printed the title twice.
+  it("carries no title of its own", () => {
+    const block = renderBatchBlock([{ number: 123, author: "octocat" }]);
+    expect(block).not.toMatch(/`/);
   });
 
   it("omits the author when GitHub gave us none", () => {
-    const block = renderBatchBlock([{ number: 7, title: "Thing", author: null }]);
-    expect(block).toContain("- `Thing` (#7)");
+    const block = renderBatchBlock([{ number: 7, author: null }]);
+    expect(block).toContain("- #7");
+    expect(block).not.toContain("by @");
   });
 
   it("carries no automation footer", () => {
-    const block = renderBatchBlock([
-      { number: 1, title: "One", author: "a" },
-    ]);
+    const block = renderBatchBlock([{ number: 1, author: "a" }]);
     expect(block).not.toContain("Updated automatically");
   });
 
@@ -58,7 +57,7 @@ describe("renderBatchBlock", () => {
 
 describe("applyBatchBlock", () => {
   const block = renderBatchBlock([
-    { number: 1, title: "One", author: "a" },
+    { number: 1, author: "a" },
   ]);
 
   it("uses the block as the whole body when there is no body", () => {
@@ -76,13 +75,13 @@ describe("applyBatchBlock", () => {
     const first = applyBatchBlock("Preamble.", block);
     const withNote = `${first}\n\nRemember to bump the changelog.`;
     const next = renderBatchBlock([
-      { number: 1, title: "One", author: "a" },
-      { number: 2, title: "Two", author: "b" },
+      { number: 1, author: "a" },
+      { number: 2, author: "b" },
     ]);
     const out = applyBatchBlock(withNote, next);
     expect(out.startsWith("Preamble.")).toBe(true);
     expect(out).toContain("Remember to bump the changelog.");
-    expect(out).toContain("- `Two` (#2 by @b)");
+    expect(out).toContain("- #2 by @b");
     // The stale single-entry list is gone, not duplicated.
     expect(out.match(/### In this batch/g)).toHaveLength(1);
   });
