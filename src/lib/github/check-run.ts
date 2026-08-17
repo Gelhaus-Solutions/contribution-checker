@@ -50,8 +50,19 @@ export function buildDecisionCheckPayload(args: {
   const { decision, applyUrl, projectName, claUrl } = args;
   switch (decision.status) {
     case "APPROVED": {
-      const disabled =
-        "bypassReason" in decision && decision.bypassReason === "checker_disabled";
+      const bypassReason =
+        "bypassReason" in decision ? decision.bypassReason : undefined;
+      if (bypassReason === "staging_batch") {
+        return {
+          name: CHECK_RUN_NAME,
+          status: "completed",
+          conclusion: "success",
+          title: "Staging batch",
+          summary: `Aggregate staging release PR for ${projectName}. The contributor gate does not apply to it.`,
+          detailsUrl: applyUrl,
+        };
+      }
+      const disabled = bypassReason === "checker_disabled";
       return {
         name: CHECK_RUN_NAME,
         status: "completed",

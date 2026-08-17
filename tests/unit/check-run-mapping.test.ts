@@ -27,6 +27,19 @@ describe("buildDecisionCheckPayload", () => {
     expect(p.title).toBe("Checker disabled");
   });
 
+  // Without this the aggregate staging PR publishes no decision check at all,
+  // and a branch protection rule requiring one waits on it forever.
+  it("APPROVED with staging_batch bypass reason gets its own green title", () => {
+    const p = buildDecisionCheckPayload({
+      decision: { status: "APPROVED", bypassReason: "staging_batch" },
+      applyUrl,
+      projectName,
+    });
+    expect(p.conclusion).toBe("success");
+    expect(p.title).toBe("Staging batch");
+    expect(p.summary).toContain(projectName);
+  });
+
   it("BYPASSED bot → success with bot title", () => {
     const p = buildDecisionCheckPayload({
       decision: { status: "BYPASSED", reason: "bot" },

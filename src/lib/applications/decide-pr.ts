@@ -30,7 +30,10 @@ export type PendingReason =
 export type CheckRequiredReason = "cla_required" | "cla_stale" | "dco_missing";
 
 export type PrDecision =
-  | { status: "APPROVED"; bypassReason?: "checker_disabled" }
+  // `staging_batch` is never produced by `decideForRepo`: it is synthesized by
+  // the webhook layer for the bot's own aggregate staging PR, which skips the
+  // gate but must still publish a green check.
+  | { status: "APPROVED"; bypassReason?: "checker_disabled" | "staging_batch" }
   | { status: "BYPASSED"; reason: "bot" | "collaborator" }
   | { status: "PENDING"; reason: PendingReason }
   | { status: "CHECK_REQUIRED"; reason: CheckRequiredReason }

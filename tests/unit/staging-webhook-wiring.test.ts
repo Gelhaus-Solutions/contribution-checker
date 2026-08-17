@@ -9,6 +9,8 @@ const getBranchSha = vi.fn();
 const installationHasContentsWrite = vi.fn();
 const signalStagingBatch = vi.fn();
 const decideForPR = vi.fn();
+const publishDecisionCheck = vi.fn();
+const publishClaCheck = vi.fn();
 
 vi.mock("@/lib/db", () => ({
   prisma: {
@@ -48,6 +50,11 @@ vi.mock("@/lib/github/pr-actions", () => ({
 
 vi.mock("@/lib/temporal/start", () => ({
   signalStagingBatch: (...a: unknown[]) => signalStagingBatch(...a),
+}));
+
+vi.mock("@/lib/github/check-run", () => ({
+  publishDecisionCheck: (...a: unknown[]) => publishDecisionCheck(...a),
+  publishClaCheck: (...a: unknown[]) => publishClaCheck(...a),
 }));
 
 vi.mock("@/lib/applications/decide-pr", async () => {
@@ -120,9 +127,13 @@ beforeEach(() => {
     installationHasContentsWrite,
     signalStagingBatch,
     decideForPR,
+    publishDecisionCheck,
+    publishClaCheck,
   ]) {
     fn.mockReset();
   }
+  publishDecisionCheck.mockResolvedValue(undefined);
+  publishClaCheck.mockResolvedValue(undefined);
   repoFindUnique.mockResolvedValue({ ...REPO });
   repoUpdate.mockResolvedValue({});
   prCheckFindUnique.mockResolvedValue(null);
@@ -237,6 +248,24 @@ describe("staging routing wiring in handlePullRequestEvent", () => {
     expect(setPullRequestBase).not.toHaveBeenCalled();
   });
 
+  // Skipping the gate must not skip the checks: the aggregate PR is the one PR
+  // that has to merge into the default branch, so a required
+  // `contribution-checker / decision` there would otherwise never be reported
+  // and the release would sit blocked forever.
+  it("still publishes both gate checks on the aggregate PR", async () => {
+    repoFindUnique.mockResolvedValue({ ...REPO, stagingBatchPrNumber: 42 });
+    await handlePullRequestEvent(payload() as never);
+    expect(publishDecisionCheck).toHaveBeenCalledWith(
+      expect.objectContaining({
+        headSha: "abc",
+        prCheckId: null,
+        decision: { status: "APPROVED", bypassReason: "staging_batch" },
+      }),
+    );
+    expect(publishClaCheck).toHaveBeenCalledWith(
+      expect.objectContaining({ headSha: "abc", state: "exempt" }),
+    );
+  });
 
   it("recognizes an untracked staging -> default PR as the aggregate PR", async () => {
     await handlePullRequestEvent(

@@ -115,6 +115,12 @@ Staging routing (`src/lib/github/staging.ts`, App mode only):
   gate would close the bot's own release PR). `isAggregatePr` matches it by the
   tracked `Repo.stagingBatchPrNumber` and structurally (same-repo head ==
   staging, base == default), so the pre-tracking window is covered.
+- **Skipping the gate must not skip the checks.** The aggregate PR is the one
+  PR that has to merge into the default branch, so if `contribution-checker /
+  decision` or `/ cla` is required there, publishing nothing leaves the release
+  stuck on "waiting for status to be reported" forever. `publishAggregatePrChecks`
+  publishes both as success (`APPROVED { bypassReason: "staging_batch" }` and
+  CLA `exempt`) before the early return.
 - **Every routing outcome is named** (`StagingRoutingOutcome`) and returned on
   `PrEventResult.staging`, so it lands in the `convergePrEvent` activity result
   and is readable from Temporal workflow history when logs are not. `retargeted:

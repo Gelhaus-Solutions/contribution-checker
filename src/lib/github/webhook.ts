@@ -264,6 +264,69 @@ type ProjectForSideEffects = {
  * applied (close/comment/label already done). Both paths are best-effort;
  * a failure here must not block the webhook response.
  */
+/**
+ * Publish the two gate checks as success on the bot's own aggregate staging PR.
+ *
+ * The aggregate PR deliberately never reaches `convergePr`, which is the only
+ * thing that publishes these checks. That exemption is right about the gate and
+ * wrong about the checks: a maintainer who requires `contribution-checker /
+ * decision` on the default branch would find the release PR permanently stuck
+ * on "Expected - waiting for status to be reported". There is no PrCheck row
+ * for the aggregate PR (it is not a contribution), so both calls pass a null
+ * id and simply create fresh check runs on the head SHA.
+ */
+async function publishAggregatePrChecks(args: {
+  repoId: string | null;
+  repoFullName: string;
+  installationId: number;
+  headSha: string | null;
+}): Promise<void> {
+  if (!args.repoId || !args.headSha) return;
+  const repo = await prisma.repo.findUnique({
+    where: { id: args.repoId },
+    select: {
+      project: {
+        select: { id: true, slug: true, name: true, checksEnabled: true },
+      },
+    },
+  });
+  if (!repo) return;
+  const project = repo.project;
+  const applyUrl = `${env.PUBLIC_BASE_URL.replace(/\/$/, "")}/p/${project.slug}`;
+
+  await publishDecisionCheck({
+    installationId: args.installationId,
+    repoFullName: args.repoFullName,
+    prCheckId: null,
+    headSha: args.headSha,
+    project,
+    decision: { status: "APPROVED", bypassReason: "staging_batch" },
+    applyUrl,
+    claUrl: `${applyUrl}/cla`,
+  }).catch((e) =>
+    logger.warn({ err: e, repoId: args.repoId }, "aggregate decision check failed"),
+  );
+
+  // The batch is the project's own merged work, not a contribution, so the CLA
+  // question does not apply to it. Publishing "exempt" keeps the required
+  // context green rather than leaving it absent.
+  await publishClaCheck({
+    installationId: args.installationId,
+    repoFullName: args.repoFullName,
+    prCheckId: null,
+    headSha: args.headSha,
+    project: {
+      id: project.id,
+      name: project.name,
+      checksEnabled: project.checksEnabled,
+    },
+    state: "exempt",
+    claUrl: `${applyUrl}/cla`,
+  }).catch((e) =>
+    logger.warn({ err: e, repoId: args.repoId }, "aggregate CLA check failed"),
+  );
+}
+
 async function postDecisionSideEffects(args: {
   installationId: number;
   repoFullName: string;
@@ -480,11 +543,21 @@ export async function handlePullRequestEvent(
   // release PR and comment an apply link on it; even when bypassed it would
   // strip the batch label and quality-score a several-hundred-file diff.
   //
+  // Skipping the gate must NOT skip the checks. The aggregate PR is the one PR
+  // that has to merge into the default branch, so if `contribution-checker /
+  // decision` and `/ cla` are required there, leaving them unpublished blocks
+  // the release forever on checks that are never coming.
   if (staging.isAggregatePr) {
     logger.debug(
       { ghRepoId, prNumber },
       "skipping gate: PR is the aggregate staging PR",
     );
+    await publishAggregatePrChecks({
+      repoId: staging.repoId,
+      repoFullName: payload.repository.full_name,
+      installationId: payload.installation.id,
+      headSha: payload.pull_request.head?.sha ?? null,
+    });
     return notTerminal(staging);
   }
 
