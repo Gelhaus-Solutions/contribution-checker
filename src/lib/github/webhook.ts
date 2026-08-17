@@ -24,6 +24,12 @@ import {
   publishClaCheck,
   type ClaCheckState,
 } from "@/lib/github/check-run";
+import {
+  applyStagingRouting,
+  handleAggregatePrClosed,
+  type StagingRoutingResult,
+} from "@/lib/github/staging";
+import { signalStagingBatch } from "@/lib/temporal/start";
 import { runQualityForPrCheck } from "@/lib/quality/run";
 import { getInstallationOctokit } from "@/lib/github/app";
 import { verifyDco } from "@/lib/cla/dco";
@@ -39,16 +45,25 @@ type WebhookPayload = {
     full_name: string;
     name: string;
     owner: { login: string };
+    default_branch?: string;
   };
   pull_request?: {
     number: number;
     node_id: string;
     state: string;
     merged?: boolean;
+    merged_at?: string | null;
     user: { login: string; id: number; type: string };
-    head?: { sha: string };
+    head?: { sha: string; ref?: string; repo?: { full_name?: string } | null };
+    base?: { ref?: string; repo?: { default_branch?: string } };
+    labels?: Array<{ name?: string }>;
     title?: string;
     body?: string | null;
+  };
+  /** Present on `edited`: which fields changed and their previous values. */
+  changes?: {
+    base?: { ref?: { from?: string } };
+    title?: { from?: string };
   };
   label?: { name: string };
   repositories?: Array<{ id: number; full_name: string }>;
@@ -364,6 +379,7 @@ export async function handlePullRequestEvent(
 ): Promise<PrEventResult> {
   const action = payload.action ?? "";
   const isReEvalLabel = action === "labeled";
+  const isEdited = action === "edited";
   if (
     !payload.pull_request ||
     !payload.repository ||
@@ -375,9 +391,19 @@ export async function handlePullRequestEvent(
         "ready_for_review",
         "synchronize",
         "closed",
-      ].includes(action) || isReEvalLabel
+      ].includes(action) ||
+      isReEvalLabel ||
+      isEdited
     )
   ) {
+    return NOT_TERMINAL;
+  }
+
+  // `edited` fires on every description tweak too. Only a base change (staging
+  // routing must re-assert itself) or a title change (the batch manifest shows
+  // titles) is interesting; everything else short-circuits on the payload
+  // alone, before any DB work.
+  if (isEdited && !payload.changes?.base && !payload.changes?.title) {
     return NOT_TERMINAL;
   }
 
@@ -414,8 +440,36 @@ export async function handlePullRequestEvent(
       ghRepoId,
       prNumber,
       merged: payload.pull_request.merged ?? false,
+      mergedAt: payload.pull_request.merged_at ?? null,
+      baseRef: payload.pull_request.base?.ref ?? null,
     });
   }
+
+  // Staging routing runs independently of the contributor gate, so a PENDING
+  // PR is retargeted before it is closed and a later approval reopens it
+  // already pointing at staging. Never throws; a staging failure must not stop
+  // the PR from being gated.
+  const staging = await runStagingRouting({
+    ghRepoId,
+    payload,
+    authorGhLogin: author.login,
+  });
+
+  // The bot's own aggregate PR must never go through the contributor gate.
+  // It has no application, so the gate would find it PENDING, close the
+  // release PR and comment an apply link on it; even when bypassed it would
+  // strip the batch label and quality-score a several-hundred-file diff.
+  if (staging.isAggregatePr) {
+    logger.debug(
+      { ghRepoId, prNumber },
+      "skipping gate: PR is the aggregate staging PR",
+    );
+    return NOT_TERMINAL;
+  }
+
+  // A title edit changes nothing the gate cares about: the batch manifest was
+  // already refreshed above, so stop before the decision pipeline.
+  if (isEdited) return NOT_TERMINAL;
 
   await convergePr({
     ghRepoId,
@@ -433,21 +487,105 @@ export async function handlePullRequestEvent(
 }
 
 /**
+ * Retarget a PR to staging when the project asks for it, and tell the repo's
+ * staging batch entity that its manifest may be stale. Both halves are
+ * best-effort: `applyStagingRouting` and `signalStagingBatch` swallow their own
+ * failures, so this never throws into the gate path.
+ *
+ * A reconcile is signalled whenever the PR touches staging at all, not only on
+ * a retarget: a PR opened directly against staging, or retitled while on it,
+ * changes the manifest just as much.
+ */
+const NO_STAGING_ROUTING: StagingRoutingResult = {
+  repoId: null,
+  retargeted: false,
+  isAggregatePr: false,
+  touchesStaging: false,
+};
+
+async function runStagingRouting(args: {
+  ghRepoId: number;
+  payload: WebhookPayload;
+  authorGhLogin: string;
+}): Promise<StagingRoutingResult> {
+  const pr = args.payload.pull_request;
+  if (!pr) return NO_STAGING_ROUTING;
+  const result = await applyStagingRouting({
+    ghRepoId: args.ghRepoId,
+    prNumber: pr.number,
+    authorGhLogin: args.authorGhLogin,
+    baseRef: pr.base?.ref ?? "",
+    head: {
+      ref: pr.head?.ref ?? "",
+      repoFullName: pr.head?.repo?.full_name ?? null,
+    },
+    prLabels: (pr.labels ?? [])
+      .map((l) => l.name)
+      .filter((n): n is string => typeof n === "string"),
+    defaultBranchHint:
+      pr.base?.repo?.default_branch ??
+      args.payload.repository?.default_branch ??
+      null,
+    prIsClosed: pr.state === "closed",
+  });
+
+  if (result.repoId && (result.retargeted || result.touchesStaging)) {
+    await signalStagingBatch({
+      repoId: result.repoId,
+      reason: result.retargeted
+        ? "pr_retargeted"
+        : `pr_${args.payload.action ?? "event"}`,
+    });
+  }
+  return result;
+}
+
+/**
  * Distinguish a terminal PR close (human close or merge) from the bot's own
  * pending/denied close (`closedByApp`, which must stay reopenable). A terminal
  * close lets prGate complete; the bot's own close keeps the entity alive so the
  * PR can be reopened on a later approval/re-gate.
+ *
+ * A close also feeds staging routing: the aggregate PR closing ends the batch,
+ * and any other PR on staging closing changes the manifest.
  */
 async function handlePrClosed(args: {
   ghRepoId: number;
   prNumber: number;
   merged: boolean;
+  mergedAt?: string | null;
+  baseRef?: string | null;
 }): Promise<PrEventResult> {
   const repo = await prisma.repo.findUnique({
     where: { ghRepoId: args.ghRepoId },
-    select: { id: true },
+    select: { id: true, project: { select: { stagingBranch: true } } },
   });
   if (!repo) return NOT_TERMINAL;
+
+  try {
+    const wasAggregate = await handleAggregatePrClosed({
+      repoId: repo.id,
+      prNumber: args.prNumber,
+      merged: args.merged,
+      mergedAt: args.mergedAt ? new Date(args.mergedAt) : null,
+    });
+    // Deliberately no reconcile when the aggregate PR itself closed. If it
+    // merged, staging is no longer ahead and there is nothing to open; if a
+    // human closed it unmerged, immediately reopening one would override them.
+    // Either way the next staging activity starts a fresh batch.
+    if (!wasAggregate && args.baseRef === repo.project.stagingBranch) {
+      await signalStagingBatch({
+        repoId: repo.id,
+        reason: args.merged ? "pr_merged_to_staging" : "pr_closed_on_staging",
+      });
+    }
+  } catch (e) {
+    logger.warn(
+      { err: e, ghRepoId: args.ghRepoId, prNumber: args.prNumber },
+      "staging batch update on PR close failed",
+    );
+  }
+
   const prCheck = await prisma.prCheck.findUnique({
     where: { repoId_prNumber: { repoId: repo.id, prNumber: args.prNumber } },
     select: { closedByApp: true },
@@ -483,7 +621,9 @@ export async function reGatePr(args: {
     node_id: string;
     state: string;
     user: { login: string; id: number } | null;
-    head?: { sha: string };
+    head?: { sha: string; ref?: string; repo?: { full_name?: string } | null };
+    base?: { ref?: string; repo?: { default_branch?: string } };
+    labels?: Array<{ name?: string }>;
   };
   try {
     const octokit = await getInstallationOctokit(repo.installationId);
@@ -500,6 +640,17 @@ export async function reGatePr(args: {
     return;
   }
   if (!pr.user) return;
+  // A re-gate is also how the settings toggle reaches existing open PRs, so
+  // staging routing must re-assert itself here too.
+  const staging = await runStagingRouting({
+    ghRepoId: args.ghRepoId,
+    payload: {
+      action: "regate",
+      pull_request: { ...pr, number: args.prNumber },
+    } as WebhookPayload,
+    authorGhLogin: pr.user.login,
+  });
+  if (staging.isAggregatePr) return;
   await convergePr({
     ghRepoId: args.ghRepoId,
     repoFullName: repo.fullName,
@@ -1245,6 +1396,33 @@ export async function handlePushEvent(payload: PushPayload) {
       defaultBranch,
       changedPaths,
     });
+
+    // Commits can reach staging without a PR. Refresh the batch so the
+    // aggregate PR exists (and its manifest is current) either way.
+    const repo = await prisma.repo.findUnique({
+      where: { ghRepoId },
+      select: {
+        id: true,
+        defaultBranch: true,
+        project: {
+          select: { stagingBatchPrEnabled: true, stagingBranch: true },
+        },
+      },
+    });
+    if (!repo) return;
+    if (payload.repository?.default_branch &&
+        repo.defaultBranch !== payload.repository.default_branch) {
+      await prisma.repo.update({
+        where: { id: repo.id },
+        data: { defaultBranch: payload.repository.default_branch },
+      });
+    }
+    if (
+      repo.project.stagingBatchPrEnabled &&
+      branch === repo.project.stagingBranch
+    ) {
+      await signalStagingBatch({ repoId: repo.id, reason: "push_to_staging" });
+    }
   } catch (e) {
     logger.warn({ err: e }, "handlePushEvent failed");
   }

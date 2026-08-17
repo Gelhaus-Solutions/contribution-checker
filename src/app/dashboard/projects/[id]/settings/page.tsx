@@ -18,6 +18,7 @@ import {
   updateLabelSettings,
   updateBypassSettings,
   updateGatingSettings,
+  updateStagingSettings,
 } from "./actions";
 
 export default async function ProjectSettings({
@@ -230,6 +231,81 @@ export default async function ProjectSettings({
 
       <Card>
         <CardHeader>
+          <CardTitle className="text-base">Staging routing</CardTitle>
+          <CardDescription>
+            Send contributions through a staging branch instead of straight to
+            the default branch, and ship them to production in reviewable
+            batches. App-mode repos only; CI-mode repos are unaffected.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form action={updateStagingSettings} className="space-y-4">
+            <input type="hidden" name="projectId" value={project.id} />
+            <div className="space-y-2">
+              <Label htmlFor="stagingBranch">Staging branch</Label>
+              <Input
+                id="stagingBranch"
+                name="stagingBranch"
+                defaultValue={project.stagingBranch}
+                className="font-mono"
+              />
+              <p className="text-xs text-muted-foreground">
+                Created automatically from the default branch head if it
+                does not exist. That needs the{" "}
+                <strong>Contents: Read &amp; write</strong> permission; without
+                it, repos missing the branch are skipped with a warning.
+              </p>
+            </div>
+            <label className="flex items-start gap-3 text-sm">
+              <input
+                type="checkbox"
+                name="stagingRetargetEnabled"
+                value="1"
+                defaultChecked={project.stagingRetargetEnabled}
+                className="mt-0.5 h-4 w-4 rounded border-border"
+              />
+              <span>
+                <span className="font-medium">
+                  Retarget PRs to the staging branch
+                </span>
+                <span className="block text-xs text-muted-foreground">
+                  Every PR opened against the default branch is rewritten to
+                  target staging, whatever the contributor gate decides.
+                  Accounts on the bypass list, and PRs carrying the staging
+                  opt-out label, keep targeting the default branch. GitHub
+                  recomputes the merge base on retarget, so a PR&apos;s diff and
+                  CI results can shift once staging diverges from the default
+                  branch.
+                </span>
+              </span>
+            </label>
+            <label className="flex items-start gap-3 text-sm">
+              <input
+                type="checkbox"
+                name="stagingBatchPrEnabled"
+                value="1"
+                defaultChecked={project.stagingBatchPrEnabled}
+                className="mt-0.5 h-4 w-4 rounded border-border"
+              />
+              <span>
+                <span className="font-medium">
+                  Keep an aggregate PR open from staging
+                </span>
+                <span className="block text-xs text-muted-foreground">
+                  While staging is ahead of the default branch, one bot-owned PR
+                  stays open, ready for review, listing every PR in the batch.
+                  Merging it ships the batch; the next staging activity opens a
+                  fresh one.
+                </span>
+              </span>
+            </label>
+            <SubmitButton>Save staging routing</SubmitButton>
+          </form>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
           <CardTitle className="text-base">Bypass list</CardTitle>
           <CardDescription>
             GitHub logins (or glob patterns like <code>*[bot]</code>) whose PRs
@@ -325,6 +401,31 @@ export default async function ProjectSettings({
                 opened before the App was installed). The bot strips the label
                 after processing, even when labels are otherwise off.
               </p>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="labelStagingBatch">Staging batch</Label>
+                <Input
+                  id="labelStagingBatch"
+                  name="labelStagingBatch"
+                  defaultValue={project.labelStagingBatch}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Carried by the aggregate staging PR so the bot can find it
+                  again.
+                </p>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="labelStagingOptOut">Staging opt-out</Label>
+                <Input
+                  id="labelStagingOptOut"
+                  name="labelStagingOptOut"
+                  defaultValue={project.labelStagingOptOut}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Add it to a PR to keep that PR targeting the default branch.
+                </p>
+              </div>
             </div>
             <SubmitButton>Save labels</SubmitButton>
           </form>

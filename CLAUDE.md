@@ -64,6 +64,29 @@ Decision pipeline:
 - `src/lib/github/post-decision.ts`: reopen prior closed PRs on application
   approval; close prior approved PRs on revoke
 
+Staging routing (`src/lib/github/staging.ts`, App mode only):
+- `applyStagingRouting`: rewrites a PR based on the default branch to target
+  `Project.stagingBranch`. Runs in `handlePullRequestEvent` **before**, and
+  independently of, `convergePr`. Loop-safe by construction: the retarget only
+  fires when the current base *is* the default branch, so our own PATCH's
+  `pull_request.edited` echo is inert. A per-process TTL fuse caps a genuine
+  ping-pong with a human or a competing automation.
+- `reconcileStagingBatch`: keeps one bot-owned aggregate PR open from staging to
+  the default branch and rewrites the manifest between the
+  `<!-- staging-batch:start/end -->` markers, preserving human text outside
+  them. A full re-derivation from live GitHub, so it is safe to run any number
+  of times; it PATCHes the body only when the rendered block actually changed.
+  The batch cutoff is the merge base of `default...staging`, so it self-heals
+  when a webhook is dropped.
+- The aggregate PR must **never** reach `convergePr` (no application means the
+  gate would close the bot's own release PR). `isAggregatePr` matches it by the
+  tracked `Repo.stagingBatchPrNumber` and structurally (same-repo head ==
+  staging, base == default), so the pre-tracking window is covered.
+- The two staging labels live **outside** the `contribution:` namespace on
+  purpose: `setLabels` strips every `contribution:*` label the gate did not just
+  set, so a staging label there would be wiped by the next converge.
+  `updateLabelSettings` rejects the prefix.
+
 GitHub side effects (all Octokit calls):
 - `src/lib/github/pr-actions.ts`: close/reopen, labels, comments, Check Runs
 - `src/lib/github/check-run.ts`: `buildDecisionCheckPayload` (pure mapping)
@@ -88,9 +111,15 @@ Audit, notifications, jobs:
 - `src/lib/audit.ts`: `recordAudit` + `AuditKind` union (extend here when
   adding new audit kinds)
 - `src/lib/notifications/{inbox,email,webhooks}.ts`
-- Database job queue lives in `JobQueue` (see schema). Workers/runners are
-  outside this index. The current state of the runner is repo-local; check for a
-  worker module before assuming reliability.
+- **All background work is Temporal.** The old `JobQueue` table was dropped in
+  `prisma/migrations/20260630120000_temporal_drop_legacy_queues`; there is no
+  DB-polling runner to hook into. Start work via `src/lib/temporal/start.ts`
+  with a deterministic id from `workflowIds` (`src/lib/temporal/task-queue.ts`),
+  add the activity under `src/worker/activities/`, and register the workflow in
+  `src/worker/workflows/index.ts`. Entity workflows: `projectGate` ->
+  `contributorGate` -> `prGate`, plus the per-repo `stagingBatch`.
+  `src/lib/temporal/contracts.ts` must stay import-light (types and plain
+  constants only) because it is bundled into the deterministic workflow bundle.
 
 ## Conventions
 
@@ -217,8 +246,9 @@ and `contents:read` is required for PR Quality scoring (file diff fetching).
 
 ## Don'ts
 
-- Don't bypass `JobQueue` (or the inline retry pattern) for GitHub side
-  effects from background tasks. The webhook path uses inline awaits today.
+- Don't run GitHub side effects from background tasks outside Temporal. The
+  webhook path uses inline awaits inside an activity; anything else starts a
+  workflow via `src/lib/temporal/start.ts`.
 - Don't `JSON.parse` JSON columns without a Zod schema or a parsing helper.
 - Don't add an LLM dependency to quality scoring (see Conventions).
 - Don't let webhook errors propagate up. GitHub will retry forever and the
@@ -229,9 +259,15 @@ and `contents:read` is required for PR Quality scoring (file diff fetching).
 
 ## Known gaps / follow-ups
 
-- The `JobQueue` table exists; if you're adding a worker, prefer reusing the
-  existing kinds (`pr.close`, `pr.reopen`, `pr.comment`, `pr.label.set`,
-  `webhook.deliver`) before adding new ones.
+- Staging routing is App mode only. CI mode (`src/lib/ci/check-pr-core.ts` and
+  the generated workflow YAML) neither retargets nor maintains a batch PR.
+- Retargeting only reaches existing open PRs through `reGateProjectPrs`, which
+  fans out over `PrCheck` rows. PRs with no row (opened before the App was
+  installed) retarget on their next event instead.
+- If a repo's default branch is protected by a merge queue or required reviews
+  and the staging branch is not, retargeting routes contributions around those
+  rules and the aggregate PR becomes the only gate. Replicate the protection
+  onto the staging branch.
 - CI mode quality scoring depends on the workflow including `qualityContext`
   in the request body. Older workflow files may not have this; users need to
   copy the latest YAML from `/dashboard/projects/<id>/repos`.

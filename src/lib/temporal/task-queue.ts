@@ -25,6 +25,10 @@ export const workflowIds = {
     `push:${repoId}:${ref}:${after}`,
   installation: (installationId: number, deliveryId: string) =>
     `installation:${installationId}:${deliveryId}`,
+  /** Per-repo staging batch entity. Keyed by the local `Repo.id` (not
+   * ghRepoId): the reconcile needs the Repo row anyway, and a CI-mode repo
+   * with no ghRepoId must still get a stable id. */
+  stagingBatch: (repoId: string) => `staging:${repoId}`,
   ciCheckPr: (projectSlug: string, prNumber: number, headSha: string) =>
     `ci-check:${projectSlug}:${prNumber}:${headSha}`,
   ciReconcile: (projectSlug: string, repoFullName: string) =>
