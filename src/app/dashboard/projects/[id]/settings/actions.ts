@@ -7,7 +7,7 @@ import { requireProjectRole } from "@/lib/authz";
 import { recordAudit } from "@/lib/audit";
 import { slugSchema } from "@/lib/slug";
 import { enqueueProjectWebhook } from "@/lib/notifications/webhooks";
-import { reGateProjectPrs } from "@/lib/temporal/start";
+import { reGateProjectPrs, signalStagingBatch } from "@/lib/temporal/start";
 import {
   assertSafeOutboundUrl,
   UnsafeOutboundUrlError,
@@ -164,6 +164,25 @@ const labelsSchema = z.object({
   labelApproved: z.string().min(1).max(50),
   labelDenied: z.string().min(1).max(50),
   labelEvaluate: z.string().min(1).max(50),
+  // The `contribution:` namespace belongs to the gate: setLabels strips every
+  // label in it that the gate did not just set, so a staging label placed
+  // there would survive exactly until the next converge.
+  labelStagingBatch: z
+    .string()
+    .min(1)
+    .max(50)
+    .refine(
+      (v) => !v.startsWith("contribution:"),
+      "staging labels cannot use the contribution: prefix, which the gate owns",
+    ),
+  labelStagingOptOut: z
+    .string()
+    .min(1)
+    .max(50)
+    .refine(
+      (v) => !v.startsWith("contribution:"),
+      "staging labels cannot use the contribution: prefix, which the gate owns",
+    ),
 });
 
 export async function updateLabelSettings(formData: FormData) {
@@ -174,15 +193,19 @@ export async function updateLabelSettings(formData: FormData) {
     labelApproved: formData.get("labelApproved"),
     labelDenied: formData.get("labelDenied"),
     labelEvaluate: formData.get("labelEvaluate"),
+    labelStagingBatch: formData.get("labelStagingBatch"),
+    labelStagingOptOut: formData.get("labelStagingOptOut"),
   });
   const labelSet = new Set([
     parsed.labelPending,
     parsed.labelApproved,
     parsed.labelDenied,
     parsed.labelEvaluate,
+    parsed.labelStagingBatch,
+    parsed.labelStagingOptOut,
   ]);
-  if (labelSet.size !== 4) {
-    throw new Error("All four labels must be unique.");
+  if (labelSet.size !== 6) {
+    throw new Error("All six labels must be unique.");
   }
   const { session } = await requireProjectRole(parsed.projectId, "ADMIN");
 
@@ -194,6 +217,8 @@ export async function updateLabelSettings(formData: FormData) {
       labelApproved: parsed.labelApproved,
       labelDenied: parsed.labelDenied,
       labelEvaluate: parsed.labelEvaluate,
+      labelStagingBatch: parsed.labelStagingBatch,
+      labelStagingOptOut: parsed.labelStagingOptOut,
     },
   });
 
@@ -422,6 +447,113 @@ export async function updateGatingSettings(formData: FormData) {
       projectId: parsed.projectId,
       reason: "gating_settings_changed",
     });
+  }
+
+  revalidatePath(`/dashboard/projects/${parsed.projectId}/settings`);
+}
+
+const stagingSchema = z.object({
+  projectId: z.string().min(1),
+  stagingRetargetEnabled: z.string().optional(),
+  stagingBatchPrEnabled: z.string().optional(),
+  // Git allows almost anything in a branch name; reject only the characters
+  // git itself forbids plus whitespace, so a typo fails here and not on the
+  // first API call.
+  stagingBranch: z
+    .string()
+    .min(1)
+    .max(200)
+    .refine(
+      (v) => !/[\s~^:?*[\\]/.test(v) && !v.includes(".."),
+      "not a valid branch name",
+    ),
+});
+
+export async function updateStagingSettings(formData: FormData) {
+  const parsed = stagingSchema.parse({
+    projectId: formData.get("projectId"),
+    stagingRetargetEnabled:
+      formData.get("stagingRetargetEnabled") ?? undefined,
+    stagingBatchPrEnabled: formData.get("stagingBatchPrEnabled") ?? undefined,
+    stagingBranch: formData.get("stagingBranch"),
+  });
+  const { session } = await requireProjectRole(parsed.projectId, "ADMIN");
+
+  const before = await prisma.project.findUnique({
+    where: { id: parsed.projectId },
+    select: {
+      stagingRetargetEnabled: true,
+      stagingBatchPrEnabled: true,
+      stagingBranch: true,
+    },
+  });
+  if (!before) throw new Error("Project not found");
+
+  const after = {
+    stagingRetargetEnabled: !!parsed.stagingRetargetEnabled,
+    stagingBatchPrEnabled: !!parsed.stagingBatchPrEnabled,
+    stagingBranch: parsed.stagingBranch,
+  };
+
+  await prisma.project.update({
+    where: { id: parsed.projectId },
+    data: after,
+  });
+
+  await recordAudit({
+    projectId: parsed.projectId,
+    actorId: session.user.id,
+    kind: "settings.staging_changed",
+    payload: {
+      changed: Object.fromEntries(
+        Object.entries({
+          stagingRetargetEnabled: [
+            before.stagingRetargetEnabled,
+            after.stagingRetargetEnabled,
+          ],
+          stagingBatchPrEnabled: [
+            before.stagingBatchPrEnabled,
+            after.stagingBatchPrEnabled,
+          ],
+          stagingBranch: [before.stagingBranch, after.stagingBranch],
+        }).filter(([, [a, b]]) => a !== b)
+      ),
+    },
+  });
+
+  // Retargeting is decided per PR event, so switching it on (or moving the
+  // branch) only reaches existing PRs via a re-gate. This covers PRs with a
+  // PrCheck row; untracked ones retarget on their next event.
+  const retargetAffecting =
+    before.stagingRetargetEnabled !== after.stagingRetargetEnabled ||
+    before.stagingBranch !== after.stagingBranch;
+  if (retargetAffecting && after.stagingRetargetEnabled) {
+    await reGateProjectPrs({
+      projectId: parsed.projectId,
+      reason: "staging_settings_changed",
+    });
+  }
+
+  // The aggregate PR is only re-derived when something signals its entity, so
+  // nudge every App-installed repo once after the toggle flips on.
+  const batchAffecting =
+    before.stagingBatchPrEnabled !== after.stagingBatchPrEnabled ||
+    before.stagingBranch !== after.stagingBranch;
+  if (batchAffecting && after.stagingBatchPrEnabled) {
+    const repos = await prisma.repo.findMany({
+      where: {
+        projectId: parsed.projectId,
+        active: true,
+        installationId: { not: null },
+      },
+      select: { id: true },
+    });
+    for (const repo of repos) {
+      await signalStagingBatch({
+        repoId: repo.id,
+        reason: "staging_settings_changed",
+      });
+    }
   }
 
   revalidatePath(`/dashboard/projects/${parsed.projectId}/settings`);

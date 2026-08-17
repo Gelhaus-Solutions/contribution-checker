@@ -149,6 +149,14 @@ STACK_WEBHOOK_SECRET="<svix signing secret>"`} />
                   <li>Issues: <strong>Read &amp; write</strong></li>
                   <li>Checks: <strong>Read &amp; write</strong></li>
                   <li>Contents: Read (needed for PR Quality scoring and for repo-file CLA sources; reads PR file diffs and tracked CLA files)</li>
+                  <li>Contents: <strong>Read &amp; write</strong> only if you
+                    enable staging routing and want the bot to create a missing
+                    staging branch for you. This grants the App the ability to
+                    push to every file in every installed repository, so prefer
+                    creating the staging branch yourself and leaving Contents at
+                    Read. Without write, repos whose staging branch is missing
+                    are skipped with a warning; everything else keeps working.
+                  </li>
                   <li>Metadata: Read (auto-selected)</li>
                 </ul>
                 <p className="mt-2 text-xs text-muted-foreground">
@@ -179,7 +187,8 @@ STACK_WEBHOOK_SECRET="<svix signing secret>"`} />
                   Push
                 </code>{" "}
                 (so a tracked CLA file change auto-publishes or queues a new
-                version),{" "}
+                version, and a direct push to a staging branch refreshes the
+                aggregate PR&apos;s description),{" "}
                 <code className="rounded bg-muted px-1 py-0.5 text-xs">
                   Installation target
                 </code>{" "}
