@@ -127,6 +127,28 @@ model Project {
   // PRs opened before the App was installed). Always removed by the bot
   // after processing, regardless of labelsEnabled.
   labelEvaluate String  @default("contribution:evaluate")
+  // Staging labels deliberately live OUTSIDE the `contribution:` namespace:
+  // setLabels() owns that namespace and strips every `contribution:*` label it
+  // did not just set, so a staging label placed there would be wiped by the
+  // next gate converge. updateLabelSettings rejects the prefix for this reason.
+  //
+  // Carried by the bot's own staging -> default aggregate PR, so the retarget
+  // path can recognize it and the reconciler can find it again if the tracked
+  // number is lost.
+  labelStagingBatch  String @default("staging:batch")
+  // Escape hatch: a PR carrying this label is never retargeted to staging,
+  // and keeps targeting the default branch.
+  labelStagingOptOut String @default("staging:opt-out")
+
+  // Staging routing. Two independent switches:
+  //  - stagingRetargetEnabled rewrites PRs based on the default branch to
+  //    target `stagingBranch` instead.
+  //  - stagingBatchPrEnabled keeps one open aggregate PR from `stagingBranch`
+  //    to the default branch, whose description lists the batch.
+  // Both off by default; enabling either only affects App-mode repos.
+  stagingRetargetEnabled Boolean @default(false)
+  stagingBatchPrEnabled  Boolean @default(false)
+  stagingBranch          String  @default("staging")
 
   // Disable switch: when checkerEnabled=false, every PR is treated as APPROVED.
   // Tracking (PrCheck rows + quality scoring) only runs if trackWhenDisabled=true.
@@ -316,6 +338,16 @@ model Repo {
   installationId     Int?            // GH App installation id; null = manually entered, App not installed yet
   requireOwnApproval Boolean @default(false)
   active             Boolean @default(true) // false if installation was uninstalled
+
+  // Cached default branch name, refreshed opportunistically from PR/push
+  // webhook payloads and, as a last resort, from GET /repos/{owner}/{repo}.
+  defaultBranch String?
+  // Staging routing state. `stagingBatchPrNumber` is the open aggregate PR
+  // (null = no batch in flight). `stagingBatchSince` is when the previous
+  // aggregate PR merged: PRs merged into staging before it are already in the
+  // default branch and are excluded from the next batch's manifest.
+  stagingBatchPrNumber Int?
+  stagingBatchSince    DateTime?
 
   createdAt DateTime @default(now())
 

@@ -31,6 +31,7 @@ export type AuditKind =
   | "user.allowlisted"
   | "user.deallowlisted"
   | "settings.gating_changed"
+  | "settings.staging_changed"
   | "settings.quality_changed"
   | "quality.backfill_started"
   | "quality.backfill_completed"
