@@ -304,9 +304,6 @@ export type StagingBatchInput = {
   repoId: string;
   dirty?: boolean;
   lastReason?: string | null;
-  /** When staging was last synced with the default branch (epoch ms), carried
-   * across Continue-As-New so a roll does not reset the batching window. */
-  lastSyncMs?: number | null;
 };
 
 /** stagingBatch durable state, exposed via QRY.stagingBatchState. */
@@ -318,10 +315,11 @@ export type StagingBatchState = {
   lastReason: string | null;
   /** Reconciles run so far in THIS run. */
   reconciles: number;
-  /** When staging was last synced with the default branch (epoch ms). */
-  lastSyncMs: number | null;
   /** A sync is wanted but is waiting for the batching window to elapse. */
   syncDeferred: boolean;
+  /** Epoch ms at which the deferred sync becomes eligible, null when none is
+   * waiting. The entity wakes then rather than idling out. */
+  syncEligibleAtMs: number | null;
 };
 
 /** Debounce before a reconcile so a burst (a PR retargeted, then labeled, then
@@ -336,8 +334,15 @@ export const STAGING_RECONCILE_DEBOUNCE = "5 seconds";
  * otherwise bury the batch under one merge commit per push. Pushes inside the
  * window collapse into a single sync at the end of it, so staging still
  * converges on the default branch, just in batches.
+ *
+ * Hours rather than minutes: the point of a staging branch is to ship in
+ * batches, and a contributor's base being a few hours behind the default
+ * branch costs nothing, while a merge commit every ten minutes makes the
+ * branch history unreadable. The window is enforced against `Repo`.
+ * `stagingLastSyncAt`, not against entity-workflow state, so it survives the
+ * entity idling out between pushes.
  */
-export const STAGING_SYNC_WINDOW_MS = 10 * 60_000;
+export const STAGING_SYNC_WINDOW_MS = 6 * 60 * 60_000;
 
 export type ProcessMergeGroupInput = { payload: unknown };
 export type ProcessPushInput = { payload: unknown };

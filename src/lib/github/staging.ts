@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { matchesAnyPattern } from "@/lib/applications/decide-pr";
+import { STAGING_SYNC_WINDOW_MS } from "@/lib/temporal/contracts";
 import {
   addLabel,
   compareBranches,
@@ -834,6 +835,17 @@ async function findAggregatePr(args: {
   return labeled ?? open[0] ?? null;
 }
 
+/** Stamp the moment staging was actually moved, which is what the sync
+ * batching window is measured from. Best-effort: a lost write costs one extra
+ * merge commit, never correctness. */
+async function recordStagingSync(repoId: string) {
+  await prisma.repo
+    .update({ where: { id: repoId }, data: { stagingLastSyncAt: new Date() } })
+    .catch((e) =>
+      logger.warn({ err: e, repoId }, "staging sync timestamp write failed"),
+    );
+}
+
 async function trackAggregatePr(repoId: string, prNumber: number | null) {
   await prisma.repo
     .update({ where: { id: repoId }, data: { stagingBatchPrNumber: prNumber } })
@@ -848,11 +860,15 @@ export type StagingReconcileResult = {
   synced: boolean;
   /** A sync is wanted but the batching window has not elapsed yet. */
   syncDeferred: boolean;
+  /** Epoch ms at which the deferred sync becomes eligible. Null unless
+   * `syncDeferred`; the entity sleeps until then instead of idling out. */
+  syncEligibleAtMs: number | null;
 };
 
 const NOTHING_DONE: StagingReconcileResult = {
   synced: false,
   syncDeferred: false,
+  syncEligibleAtMs: null,
 };
 
 /**
@@ -863,10 +879,6 @@ const NOTHING_DONE: StagingReconcileResult = {
  */
 export async function reconcileStagingBatch(args: {
   repoId: string;
-  /** False while the sync batching window is still open: the reconcile then
-   * refreshes the manifest as usual but reports the sync as deferred instead
-   * of writing to the branch. */
-  allowSync: boolean;
 }): Promise<StagingReconcileResult> {
   try {
     const repo = await prisma.repo.findUnique({
@@ -879,6 +891,7 @@ export async function reconcileStagingBatch(args: {
         defaultBranch: true,
         stagingBatchPrNumber: true,
         stagingBatchSince: true,
+        stagingLastSyncAt: true,
         ...stagingRepoSelect,
         project: { select: stagingProjectSelect },
       },
@@ -918,13 +931,22 @@ export async function reconcileStagingBatch(args: {
 
     // Bring staging up to date with the default branch first, so the batch is
     // measured and shipped against current code. Syncing writes commits, so it
-    // is rate-limited by the caller: when the window has not elapsed we report
-    // the deferral and the entity comes back for it.
+    // is rate-limited here, against the last sync recorded on the repo row:
+    // inside the window we report the deferral along with the moment it lifts,
+    // and the entity comes back for it then. The timestamp lives in the
+    // database rather than in the entity because the entity completes once the
+    // batch settles, and a fresh run would sync on the very next push.
     let synced = false;
     let syncDeferred = false;
+    let syncEligibleAtMs: number | null = null;
     if (cfg.syncEnabled && cmp && cmp.behindBy > 0) {
-      if (!args.allowSync) {
+      const eligibleAt =
+        repo.stagingLastSyncAt == null
+          ? 0
+          : repo.stagingLastSyncAt.getTime() + STAGING_SYNC_WINDOW_MS;
+      if (Date.now() < eligibleAt) {
         syncDeferred = true;
+        syncEligibleAtMs = eligibleAt;
       } else {
         const result = await syncStagingWithDefault({
           ref,
@@ -934,10 +956,19 @@ export async function reconcileStagingBatch(args: {
           aheadBy: cmp.aheadBy,
         });
         synced = result === "fast_forwarded" || result === "merged";
+        // Only a write opens a new window. "up_to_date" and every failure
+        // leave the old one, so a conflict a human has just resolved is picked
+        // up on the next request rather than hours later.
+        if (synced) await recordStagingSync(repo.id);
       }
     }
+    const paced: StagingReconcileResult = {
+      synced,
+      syncDeferred,
+      syncEligibleAtMs,
+    };
 
-    if (!cfg.batchPrEnabled) return { synced, syncDeferred };
+    if (!cfg.batchPrEnabled) return paced;
 
     // Nothing to ship: do not open an empty PR, and drop a tracked number whose
     // PR has already been merged or closed. A fast-forward lands here too, and
@@ -949,7 +980,7 @@ export async function reconcileStagingBatch(args: {
           await trackAggregatePr(repo.id, null);
         }
       }
-      return { synced, syncDeferred };
+      return paced;
     }
 
     // Build the manifest BEFORE find-or-create, so a PR we open is born with
@@ -1025,7 +1056,7 @@ export async function reconcileStagingBatch(args: {
             { repoId: repo.id, failure: created.failure },
             "aggregate PR not created",
           );
-          return { synced, syncDeferred };
+          return paced;
         }
       } else {
         await trackAggregatePr(repo.id, created.number);
@@ -1080,7 +1111,7 @@ export async function reconcileStagingBatch(args: {
         "refreshed aggregate PR manifest",
       );
     }
-    return { synced, syncDeferred };
+    return paced;
   } catch (e) {
     logger.warn({ err: e, repoId: args.repoId }, "reconcileStagingBatch failed");
     return NOTHING_DONE;

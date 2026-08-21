@@ -50,6 +50,7 @@ vi.mock("@/lib/github/pr-actions", () => ({
 }));
 
 import { reconcileStagingBatch, renderBatchBlock } from "@/lib/github/staging";
+import { STAGING_SYNC_WINDOW_MS } from "@/lib/temporal/contracts";
 import type { PrSummary } from "@/lib/github/pr-actions";
 
 const AGGREGATE: PrSummary = {
@@ -75,6 +76,7 @@ function makeRepo(overrides: Record<string, unknown> = {}) {
     defaultBranch: "main",
     stagingBatchPrNumber: 500,
     stagingBatchSince: null,
+    stagingLastSyncAt: null,
     stagingRetargetEnabled: null,
     stagingBatchPrEnabled: null,
     stagingSyncEnabled: null,
@@ -175,10 +177,7 @@ describe("staging sync with the default branch", () => {
     fastForwardBranch.mockResolvedValue(true);
     getPullRequest.mockResolvedValue(null);
 
-    const res = await reconcileStagingBatch({
-      repoId: "repo1",
-      allowSync: true,
-    });
+    const res = await reconcileStagingBatch({ repoId: "repo1" });
     expect(fastForwardBranch).toHaveBeenCalledWith(
       expect.anything(),
       "staging",
@@ -199,10 +198,7 @@ describe("staging sync with the default branch", () => {
     installationHasContentsWrite.mockResolvedValue(true);
     mergeBranch.mockResolvedValue({ merged: true });
 
-    const res = await reconcileStagingBatch({
-      repoId: "repo1",
-      allowSync: true,
-    });
+    const res = await reconcileStagingBatch({ repoId: "repo1" });
     expect(fastForwardBranch).not.toHaveBeenCalled();
     expect(mergeBranch).toHaveBeenCalledWith(
       expect.anything(),
@@ -225,7 +221,7 @@ describe("staging sync with the default branch", () => {
     mergeBranch.mockResolvedValue({ merged: true });
     getPullRequest.mockResolvedValue(null);
 
-    await reconcileStagingBatch({ repoId: "repo1", allowSync: true });
+    await reconcileStagingBatch({ repoId: "repo1" });
     expect(mergeBranch).toHaveBeenCalled();
   });
 
@@ -235,10 +231,7 @@ describe("staging sync with the default branch", () => {
       behindBy: 0,
       mergeBaseDate: null,
     });
-    const res = await reconcileStagingBatch({
-      repoId: "repo1",
-      allowSync: true,
-    });
+    const res = await reconcileStagingBatch({ repoId: "repo1" });
     expect(fastForwardBranch).not.toHaveBeenCalled();
     expect(mergeBranch).not.toHaveBeenCalled();
     expect(res.synced).toBe(false);
@@ -247,21 +240,73 @@ describe("staging sync with the default branch", () => {
   it("defers the sync while the batching window is still open", async () => {
     // Reported, not dropped: the entity comes back for it when the window
     // closes, so a burst of pushes to main costs one merge commit, not one
-    // per push.
+    // per push. The window is measured from the repo row, so it holds even
+    // though this is a fresh call with no entity state behind it.
+    const lastSync = new Date(Date.now() - 60_000);
+    repoFindUnique.mockResolvedValue(
+      makeRepo({ stagingLastSyncAt: lastSync }),
+    );
     compareBranches.mockResolvedValue({
       aheadBy: 2,
       behindBy: 3,
       mergeBaseDate: null,
     });
-    const res = await reconcileStagingBatch({
-      repoId: "repo1",
-      allowSync: false,
-    });
+    const res = await reconcileStagingBatch({ repoId: "repo1" });
     expect(mergeBranch).not.toHaveBeenCalled();
     expect(fastForwardBranch).not.toHaveBeenCalled();
     expect(res.syncDeferred).toBe(true);
+    expect(res.syncEligibleAtMs).toBe(
+      lastSync.getTime() + STAGING_SYNC_WINDOW_MS,
+    );
     // The manifest is still refreshed: only the branch write is rate-limited.
     expect(updatePullRequestBody).toHaveBeenCalled();
+  });
+
+  it("syncs again once the window has elapsed, and stamps the repo", async () => {
+    repoFindUnique.mockResolvedValue(
+      makeRepo({
+        stagingLastSyncAt: new Date(Date.now() - STAGING_SYNC_WINDOW_MS - 1000),
+      }),
+    );
+    compareBranches.mockResolvedValue({
+      aheadBy: 2,
+      behindBy: 3,
+      mergeBaseDate: null,
+    });
+    installationHasContentsWrite.mockResolvedValue(true);
+    mergeBranch.mockResolvedValue({ merged: true });
+
+    const res = await reconcileStagingBatch({ repoId: "repo1" });
+    expect(mergeBranch).toHaveBeenCalled();
+    expect(res.synced).toBe(true);
+    expect(res.syncDeferred).toBe(false);
+    // The stamp is what makes the next window hold; without it the entity
+    // would sync again on the very next push.
+    expect(repoUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "repo1" },
+        data: { stagingLastSyncAt: expect.any(Date) },
+      }),
+    );
+  });
+
+  it("leaves the window open when the sync wrote nothing", async () => {
+    // A conflict is a state for a human. Starting a window on it would make
+    // the resolved branch wait hours for its next sync.
+    compareBranches.mockResolvedValue({
+      aheadBy: 2,
+      behindBy: 3,
+      mergeBaseDate: null,
+    });
+    installationHasContentsWrite.mockResolvedValue(true);
+    mergeBranch.mockResolvedValue({ failure: "conflict" });
+
+    await reconcileStagingBatch({ repoId: "repo1" });
+    expect(repoUpdate).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: { stagingLastSyncAt: expect.any(Date) },
+      }),
+    );
   });
 
   it("reports a merge conflict instead of throwing", async () => {
@@ -273,10 +318,7 @@ describe("staging sync with the default branch", () => {
     installationHasContentsWrite.mockResolvedValue(true);
     mergeBranch.mockResolvedValue({ failure: "conflict" });
 
-    const res = await reconcileStagingBatch({
-      repoId: "repo1",
-      allowSync: true,
-    });
+    const res = await reconcileStagingBatch({ repoId: "repo1" });
     expect(res.synced).toBe(false);
     // The batch still reconciles; only the branch is left for a human.
     expect(updatePullRequestBody).toHaveBeenCalled();
@@ -291,7 +333,7 @@ describe("staging sync with the default branch", () => {
     installationHasContentsWrite.mockResolvedValue(false);
     getPullRequest.mockResolvedValue(null);
 
-    await reconcileStagingBatch({ repoId: "repo1", allowSync: true });
+    await reconcileStagingBatch({ repoId: "repo1" });
     expect(fastForwardBranch).not.toHaveBeenCalled();
     expect(mergeBranch).not.toHaveBeenCalled();
   });
@@ -311,10 +353,7 @@ describe("staging sync with the default branch", () => {
     getBranchSha.mockResolvedValue("sha-main");
     fastForwardBranch.mockResolvedValue(true);
 
-    const res = await reconcileStagingBatch({
-      repoId: "repo1",
-      allowSync: true,
-    });
+    const res = await reconcileStagingBatch({ repoId: "repo1" });
     expect(res.synced).toBe(true);
     expect(createPullRequest).not.toHaveBeenCalled();
     expect(updatePullRequestBody).not.toHaveBeenCalled();
@@ -332,14 +371,14 @@ describe("reconcileStagingBatch", () => {
         },
       }),
     );
-    await reconcileStagingBatch({ repoId: "repo1", allowSync: true });
+    await reconcileStagingBatch({ repoId: "repo1" });
     expect(compareBranches).not.toHaveBeenCalled();
     expect(createPullRequest).not.toHaveBeenCalled();
   });
 
   it("does nothing for a CI-mode repo with no installation", async () => {
     repoFindUnique.mockResolvedValue(makeRepo({ installationId: null }));
-    await reconcileStagingBatch({ repoId: "repo1", allowSync: true });
+    await reconcileStagingBatch({ repoId: "repo1" });
     expect(compareBranches).not.toHaveBeenCalled();
   });
 
@@ -350,7 +389,7 @@ describe("reconcileStagingBatch", () => {
       mergeBaseDate: null,
     });
     getPullRequest.mockResolvedValue(null);
-    await reconcileStagingBatch({ repoId: "repo1", allowSync: true });
+    await reconcileStagingBatch({ repoId: "repo1" });
     expect(createPullRequest).not.toHaveBeenCalled();
     // The tracked PR is gone, so the tracking is cleared for the next batch.
     expect(repoUpdate).toHaveBeenCalledWith(
@@ -362,7 +401,7 @@ describe("reconcileStagingBatch", () => {
 
   it("refreshes the manifest of the tracked aggregate PR", async () => {
     batchPrs = [mergedPr(12, "Fix the retry backoff")];
-    await reconcileStagingBatch({ repoId: "repo1", allowSync: true });
+    await reconcileStagingBatch({ repoId: "repo1" });
     const [, prNumber, body] = updatePullRequestBody.mock.calls[0];
     expect(prNumber).toBe(500);
     expect(body).toContain("- #12 by @octocat");
@@ -378,7 +417,7 @@ describe("reconcileStagingBatch", () => {
         mergedAt: null,
       },
     ];
-    await reconcileStagingBatch({ repoId: "repo1", allowSync: true });
+    await reconcileStagingBatch({ repoId: "repo1" });
     const body = updatePullRequestBody.mock.calls[0][2] as string;
     expect(body).not.toContain("#13");
     expect(body).toContain("No merged PRs in this batch yet");
@@ -389,7 +428,7 @@ describe("reconcileStagingBatch", () => {
       ...AGGREGATE,
       body: renderBatchBlock([]),
     });
-    await reconcileStagingBatch({ repoId: "repo1", allowSync: true });
+    await reconcileStagingBatch({ repoId: "repo1" });
     expect(updatePullRequestBody).not.toHaveBeenCalled();
   });
 
@@ -399,7 +438,7 @@ describe("reconcileStagingBatch", () => {
       body: `Ship on Friday.\n\n${renderBatchBlock([])}`,
     });
     batchPrs = [mergedPr(12, "New thing", "hubot")];
-    await reconcileStagingBatch({ repoId: "repo1", allowSync: true });
+    await reconcileStagingBatch({ repoId: "repo1" });
     const body = updatePullRequestBody.mock.calls[0][2] as string;
     expect(body.startsWith("Ship on Friday.")).toBe(true);
     expect(body).toContain("- #12 by @hubot");
@@ -409,7 +448,7 @@ describe("reconcileStagingBatch", () => {
     repoFindUnique.mockResolvedValue(makeRepo({ stagingBatchPrNumber: 404 }));
     getPullRequest.mockResolvedValue(null);
     openAggregatePrs = [{ ...AGGREGATE, number: 501 }];
-    await reconcileStagingBatch({ repoId: "repo1", allowSync: true });
+    await reconcileStagingBatch({ repoId: "repo1" });
     expect(createPullRequest).not.toHaveBeenCalled();
     expect(repoUpdate).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -421,7 +460,7 @@ describe("reconcileStagingBatch", () => {
   it("creates the aggregate PR when none exists, and labels it", async () => {
     repoFindUnique.mockResolvedValue(makeRepo({ stagingBatchPrNumber: null }));
     createPullRequest.mockResolvedValue({ number: 600 });
-    await reconcileStagingBatch({ repoId: "repo1", allowSync: true });
+    await reconcileStagingBatch({ repoId: "repo1" });
     expect(createPullRequest).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({ head: "staging", base: "main" }),
@@ -443,7 +482,7 @@ describe("reconcileStagingBatch", () => {
       mergedPr(13, "Add German translations", "hubot"),
     ];
     createPullRequest.mockResolvedValue({ number: 600 });
-    await reconcileStagingBatch({ repoId: "repo1", allowSync: true });
+    await reconcileStagingBatch({ repoId: "repo1" });
 
     const body = createPullRequest.mock.calls[0][1].body as string;
     expect(body).toContain("- #12 by @octocat");
@@ -458,8 +497,12 @@ describe("reconcileStagingBatch", () => {
     repoFindUnique.mockResolvedValue(makeRepo({ stagingBatchPrNumber: null }));
     createPullRequest.mockResolvedValue({ failure: "no_commits" });
     await expect(
-      reconcileStagingBatch({ repoId: "repo1", allowSync: true }),
-    ).resolves.toEqual({ synced: false, syncDeferred: false });
+      reconcileStagingBatch({ repoId: "repo1" }),
+    ).resolves.toEqual({
+      synced: false,
+      syncDeferred: false,
+      syncEligibleAtMs: null,
+    });
     expect(updatePullRequestBody).not.toHaveBeenCalled();
   });
 
@@ -478,7 +521,7 @@ describe("reconcileStagingBatch", () => {
       },
     );
     createPullRequest.mockResolvedValue({ failure: "already_exists" });
-    await reconcileStagingBatch({ repoId: "repo1", allowSync: true });
+    await reconcileStagingBatch({ repoId: "repo1" });
     expect(repoUpdate).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ stagingBatchPrNumber: 601 }),
@@ -489,7 +532,7 @@ describe("reconcileStagingBatch", () => {
   it("skips branch creation when the installation lacks contents:write", async () => {
     getBranchSha.mockResolvedValue(null);
     installationHasContentsWrite.mockResolvedValue(false);
-    await reconcileStagingBatch({ repoId: "repo1", allowSync: true });
+    await reconcileStagingBatch({ repoId: "repo1" });
     expect(createBranch).not.toHaveBeenCalled();
     expect(createPullRequest).not.toHaveBeenCalled();
   });
@@ -504,7 +547,7 @@ describe("reconcileStagingBatch", () => {
       mergedPr(1, "Old", "octocat", "2026-08-01T00:00:00Z"),
       mergedPr(2, "New", "octocat", "2026-08-12T00:00:00Z"),
     ];
-    await reconcileStagingBatch({ repoId: "repo1", allowSync: true });
+    await reconcileStagingBatch({ repoId: "repo1" });
     const body = updatePullRequestBody.mock.calls[0][2] as string;
     expect(body).not.toContain("#1");
     expect(body).toContain("- #2");

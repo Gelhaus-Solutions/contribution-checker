@@ -365,6 +365,12 @@ model Repo {
   // default branch and are excluded from the next batch's manifest.
   stagingBatchPrNumber Int?
   stagingBatchSince    DateTime?
+  // When the staging branch was last actually moved onto the default branch
+  // (fast-forwarded or merged). The sync batching window is measured from
+  // here rather than from entity-workflow state, because that workflow
+  // completes as soon as the batch settles and a fresh run would forget it,
+  // syncing again on the very next push to the default branch.
+  stagingLastSyncAt    DateTime?
 
   createdAt DateTime @default(now())
 

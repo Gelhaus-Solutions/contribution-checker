@@ -65,13 +65,9 @@ export async function convergePrReGate(args: {
  */
 export async function convergeStagingBatch(args: {
   repoId: string;
-  allowSync: boolean;
 }): Promise<StagingReconcileResult> {
   try {
-    return await reconcileStagingBatch({
-      repoId: args.repoId,
-      allowSync: args.allowSync,
-    });
+    return await reconcileStagingBatch({ repoId: args.repoId });
   } catch (e) {
     throw classifyGithubError(e);
   }

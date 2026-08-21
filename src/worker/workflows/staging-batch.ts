@@ -13,7 +13,6 @@ import {
   QRY,
   SIG,
   STAGING_RECONCILE_DEBOUNCE,
-  STAGING_SYNC_WINDOW_MS,
 } from "../../lib/temporal/contracts";
 import { SA, type GateStatusValue } from "../../lib/temporal/search-attributes";
 import type {
@@ -47,6 +46,12 @@ function setGateStatus(status: GateStatusValue): void {
  * workflow COMPLETES. A later signal simply signalWithStarts a fresh run. */
 const IDLE_TIMEOUT = "2 minutes";
 
+/** Floor on the wait before retrying a deferred sync. The eligibility instant
+ * is computed on the activity's clock and consumed on the workflow's, so a
+ * workflow clock running ahead would otherwise re-ask every debounce interval
+ * for as long as the window has left. */
+const DEFERRED_SYNC_FLOOR_MS = 60_000;
+
 /**
  * Per-repo staging batch entity (one per repo). It owns the aggregate
  * `staging -> default` PR: creating it while staging is ahead of the default
@@ -67,8 +72,8 @@ const IDLE_TIMEOUT = "2 minutes";
 export async function stagingBatch(input: StagingBatchInput): Promise<void> {
   let dirty = input.dirty ?? false;
   let lastReason: string | null = input.lastReason ?? null;
-  let lastSyncMs: number | null = input.lastSyncMs ?? null;
   let syncDeferred = false;
+  let syncEligibleAtMs: number | null = null;
   let reconciles = 0;
 
   setHandler(stagingReconcile, (payload) => {
@@ -80,24 +85,21 @@ export async function stagingBatch(input: StagingBatchInput): Promise<void> {
     dirty,
     lastReason,
     reconciles,
-    lastSyncMs,
     syncDeferred,
+    syncEligibleAtMs,
   }));
 
   setGateStatus("active");
 
-  /** Epoch ms at which a sync is allowed again, or null when one may run now. */
-  const syncNotBefore = (): number | null =>
-    lastSyncMs == null ? null : lastSyncMs + STAGING_SYNC_WINDOW_MS;
-
   while (!shouldContinueAsNew(reconciles)) {
     // With a sync waiting on the batching window, wake when the window closes
     // rather than idling out, so the deferred sync actually happens instead of
-    // waiting for whatever event happens to come next.
-    const notBefore = syncNotBefore();
+    // waiting for whatever event happens to come next. The window itself is
+    // enforced by the activity, against the repo row, so it holds across an
+    // entity that completed in between.
     const waitMs =
-      syncDeferred && notBefore != null
-        ? Math.max(0, notBefore - Date.now())
+      syncDeferred && syncEligibleAtMs != null
+        ? Math.max(DEFERRED_SYNC_FLOOR_MS, syncEligibleAtMs - Date.now())
         : null;
     const hasWork = await condition(
       () => dirty,
@@ -116,15 +118,10 @@ export async function stagingBatch(input: StagingBatchInput): Promise<void> {
     // absorbed by the flag we are about to clear, so nothing is lost.
     await sleep(STAGING_RECONCILE_DEBOUNCE);
     dirty = false;
-    const now = Date.now();
-    const allowSync = notBefore == null || now >= notBefore;
-    const res = await acts.convergeStagingBatch({
-      repoId: input.repoId,
-      allowSync,
-    });
+    const res = await acts.convergeStagingBatch({ repoId: input.repoId });
     reconciles += 1;
-    if (res.synced) lastSyncMs = Date.now();
     syncDeferred = res.syncDeferred;
+    syncEligibleAtMs = res.syncEligibleAtMs;
   }
 
   if (dirty || syncDeferred) {
@@ -133,7 +130,6 @@ export async function stagingBatch(input: StagingBatchInput): Promise<void> {
       repoId: input.repoId,
       dirty,
       lastReason,
-      lastSyncMs,
     });
   }
 

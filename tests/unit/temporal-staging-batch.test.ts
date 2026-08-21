@@ -3,7 +3,11 @@ import { fileURLToPath } from "node:url";
 import { TestWorkflowEnvironment } from "@temporalio/testing";
 import { Worker } from "@temporalio/worker";
 import { registerTestSearchAttributes } from "./helpers/search-attributes";
-import { WF, SIG } from "@/lib/temporal/contracts";
+import {
+  WF,
+  SIG,
+  STAGING_SYNC_WINDOW_MS,
+} from "@/lib/temporal/contracts";
 
 /**
  * Time-skipping tests for the per-repo staging batch entity. Same determinism
@@ -17,6 +21,13 @@ import { WF, SIG } from "@/lib/temporal/contracts";
  */
 const TASK_QUEUE = "test-staging-batch";
 
+/** A pass that neither synced nor wants to. */
+const NOTHING_DONE = {
+  synced: false,
+  syncDeferred: false,
+  syncEligibleAtMs: null,
+};
+
 async function runBatch(
   workflowId: string,
   seed: (
@@ -26,7 +37,7 @@ async function runBatch(
   onReconcile?: (calls: number) => Promise<void>,
 ) {
   const env = await TestWorkflowEnvironment.createTimeSkipping();
-  const reconciles: Array<{ repoId: string; allowSync: boolean }> = [];
+  const reconciles: Array<{ repoId: string }> = [];
   try {
     await registerTestSearchAttributes(env);
     await seed(workflowId, env.client);
@@ -38,13 +49,10 @@ async function runBatch(
         new URL("../../src/worker/workflows/index.ts", import.meta.url),
       ),
       activities: {
-        async convergeStagingBatch(args: {
-          repoId: string;
-          allowSync: boolean;
-        }) {
+        async convergeStagingBatch(args: { repoId: string }) {
           reconciles.push(args);
           await onReconcile?.(reconciles.length);
-          return { synced: false, syncDeferred: false };
+          return NOTHING_DONE;
         },
       },
     });
@@ -81,8 +89,6 @@ describe("stagingBatch", () => {
     // Four signals, one pass over the GitHub API.
     expect(reconciles).toHaveLength(1);
     expect(reconciles[0].repoId).toBe("repo1");
-    // Nothing has synced yet, so the first pass is free to.
-    expect(reconciles[0].allowSync).toBe(true);
   });
 
   it("earns a second reconcile for a signal that arrives mid-reconcile", async () => {
@@ -90,7 +96,7 @@ describe("stagingBatch", () => {
     // ordering: `dirty` is cleared BEFORE the activity runs, so a request
     // landing during it is not swallowed.
     let env: TestWorkflowEnvironment | null = null;
-    const reconciles: Array<{ repoId: string; allowSync: boolean }> = [];
+    const reconciles: Array<{ repoId: string }> = [];
     env = await TestWorkflowEnvironment.createTimeSkipping();
     try {
       await registerTestSearchAttributes(env);
@@ -105,17 +111,14 @@ describe("stagingBatch", () => {
           new URL("../../src/worker/workflows/index.ts", import.meta.url),
         ),
         activities: {
-          async convergeStagingBatch(args: {
-            repoId: string;
-            allowSync: boolean;
-          }) {
+          async convergeStagingBatch(args: { repoId: string }) {
             reconciles.push(args);
             if (reconciles.length === 1) {
               await handle.signal(SIG.stagingReconcile, {
                 reason: "pr_merged_to_staging",
               });
             }
-            return { synced: false, syncDeferred: false };
+            return NOTHING_DONE;
           },
         },
       });
@@ -128,7 +131,7 @@ describe("stagingBatch", () => {
 
   it("idle-completes without reconciling when no signal ever arrives", async () => {
     const env = await TestWorkflowEnvironment.createTimeSkipping();
-    const reconciles: Array<{ repoId: string; allowSync: boolean }> = [];
+    const reconciles: Array<{ repoId: string }> = [];
     try {
       await registerTestSearchAttributes(env);
       const id = "staging:repo3";
@@ -144,12 +147,9 @@ describe("stagingBatch", () => {
           new URL("../../src/worker/workflows/index.ts", import.meta.url),
         ),
         activities: {
-          async convergeStagingBatch(args: {
-            repoId: string;
-            allowSync: boolean;
-          }) {
+          async convergeStagingBatch(args: { repoId: string }) {
             reconciles.push(args);
-            return { synced: false, syncDeferred: false };
+            return NOTHING_DONE;
           },
         },
       });
@@ -164,11 +164,12 @@ describe("stagingBatch", () => {
 
   it("holds the next sync back until the batching window closes", async () => {
     // A burst of pushes to the default branch must cost one merge commit on
-    // staging, not one per push, so once a sync happens the following passes
-    // are told they may not sync until the window has elapsed. The
+    // staging, not one per push. The activity owns the window (it reads the
+    // last sync off the repo row) and reports when it lifts; the entity's job
+    // is to still be there at that moment instead of idling out. The
     // time-skipping server fast-forwards the wait, so this is not a slow test.
     const env = await TestWorkflowEnvironment.createTimeSkipping();
-    const calls: Array<{ allowSync: boolean }> = [];
+    const calls: number[] = [];
     try {
       await registerTestSearchAttributes(env);
       const id = "staging:repo4";
@@ -182,26 +183,27 @@ describe("stagingBatch", () => {
           new URL("../../src/worker/workflows/index.ts", import.meta.url),
         ),
         activities: {
-          async convergeStagingBatch(args: {
-            repoId: string;
-            allowSync: boolean;
-          }) {
-            calls.push({ allowSync: args.allowSync });
+          async convergeStagingBatch(_args: { repoId: string }) {
+            calls.push(calls.length + 1);
             if (calls.length === 1) {
               // First pass syncs, which opens the window; then another push
               // to the default branch lands immediately.
               await handle.signal(SIG.stagingReconcile, {
                 reason: "push_to_default",
               });
-              return { synced: true, syncDeferred: false };
+              return { synced: true, syncDeferred: false, syncEligibleAtMs: null };
             }
-            // Second pass is inside the window and reports the deferral; the
-            // workflow must come back a third time once it closes.
+            // Second pass is inside the window and reports the deferral with
+            // the moment it lifts. The entity must sleep past it and come back
+            // rather than completing on the idle timeout.
             if (calls.length === 2) {
-              expect(args.allowSync).toBe(false);
-              return { synced: false, syncDeferred: true };
+              return {
+                synced: false,
+                syncDeferred: true,
+                syncEligibleAtMs: Date.now() + STAGING_SYNC_WINDOW_MS,
+              };
             }
-            return { synced: true, syncDeferred: false };
+            return { synced: true, syncDeferred: false, syncEligibleAtMs: null };
           },
         },
       });
@@ -209,6 +211,7 @@ describe("stagingBatch", () => {
     } finally {
       await env.teardown();
     }
-    expect(calls.map((c) => c.allowSync)).toEqual([true, false, true]);
+    // The held-back sync ran: three passes, not two.
+    expect(calls).toEqual([1, 2, 3]);
   });
 });

@@ -111,9 +111,17 @@ Staging routing (`src/lib/github/staging.ts`, App mode only):
   would never sync at all.
 - **Syncs are rate-limited, manifest refreshes are not.** On a staging branch
   with unmerged work each sync is a merge commit, so `STAGING_SYNC_WINDOW_MS`
-  (10 min) collapses a burst of default-branch pushes into one. The workflow
-  passes `allowSync`, the activity reports `syncDeferred`, and the entity wakes
-  at the end of the window to run what it held back.
+  (6 h) collapses a burst of default-branch pushes into one.
+  `reconcileStagingBatch` owns the window and measures it from
+  `Repo.stagingLastSyncAt`, which only a real write (fast-forward or merge)
+  stamps: a conflict or a failure leaves the window open so the next request
+  retries. It reports `syncDeferred` plus `syncEligibleAtMs`, and the entity
+  sleeps until then instead of idling out. **The window must stay in the
+  database, not in the entity.** It lived in workflow state once, and the
+  entity completes two minutes after the batch settles, so the next push
+  started a fresh run that knew of no previous sync and merged immediately:
+  the 10-minute window was in practice a 2-minute one, which is what buried
+  live staging branches under a merge commit per push.
 - `resolveStagingConfig` is the only place that folds per-repo overrides onto
   project defaults; never read the `staging*` columns directly. `syncEnabled`
   is gated on `anyEnabled`, so the sync default cannot touch a repo that is not
