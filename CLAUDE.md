@@ -248,6 +248,28 @@ Audit, notifications, jobs:
   across other people's repositories. It must not move, 404, require auth, or
   depend on the database.
 
+## Request cost
+
+Every route is dynamic (`export const dynamic = "force-dynamic"` in the root
+layout, which is load-bearing; see the comment there), so nothing is amortized
+by a cache and per-request work is paid on every page view. Two rules follow:
+
+- **Do not stack independent awaits.** The root layout issues `auth()`, the
+  Hexclave app and `cookies()` together; the project layout issues
+  `getProjectForViewer` and `getProjectPermissions` together; `resolveOrgRoles`
+  issues its two permission reads and its team read together. Each of these was
+  a serial chain in front of the first byte of every page.
+- **Session and membership reads are memoized, not repeated.** See the
+  `auth()` / `getProjectMembership` note under Auth & roles.
+
+The Sentry sample rates are a deliberate exception: traces, node profiling,
+browser profiling and Session Replay all stay hardcoded at 1.0 in
+`src/sentry.*.config.ts` and `src/instrumentation-client.ts`. That is real
+per-request and per-page-view cost (the V8 CPU profiler on every sampled
+transaction; rrweb serializing and uploading the DOM of every page for every
+visitor, with masking off), and it is accepted in exchange for full-fidelity
+observability. Do not sample it down without asking.
+
 ## Auth & roles
 
 - Login is Hexclave (`@hexclave/next`). `auth()` (`src/auth.ts`) reads the
@@ -261,6 +283,29 @@ Audit, notifications, jobs:
   `User.country` by `captureGeoCountry`) — the user is never prompted, and it is
   not gated on. Edge `middleware.ts` does a fast cookie-presence gate for
   `/dashboard` and `/admin`.
+- **Onboarding must never require a connected-account OAuth token.** Hexclave
+  issues none when its GitHub provider runs on shared OAuth keys: the
+  `createProviderAccessToken` call fails. Both sides of `/welcome` therefore key
+  on the provider LINK only: `syncGitHubIdentity` reads the numeric id from
+  `listOAuthProviders()`'s `accountId`, and `WelcomeClient` checks
+  `useOAuthProviders()` for `type === "github"`, calling `linkConnectedAccount`
+  when it is missing. Do not reintroduce `useConnectedAccount` /
+  `getConnectedAccount` / `useOrLinkConnectedAccount` here: those resolve a
+  token, treat a perfectly good link as unconnected, and with `or: "redirect"`
+  either bounce the user through GitHub forever or throw out of the render into
+  `error.tsx`. That is what made sign-up impossible for real applicants, and it
+  shows up as a client-side "Something went wrong" with **no digest**.
+- `auth()` is memoized per request with React `cache()`. A page calls it from
+  the root layout, `SiteHeader`, `requireSession()` and again from the page's
+  `requireProjectRole()`; unmemoized, each call repeated the local-user lookup,
+  the country capture and the role mirror write, and the Hexclave SDK only
+  holds its own reads for ~5s. `getProjectMembership` is memoized for the same
+  reason. `cookies()` inside a `cache()` scope is fine: Next only rejects it
+  under `"use cache"` / `unstable_cache(...)`, which is a different scope
+  type (see `dist/server/request/cookies.js`). An earlier revert blamed
+  `cache()` for a sign-in loop; the wrapper now falls back to an uncached
+  resolve if the memo is ever unavailable, so it cannot report a signed-in user
+  as signed out.
 - Org roles (super-admin, can-create-project) are **Hexclave project
   permissions** (`super_admin` / `create_project`) — Hexclave is the source of
   truth. `User.isSuperAdmin` / `User.canCreateProj` are mirror cache columns
