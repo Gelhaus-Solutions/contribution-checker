@@ -190,34 +190,41 @@ export type OrgRoles = { isSuperAdmin: boolean; canCreateProj: boolean };
 export async function resolveOrgRoles(
   stackUser: ServerUser,
 ): Promise<OrgRoles> {
-  let isSuperAdmin = false;
-  let canCreateProj = false;
+  // Three independent Hexclave reads. Issued concurrently: run in sequence they
+  // cost three round-trips on the auth path of every request, and none of them
+  // feeds the others. Each is guarded on its own so one failing read degrades to
+  // "no privilege from this source" instead of discarding a sibling's answer.
+  const read = async <T>(
+    run: () => Promise<T>,
+    what: string,
+  ): Promise<T | null> => {
+    try {
+      return await run();
+    } catch (e) {
+      logger.warn({ err: e, "stack.user_id": stackUser.id }, `auth: ${what}`);
+      return null;
+    }
+  };
 
-  // Global project (break-glass) permissions.
-  try {
-    if (await stackUser.getPermission(SUPER_ADMIN_PERMISSION)) isSuperAdmin = true;
-    if (await stackUser.getPermission(CREATE_PROJECT_PERMISSION))
-      canCreateProj = true;
-  } catch (e) {
-    logger.warn(
-      { err: e, "stack.user_id": stackUser.id },
-      "auth: reading project permissions failed",
-    );
-  }
+  const [superAdminPerm, createProjectPerm, teams] = await Promise.all([
+    // Global project (break-glass) permissions.
+    read(
+      () => stackUser.getPermission(SUPER_ADMIN_PERMISSION),
+      "reading the super-admin project permission failed",
+    ),
+    read(
+      () => stackUser.getPermission(CREATE_PROJECT_PERMISSION),
+      "reading the create-project permission failed",
+    ),
+    // Instance Admin team membership = super-admin (the primary live authority).
+    read(() => stackUser.listTeams(), "reading team memberships failed"),
+  ]);
 
-  // Instance Admin team membership = super-admin (the primary live authority).
-  try {
-    const teams = await stackUser.listTeams();
-    if (teams.some((team) => isInstanceAdminTeam(team))) isSuperAdmin = true;
-  } catch (e) {
-    logger.warn(
-      { err: e, "stack.user_id": stackUser.id },
-      "auth: reading team memberships failed",
-    );
-  }
-
+  const isSuperAdmin =
+    !!superAdminPerm || !!teams?.some((team) => isInstanceAdminTeam(team));
   // Super-admin always implies project creation.
-  if (isSuperAdmin) canCreateProj = true;
+  const canCreateProj = isSuperAdmin || !!createProjectPerm;
+
   return { isSuperAdmin, canCreateProj };
 }
 

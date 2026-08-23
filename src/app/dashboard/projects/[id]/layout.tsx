@@ -17,7 +17,12 @@ export default async function ProjectLayout({
   const { id } = await params;
   const session = await requireSession();
   const isSuperAdmin = session.user.isSuperAdmin;
-  const data = await getProjectForViewer(id, session.user.id);
+  // Both read ProjectMember and neither depends on the other, so they go out
+  // together instead of stacking two round-trips in front of every project page.
+  const [data, perms] = await Promise.all([
+    getProjectForViewer(id, session.user.id),
+    getProjectPermissions(id, session.user.id, isSuperAdmin),
+  ]);
 
   // Members see their project. Super-admins can view any project even without a
   // membership row (synthesized as OWNER).
@@ -37,8 +42,6 @@ export default async function ProjectLayout({
   } else {
     notFound();
   }
-
-  const perms = await getProjectPermissions(id, session.user.id, isSuperAdmin);
 
   return (
     <>

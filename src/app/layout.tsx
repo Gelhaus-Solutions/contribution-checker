@@ -64,21 +64,30 @@ export default async function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const session = await auth();
+  // All three are independent, and this layout gates the render of every page,
+  // so they are issued together rather than one after another. `auth()` is the
+  // long pole (it talks to Hexclave); making the theme cookie and the provider
+  // wait behind it added latency to every request for nothing.
+  //
+  // Only build/mount the Hexclave provider when configured, so unconfigured
+  // deploys and the build phase don't require a live instance.
+  //
+  // Reading a cookie is free here: the app is force-dynamic anyway, and it
+  // keeps the theme server-readable. Stamping "dark" is what makes a pinned
+  // dark theme flash-free; "system" is resolved by ThemeScript before paint,
+  // which is why <html> needs suppressHydrationWarning.
+  const [session, stackApp, cookieStore] = await Promise.all([
+    auth(),
+    env.stackConfigured ? getStackServerApp() : null,
+    cookies(),
+  ]);
+
   const user = userFromSession(session);
   // Server-side scope: attaches user to errors / spans / logs raised during
   // the rest of this request's render path.
   setSentryUser(user);
 
-  // Only build/mount the Hexclave provider when configured, so unconfigured
-  // deploys and the build phase don't require a live instance.
-  const stackApp = env.stackConfigured ? await getStackServerApp() : null;
-
-  // Free: the app is already force-dynamic, so reading a cookie costs nothing
-  // and it keeps the theme server-readable. Stamping "dark" here is what makes
-  // a pinned dark theme flash-free; "system" is resolved by ThemeScript before
-  // paint, which is why <html> needs suppressHydrationWarning.
-  const theme = (await cookies()).get(THEME_COOKIE)?.value;
+  const theme = cookieStore.get(THEME_COOKIE)?.value;
 
   const content = (
     <>

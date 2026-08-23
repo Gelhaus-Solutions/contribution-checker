@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/db";
 import { redirect } from "next/navigation";
@@ -51,11 +52,20 @@ export async function requireSuperAdmin(): Promise<Session> {
   return session;
 }
 
-export async function getProjectMembership(projectId: string, userId: string) {
+/**
+ * Memoized per request: a single project page reads the same membership row
+ * from the layout (getProjectPermissions), the page (requireProjectRole /
+ * requireProjectPermission) and often an action guard too. Both arguments are
+ * plain strings, so React `cache()` keys on them exactly.
+ */
+export const getProjectMembership = cache(async function getProjectMembership(
+  projectId: string,
+  userId: string,
+) {
   return prisma.projectMember.findUnique({
     where: { projectId_userId: { projectId, userId } },
   });
-}
+});
 
 /**
  * Resolve the viewer's effective LEAF permissions for a project, reading the

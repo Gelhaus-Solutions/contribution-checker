@@ -1,4 +1,5 @@
 import "server-only";
+import { cache } from "react";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { env } from "@/lib/env";
@@ -26,14 +27,21 @@ export type { Session } from "@/lib/auth-types";
  * Org roles (isSuperAdmin/canCreateProj) are resolved LIVE from Hexclave each
  * request (env CSV + project permissions + team metadata + whitelisted-team
  * team permissions; see resolveOrgRoles) so team-membership changes take effect
- * on the next request, and the local cache columns are kept in sync. The
- * Hexclave SDK already dedupes getUser()/permission/team reads per request, so
- * calling auth() from many components is cheap. (Do NOT wrap this in
- * React.cache(): getUser() reads cookies(), and Next 15 throws when a dynamic
- * API is used inside a cache scope -> auth() would throw and every protected
- * page would bounce to sign-in.)
+ * on the next request, and the local cache columns are kept in sync.
+ *
+ * Memoized per request with React `cache()`, because auth() is called several
+ * times on a single page (root layout, SiteHeader, requireSession, then again
+ * by requireProjectRole in the page) and each call otherwise re-ran the local
+ * user lookup, the country capture and the role mirror write. The Hexclave SDK
+ * only holds its own reads for ~5s, so the round-trips repeated too.
+ *
+ * `cookies()` inside a `cache()` scope is fine: Next only rejects it under
+ * `"use cache"` / `unstable_cache(...)`, which is a different scope type. An
+ * earlier cache() wrapper was removed for supposedly causing a sign-in loop; if
+ * a runtime ever does refuse the memo, the wrapper below falls back to
+ * resolving directly rather than reporting the request as signed out.
  */
-export async function auth(): Promise<Session | null> {
+async function resolveSession(): Promise<Session | null> {
   if (!env.stackConfigured) return null;
   try {
     const stackApp = await getStackServerApp();
@@ -145,6 +153,21 @@ export async function auth(): Promise<Session | null> {
   } catch (e) {
     logger.error({ err: e }, "auth: failed to resolve session");
     return null;
+  }
+}
+
+const memoizedSession = cache(resolveSession);
+
+export async function auth(): Promise<Session | null> {
+  try {
+    return await memoizedSession();
+  } catch (e) {
+    // resolveSession swallows its own failures, so reaching here means the
+    // memo itself refused (no cache scope available in this runtime). Resolve
+    // uncached rather than returning null: a null here reads as "signed out"
+    // and would bounce every signed-in user to /handler/sign-in.
+    logger.warn({ err: e }, "auth: session memo unavailable, resolving direct");
+    return resolveSession();
   }
 }
 
