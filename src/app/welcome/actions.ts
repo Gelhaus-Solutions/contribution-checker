@@ -14,8 +14,10 @@ import {
  * Complete onboarding (no user input): bind the GitHub identity (ghId/ghLogin)
  * to the local row, reconcile org permissions, and capture the country code in
  * the background from Hexclave's geo signal. By the time this runs the welcome
- * client has already ensured the GitHub connection, so the connected-account
- * token is available server-side (read-only, no cookie write).
+ * client has already ensured the GitHub provider is LINKED. It does not ensure
+ * a connected-account access token, and this must not need one: Hexclave issues
+ * no token when its GitHub provider runs on shared OAuth keys, which is why
+ * syncGitHubIdentity reads the numeric id off the provider link instead.
  *
  * Takes a FormData arg because it's invoked as a `<form action>` (the form has
  * no fields; it's just the submit trigger), but reads nothing from it.

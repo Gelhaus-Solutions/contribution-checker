@@ -12,28 +12,49 @@ import {
 import { SubmitButton } from "@/components/ui/submit-button";
 import { finishOnboarding } from "./actions";
 
-// Kept in sync with GITHUB_OAUTH_SCOPES in src/lib/stack.ts (which is
-// server-only and cannot be imported here). These let the connected-account
-// token read the numeric id, login, and primary email.
+// Kept in sync with GITHUB_PROVIDER_CONFIG_ID / GITHUB_OAUTH_SCOPES in
+// src/lib/auth/constants.ts (imported there by server-only modules; duplicated
+// here so this client component pulls in no server code).
+const GITHUB_PROVIDER = "github";
 const GITHUB_SCOPES = ["read:user", "user:email"];
 
 export function WelcomeClient({ error }: { error?: string }) {
-  // Require a signed-in user, then force a GitHub connection with our scopes.
-  // If the user signed up via email/Google/etc., this redirects them through
-  // the GitHub OAuth flow (cookie write happens client-side, which a server
-  // component can't do). Once connected, we finish onboarding server-side.
+  // Require a signed-in user, then make sure a GitHub provider is LINKED.
+  //
+  // This deliberately does not use `useConnectedAccount("github", { or:
+  // "redirect" })`. That hook resolves a connected-account ACCESS TOKEN, and
+  // Hexclave never issues one when its GitHub provider runs on shared OAuth
+  // keys: the token call fails, the hook concludes the account is not
+  // connected, and with `or: "redirect"` it bounced the user back through
+  // GitHub forever, or threw out of the render into the route error boundary
+  // ("Something went wrong"). Either way sign-up was impossible.
+  //
+  // finishOnboarding does not need a token either: syncGitHubIdentity reads the
+  // numeric id from the provider link's accountId and resolves the public
+  // profile by id. So the link itself is the only thing worth checking, and
+  // useOAuthProviders() reports it without touching the token endpoint.
   const user = useUser({ or: "redirect" });
-  user.useConnectedAccount("github", { or: "redirect", scopes: GITHUB_SCOPES });
+  const providers = user.useOAuthProviders();
+  const linked = providers.some((p) => p.type === GITHUB_PROVIDER);
+
+  // Email/Google sign-ups arrive here with no GitHub link. Send them through
+  // the OAuth flow once; linkConnectedAccount redirects and never returns.
+  const linking = useRef(false);
+  useEffect(() => {
+    if (linked || linking.current) return;
+    linking.current = true;
+    void user.linkConnectedAccount(GITHUB_PROVIDER, { scopes: GITHUB_SCOPES });
+  }, [linked, user]);
 
   const formRef = useRef<HTMLFormElement>(null);
   const submitted = useRef(false);
   useEffect(() => {
-    // Auto-complete once GitHub is connected. Skip on error so a failed run
+    // Auto-complete once GitHub is linked. Skip on error so a failed run
     // doesn't loop; the user can click Continue to retry.
-    if (submitted.current || error) return;
+    if (!linked || submitted.current || error) return;
     submitted.current = true;
     formRef.current?.requestSubmit();
-  }, [error]);
+  }, [linked, error]);
 
   return (
     <Card>
