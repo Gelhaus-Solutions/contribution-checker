@@ -5,6 +5,8 @@ const PROJECT = {
   stagingRetargetEnabled: true,
   stagingBatchPrEnabled: true,
   stagingSyncEnabled: true,
+  stagingDigestEnabled: true,
+  stagingDigestSections: '["env","stats"]',
   stagingBranch: "staging",
 };
 
@@ -12,6 +14,7 @@ const NO_OVERRIDES = {
   stagingRetargetEnabled: null,
   stagingBatchPrEnabled: null,
   stagingSyncEnabled: null,
+  stagingDigestEnabled: null,
   stagingBranch: null,
 };
 
@@ -25,6 +28,7 @@ describe("resolveStagingConfig", () => {
       retargetEnabled: false,
       batchPrEnabled: false,
       syncEnabled: false,
+      digestEnabled: false,
       stagingBranch: false,
     });
   });
@@ -128,5 +132,41 @@ describe("resolveStagingConfig", () => {
     expect(cfg.retargetEnabled).toBe(true);
     expect(cfg.syncEnabled).toBe(false);
     expect(cfg.overridden.syncEnabled).toBe(true);
+  });
+});
+
+describe("resolveStagingConfig: the digest", () => {
+  it("reads the project's section list", () => {
+    const cfg = resolveStagingConfig(PROJECT, NO_OVERRIDES);
+    expect(cfg.digestEnabled).toBe(true);
+    expect([...cfg.digestSections].sort()).toEqual(["env", "stats"]);
+  });
+
+  it("lets a repo opt out while the project has it on", () => {
+    const cfg = resolveStagingConfig(PROJECT, {
+      ...NO_OVERRIDES,
+      stagingDigestEnabled: false,
+    });
+    expect(cfg.digestEnabled).toBe(false);
+    expect(cfg.overridden.digestEnabled).toBe(true);
+  });
+
+  // The digest is part of the aggregate PR's body. Without that PR there is
+  // nothing to print it on, so the switch cannot be honored on its own.
+  it("stays off for a repo that has no aggregate PR", () => {
+    const cfg = resolveStagingConfig(PROJECT, {
+      ...NO_OVERRIDES,
+      stagingBatchPrEnabled: false,
+    });
+    expect(cfg.digestEnabled).toBe(false);
+    expect(cfg.digestSections.size).toBe(0);
+  });
+
+  it("holds no sections at all when the digest is off", () => {
+    const cfg = resolveStagingConfig(
+      { ...PROJECT, stagingDigestEnabled: false },
+      NO_OVERRIDES,
+    );
+    expect(cfg.digestSections.size).toBe(0);
   });
 });

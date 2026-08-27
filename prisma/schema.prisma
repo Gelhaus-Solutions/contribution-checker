@@ -155,6 +155,18 @@ model Project {
   // every contributor a stale base. Inert until one of the two switches above
   // is on, so it cannot touch a repo that is not using staging routing.
   stagingSyncEnabled     Boolean @default(true)
+  // The "before you merge" digest appended to the aggregate PR body: new
+  // environment variables, migrations, dependency and infrastructure changes,
+  // and so on. Off by default, including for projects that already run the
+  // aggregate PR: it changes the shape of a description people are used to
+  // reading, so it is opt-in rather than something that appears one deploy.
+  // `stagingDigestSections` is a JSON array of section ids from
+  // DIGEST_SECTIONS in src/lib/github/staging-digest.ts; parse it with
+  // parseDigestSections, never with a bare JSON.parse. An empty array means
+  // "every section off", which is why the default spells them all out rather
+  // than relying on the empty-string fallback.
+  stagingDigestEnabled   Boolean @default(false)
+  stagingDigestSections  String  @default("[\"overview\",\"env\",\"breaking\",\"migrations\",\"schema\",\"dependencies\",\"workflows\",\"infra\",\"tooling\",\"stats\"]")
 
   // Disable switch: when checkerEnabled=false, every PR is treated as APPROVED.
   // Tracking (PrCheck rows + quality scoring) only runs if trackWhenDisabled=true.
@@ -359,6 +371,10 @@ model Repo {
   stagingBatchPrEnabled  Boolean?
   stagingSyncEnabled     Boolean?
   stagingBranch          String?
+  // Overrides the project's digest switch only. Which sections the digest
+  // prints stays project-wide: a per-repo section list would be four more
+  // columns of configuration for a body nobody reads differently per repo.
+  stagingDigestEnabled   Boolean?
   // Staging routing state. `stagingBatchPrNumber` is the open aggregate PR
   // (null = no batch in flight). `stagingBatchSince` is when the previous
   // aggregate PR merged: PRs merged into staging before it are already in the

@@ -3,6 +3,14 @@ import { logger } from "@/lib/logger";
 import { matchesAnyPattern } from "@/lib/applications/decide-pr";
 import { STAGING_SYNC_WINDOW_MS } from "@/lib/temporal/contracts";
 import {
+  buildStagingDigest,
+  parseDigestSections,
+  renderDigestLines,
+  type BatchOverview,
+  type DigestSectionId,
+  type StagingDigest,
+} from "@/lib/github/staging-digest";
+import {
   addLabel,
   compareBranches,
   createBranch,
@@ -18,6 +26,7 @@ import {
   repoRef,
   setPullRequestBase,
   updatePullRequestBody,
+  type CompareResult,
   type PrSummary,
   type RepoRef,
 } from "@/lib/github/pr-actions";
@@ -53,6 +62,8 @@ export type StagingProject = {
   stagingRetargetEnabled: boolean;
   stagingBatchPrEnabled: boolean;
   stagingSyncEnabled: boolean;
+  stagingDigestEnabled: boolean;
+  stagingDigestSections: string;
   stagingBranch: string;
   labelStagingBatch: string;
   labelStagingOptOut: string;
@@ -63,6 +74,7 @@ export type StagingRepoOverrides = {
   stagingRetargetEnabled: boolean | null;
   stagingBatchPrEnabled: boolean | null;
   stagingSyncEnabled: boolean | null;
+  stagingDigestEnabled: boolean | null;
   stagingBranch: string | null;
 };
 
@@ -72,6 +84,8 @@ export const stagingProjectSelect = {
   stagingRetargetEnabled: true,
   stagingBatchPrEnabled: true,
   stagingSyncEnabled: true,
+  stagingDigestEnabled: true,
+  stagingDigestSections: true,
   stagingBranch: true,
   labelStagingBatch: true,
   labelStagingOptOut: true,
@@ -81,6 +95,7 @@ export const stagingRepoSelect = {
   stagingRetargetEnabled: true,
   stagingBatchPrEnabled: true,
   stagingSyncEnabled: true,
+  stagingDigestEnabled: true,
   stagingBranch: true,
 } as const;
 
@@ -90,6 +105,10 @@ export type ResolvedStagingConfig = {
   batchPrEnabled: boolean;
   /** Keep staging current with the default branch, with no PR. */
   syncEnabled: boolean;
+  /** Append the "before you merge" digest to the aggregate PR body. */
+  digestEnabled: boolean;
+  /** Which digest sections print. Empty when the digest is off. */
+  digestSections: Set<DigestSectionId>;
   stagingBranch: string;
   /** Staging routing does anything at all for this repo. `syncEnabled` alone
    * does not qualify: syncing a branch nothing routes through is a write to
@@ -100,6 +119,7 @@ export type ResolvedStagingConfig = {
     retargetEnabled: boolean;
     batchPrEnabled: boolean;
     syncEnabled: boolean;
+    digestEnabled: boolean;
     stagingBranch: boolean;
   };
 };
@@ -116,6 +136,8 @@ export function resolveStagingConfig(
     | "stagingRetargetEnabled"
     | "stagingBatchPrEnabled"
     | "stagingSyncEnabled"
+    | "stagingDigestEnabled"
+    | "stagingDigestSections"
     | "stagingBranch"
   >,
   repo: StagingRepoOverrides | null,
@@ -126,17 +148,28 @@ export function resolveStagingConfig(
   const batchPrEnabled =
     repo?.stagingBatchPrEnabled ?? project.stagingBatchPrEnabled;
   const anyEnabled = retargetEnabled || batchPrEnabled;
+  // Gated on `batchPrEnabled`, not on `anyEnabled`: the digest is part of the
+  // aggregate PR's body and has nowhere else to go, so a repo that only
+  // retargets has nothing to print it on.
+  const digestEnabled =
+    batchPrEnabled &&
+    (repo?.stagingDigestEnabled ?? project.stagingDigestEnabled);
   return {
     retargetEnabled,
     batchPrEnabled,
     syncEnabled:
       anyEnabled && (repo?.stagingSyncEnabled ?? project.stagingSyncEnabled),
+    digestEnabled,
+    digestSections: digestEnabled
+      ? parseDigestSections(project.stagingDigestSections)
+      : new Set<DigestSectionId>(),
     stagingBranch: branch || project.stagingBranch,
     anyEnabled,
     overridden: {
       retargetEnabled: repo?.stagingRetargetEnabled != null,
       batchPrEnabled: repo?.stagingBatchPrEnabled != null,
       syncEnabled: repo?.stagingSyncEnabled != null,
+      digestEnabled: repo?.stagingDigestEnabled != null,
       stagingBranch: !!branch,
     },
   };
@@ -158,14 +191,29 @@ function parseBypassHandles(raw: string): string[] {
 export type BatchEntry = {
   number: number;
   author: string | null;
+  /** When it merged into staging. Optional because only the batch overview
+   * reads it, and it is best-effort even there: GitHub has been known to
+   * return a merged PR with no `merged_at`. */
+  mergedAt?: string | null;
 };
 
 /**
  * Render the manifest block. Kept pure and exported so the formatting is
  * testable on its own, the same way `buildDecisionCheckPayload` is split from
  * `publishDecisionCheck`.
+ *
+ * The optional digest is the second half of the answer. The PR list says which
+ * changes ship; the digest says what shipping them costs the operator: the
+ * environment variables that have to exist first, the migrations that have to
+ * run, the dependencies and infrastructure that moved. It is omitted entirely
+ * when the compare turned up nothing notable, so a quiet batch stays a short
+ * body.
  */
-export function renderBatchBlock(entries: BatchEntry[]): string {
+export function renderBatchBlock(
+  entries: BatchEntry[],
+  digest?: StagingDigest | null,
+  sections?: ReadonlySet<DigestSectionId>,
+): string {
   const lines =
     entries.length === 0
       ? ["_No merged PRs in this batch yet._"]
@@ -175,7 +223,41 @@ export function renderBatchBlock(entries: BatchEntry[]): string {
           const by = e.author ? ` by @${e.author}` : "";
           return `- #${e.number}${by}`;
         });
-  return [BLOCK_START, "### In this batch", "", ...lines, BLOCK_END].join("\n");
+  const digestLines = digest ? renderDigestLines(digest, sections) : [];
+  const heads =
+    digestLines.length === 0
+      ? []
+      : ["", "### Before you merge", "", ...digestLines];
+  return [
+    BLOCK_START,
+    "### In this batch",
+    "",
+    ...lines,
+    ...heads,
+    BLOCK_END,
+  ].join("\n");
+}
+
+/**
+ * Reduce the manifest entries to the batch overview. Kept here rather than in
+ * the digest module because it reads `BatchEntry`, which is a manifest concept:
+ * the digest describes the diff, and the diff does not know which PRs produced
+ * it.
+ */
+export function batchOverview(entries: BatchEntry[]): BatchOverview {
+  const authors = [
+    ...new Set(entries.map((e) => e.author).filter((a): a is string => !!a)),
+  ].sort();
+  const merged = entries
+    .map((e) => e.mergedAt)
+    .filter((m): m is string => !!m)
+    .sort();
+  return {
+    prCount: entries.length,
+    authors,
+    firstMergedAt: merged[0] ?? null,
+    lastMergedAt: merged[merged.length - 1] ?? null,
+  };
 }
 
 /**
@@ -392,6 +474,7 @@ export function selectBatchEntries(args: {
   return kept.map((pr) => ({
     number: pr.number,
     author: pr.authorLogin,
+    mergedAt: pr.mergedAt,
   }));
 }
 
@@ -872,6 +955,28 @@ const NOTHING_DONE: StagingReconcileResult = {
 };
 
 /**
+ * Reduce the compare into the "before you merge" digest, or null when it could
+ * not be built. Every part of this is heuristic and advisory, so it is wrapped:
+ * a regex that trips over an odd patch must cost the release PR its digest,
+ * never its manifest.
+ */
+function safeDigest(cmp: CompareResult, repoId: string): StagingDigest | null {
+  try {
+    return buildStagingDigest({
+      files: cmp.files ?? [],
+      commits: (cmp.commitShas ?? []).map((sha) => ({
+        sha,
+        message: cmp.commitMessages?.[sha] ?? "",
+      })),
+      filesTruncated: cmp.filesTruncated ?? false,
+    });
+  } catch (e) {
+    logger.warn({ err: e, repoId }, "staging digest build failed");
+    return null;
+  }
+}
+
+/**
  * Re-derive a repo's aggregate staging PR from live GitHub state: ensure it
  * exists while staging is ahead, and keep its manifest block accurate. Called
  * only from the per-repo `stagingBatch` entity workflow, so runs for one repo
@@ -1006,17 +1111,30 @@ export async function reconcileStagingBatch(args: {
         "staging batch compare truncated; falling back to the timestamp cutoff",
       );
     }
-    const renderFor = (excludePrNumber: number | null): string =>
-      renderBatchBlock(
-        selectBatchEntries({
-          prs,
-          stagingBranch: cfg.stagingBranch,
-          since,
-          batchShas,
-          batchParents: cmp.commitParents,
-          excludePrNumber,
-        }),
+    // Derived from the compare we already have, so the whole digest is free:
+    // the response carries the changed files and the commit messages whether
+    // we read them or not. Degrades to no digest rather than throwing: the
+    // manifest is the part of the body that must never be lost to a parsing
+    // bug in the part that is only advisory.
+    // Built once, off the compare, and reused: scanning the patches does not
+    // depend on which PR we exclude. Null when the project has the digest off,
+    // which is also the point at which the work is skipped entirely.
+    const baseDigest = cfg.digestEnabled ? safeDigest(cmp, repo.id) : null;
+    const renderFor = (excludePrNumber: number | null): string => {
+      const entries = selectBatchEntries({
+        prs,
+        stagingBranch: cfg.stagingBranch,
+        since,
+        batchShas,
+        batchParents: cmp.commitParents,
+        excludePrNumber,
+      });
+      return renderBatchBlock(
+        entries,
+        baseDigest && { ...baseDigest, overview: batchOverview(entries) },
+        cfg.digestSections,
       );
+    };
 
     let aggregate = await findAggregatePr({
       ref,

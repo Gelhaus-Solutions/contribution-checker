@@ -50,6 +50,7 @@ vi.mock("@/lib/github/pr-actions", () => ({
 }));
 
 import { reconcileStagingBatch, renderBatchBlock } from "@/lib/github/staging";
+import { ALL_DIGEST_SECTION_IDS } from "@/lib/github/staging-digest";
 import { STAGING_SYNC_WINDOW_MS } from "@/lib/temporal/contracts";
 import type { PrSummary } from "@/lib/github/pr-actions";
 
@@ -80,6 +81,7 @@ function makeRepo(overrides: Record<string, unknown> = {}) {
     stagingRetargetEnabled: null,
     stagingBatchPrEnabled: null,
     stagingSyncEnabled: null,
+    stagingDigestEnabled: null,
     stagingBranch: null,
     project: {
       id: "proj1",
@@ -87,11 +89,27 @@ function makeRepo(overrides: Record<string, unknown> = {}) {
       stagingRetargetEnabled: true,
       stagingBatchPrEnabled: true,
       stagingSyncEnabled: true,
+      // Off by default here as in the schema: the digest tests opt in.
+      stagingDigestEnabled: false,
+      stagingDigestSections: "[]",
       stagingBranch: "staging",
       labelStagingBatch: "staging:batch",
       labelStagingOptOut: "staging:opt-out",
     },
     ...overrides,
+  };
+}
+
+/** The same repo with the digest switched on project-wide. */
+function digestOn(overrides: Record<string, unknown> = {}) {
+  const repo = makeRepo(overrides);
+  return {
+    ...repo,
+    project: {
+      ...repo.project,
+      stagingDigestEnabled: true,
+      stagingDigestSections: JSON.stringify(ALL_DIGEST_SECTION_IDS),
+    },
   };
 }
 
@@ -535,6 +553,142 @@ describe("reconcileStagingBatch", () => {
     await reconcileStagingBatch({ repoId: "repo1" });
     expect(createBranch).not.toHaveBeenCalled();
     expect(createPullRequest).not.toHaveBeenCalled();
+  });
+
+  it("carries the digest into the aggregate PR body", async () => {
+    repoFindUnique.mockResolvedValue(digestOn());
+    compareBranches.mockResolvedValue({
+      aheadBy: 1,
+      behindBy: 0,
+      mergeBaseDate: null,
+      commitShas: ["c1"],
+      commitParents: { c1: [] },
+      commitMessages: { c1: "feat(api)!: rename the config key" },
+      files: [
+        {
+          filename: ".env.example",
+          previousFilename: null,
+          status: "modified",
+          additions: 1,
+          deletions: 0,
+          patch: "@@\n+SENTRY_DSN=",
+        },
+        {
+          filename: "prisma/migrations/20260101_x/migration.sql",
+          previousFilename: null,
+          status: "added",
+          additions: 4,
+          deletions: 0,
+          patch: null,
+        },
+      ],
+      filesTruncated: false,
+      truncated: false,
+    });
+    batchPrs = [mergedPr(2, "New", "octocat", "2026-08-12T00:00:00Z")];
+    await reconcileStagingBatch({ repoId: "repo1" });
+    const body = updatePullRequestBody.mock.calls[0][2] as string;
+    expect(body).toContain("- #2");
+    expect(body).toContain("### Before you merge");
+    expect(body).toContain("`SENTRY_DSN`");
+    expect(body).toContain("Database migrations");
+    expect(body).toContain("Breaking changes");
+  });
+
+  // Existing projects must not wake up to a differently-shaped release PR.
+  it("leaves the digest out until the project turns it on", async () => {
+    compareBranches.mockResolvedValue({
+      aheadBy: 1,
+      behindBy: 0,
+      mergeBaseDate: null,
+      commitShas: ["c1"],
+      commitParents: { c1: [] },
+      commitMessages: { c1: "feat: x" },
+      files: [
+        {
+          filename: ".env.example",
+          previousFilename: null,
+          status: "modified",
+          additions: 1,
+          deletions: 0,
+          patch: "@@\n+SENTRY_DSN=",
+        },
+      ],
+      filesTruncated: false,
+      truncated: false,
+    });
+    batchPrs = [mergedPr(2, "New", "octocat", "2026-08-12T00:00:00Z")];
+    await reconcileStagingBatch({ repoId: "repo1" });
+    const body = updatePullRequestBody.mock.calls[0][2] as string;
+    expect(body).toContain("- #2");
+    expect(body).not.toContain("Before you merge");
+    expect(body).not.toContain("SENTRY_DSN");
+  });
+
+  it("honors the project's section list", async () => {
+    repoFindUnique.mockResolvedValue({
+      ...digestOn(),
+      project: {
+        ...digestOn().project,
+        stagingDigestSections: '["migrations"]',
+      },
+    });
+    compareBranches.mockResolvedValue({
+      aheadBy: 1,
+      behindBy: 0,
+      mergeBaseDate: null,
+      commitShas: ["c1"],
+      commitParents: { c1: [] },
+      commitMessages: { c1: "feat: x" },
+      files: [
+        {
+          filename: ".env.example",
+          previousFilename: null,
+          status: "modified",
+          additions: 1,
+          deletions: 0,
+          patch: "@@\n+SENTRY_DSN=",
+        },
+        {
+          filename: "prisma/migrations/20260101_x/migration.sql",
+          previousFilename: null,
+          status: "added",
+          additions: 4,
+          deletions: 0,
+          patch: null,
+        },
+      ],
+      filesTruncated: false,
+      truncated: false,
+    });
+    batchPrs = [mergedPr(2, "New", "octocat", "2026-08-12T00:00:00Z")];
+    await reconcileStagingBatch({ repoId: "repo1" });
+    const body = updatePullRequestBody.mock.calls[0][2] as string;
+    expect(body).toContain("Database migrations");
+    expect(body).not.toContain("SENTRY_DSN");
+  });
+
+  // The digest is advisory; the manifest is not. A digest that blows up must
+  // cost the release PR its heads-up section, never its list of PRs.
+  it("still writes the manifest when the digest cannot be built", async () => {
+    repoFindUnique.mockResolvedValue(digestOn());
+    compareBranches.mockResolvedValue({
+      aheadBy: 1,
+      behindBy: 0,
+      mergeBaseDate: null,
+      commitShas: ["c1"],
+      commitParents: { c1: [] },
+      commitMessages: { c1: "feat: x" },
+      // Not an array: whatever GitHub did, the reconcile has to survive it.
+      files: 42,
+      filesTruncated: false,
+      truncated: false,
+    });
+    batchPrs = [mergedPr(2, "New", "octocat", "2026-08-12T00:00:00Z")];
+    await reconcileStagingBatch({ repoId: "repo1" });
+    const body = updatePullRequestBody.mock.calls[0][2] as string;
+    expect(body).toContain("- #2");
+    expect(body).not.toContain("Before you merge");
   });
 
   it("excludes PRs already shipped by the previous batch", async () => {

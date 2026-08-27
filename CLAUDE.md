@@ -90,6 +90,38 @@ Staging routing (`src/lib/github/staging.ts`, App mode only):
 - **The manifest lists merged PRs only.** Open and closed-without-merging PRs
   are excluded: the description is a record of what the batch ships, not of
   what was proposed.
+- **The "before you merge" digest** (`src/lib/github/staging-digest.ts`) is the
+  second half of the aggregate PR body: environment variables the batch adds or
+  drops, database migrations and schema edits, dependency, CI and
+  infrastructure changes, and breaking-change commits, plus a diff-stat line.
+  It is derived entirely from the `default...staging` compare the reconcile
+  already fetches (that response carries the changed files, their patches and
+  the commit messages whether we read them or not), so it costs **no extra
+  GitHub call**. Everything in it is a pure heuristic over the diff, it renders
+  nothing when a batch has nothing notable, and `safeDigest` swallows any
+  failure: the digest is advisory, the manifest is not, so a regex that trips
+  over an odd patch must never cost the release PR its list of PRs. Env vars
+  are picked up both from declaration files (`.env*`, `env.ts` and the like,
+  where the name starts the line) and from reads in added code
+  (`process.env.X`, `os.getenv("X")`, ...); a name on both sides of the same
+  file's diff is a move, not a change, and is dropped. Keep the output
+  deterministic (sorted, capped) or every reconcile becomes a visible edit on
+  the release PR.
+- **The digest is configured per section.** `DIGEST_SECTIONS` is the catalog
+  the settings UI renders from, exactly as `ALL_HEURISTICS` is for quality
+  scoring: add a section there and its checkbox appears with no further UI work
+  and no migration. A project stores the subset it wants in
+  `Project.stagingDigestSections` (JSON array of ids, read with
+  `parseDigestSections`, never a bare `JSON.parse`), behind the
+  `Project.stagingDigestEnabled` switch, which `Repo.stagingDigestEnabled`
+  overrides per repo. All of it resolves through `resolveStagingConfig` like
+  every other staging setting. Six section ids double as `GROUPS` ids, which is
+  what makes a file group's checkbox work with no extra wiring; a group whose
+  id is not in the catalog can never be printed. The digest is built in full
+  and filtered at render, so a disabled section costs a line and nothing else.
+  Off by default, including for projects that already run an aggregate PR: it
+  changes the shape of a description reviewers are used to, and a release PR is
+  the wrong place to surprise someone.
 - **A merge commit in the range is not proof the batch ships it.** When a
   branch is merged into staging *and* separately into the default branch, the
   staging merge commit is still unique to staging while its content is already
@@ -125,7 +157,9 @@ Staging routing (`src/lib/github/staging.ts`, App mode only):
 - `resolveStagingConfig` is the only place that folds per-repo overrides onto
   project defaults; never read the `staging*` columns directly. `syncEnabled`
   is gated on `anyEnabled`, so the sync default cannot touch a repo that is not
-  retargeting or batching.
+  retargeting or batching, and `digestEnabled` is gated on `batchPrEnabled`,
+  because the digest is part of the aggregate PR body and has nowhere else to
+  go.
 - The aggregate PR must **never** reach `convergePr` (no application means the
   gate would close the bot's own release PR). `isAggregatePr` matches it by the
   tracked `Repo.stagingBatchPrNumber` and structurally (same-repo head ==

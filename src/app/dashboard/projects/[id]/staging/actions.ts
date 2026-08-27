@@ -6,6 +6,11 @@ import { prisma } from "@/lib/db";
 import { requireProjectRole } from "@/lib/authz";
 import { recordAudit } from "@/lib/audit";
 import { reGateProjectPrs, signalStagingBatch } from "@/lib/temporal/start";
+import {
+  ALL_DIGEST_SECTION_IDS,
+  serializeDigestSections,
+  type DigestSectionId,
+} from "@/lib/github/staging-digest";
 
 /**
  * Git forbids whitespace, `~^:?*[`, backslash, `..`, a leading `-` or `/`, a
@@ -41,11 +46,20 @@ const stagingLabel = z
     "staging labels cannot use the contribution: prefix, which the gate owns",
   );
 
+/** Section ids come from a checkbox group, so the browser sends only the
+ * checked ones and an all-off form sends nothing at all. Unknown ids are
+ * rejected rather than dropped: they can only come from a hand-edited form. */
+const digestSection = z.enum(
+  ALL_DIGEST_SECTION_IDS as [DigestSectionId, ...DigestSectionId[]],
+);
+
 const defaultsSchema = z.object({
   projectId: z.string().min(1),
   stagingRetargetEnabled: z.string().optional(),
   stagingBatchPrEnabled: z.string().optional(),
   stagingSyncEnabled: z.string().optional(),
+  stagingDigestEnabled: z.string().optional(),
+  stagingDigestSections: z.array(digestSection),
   stagingBranch: branchName,
   labelStagingBatch: stagingLabel,
   labelStagingOptOut: stagingLabel,
@@ -58,6 +72,8 @@ export async function updateStagingDefaults(formData: FormData) {
       formData.get("stagingRetargetEnabled") ?? undefined,
     stagingBatchPrEnabled: formData.get("stagingBatchPrEnabled") ?? undefined,
     stagingSyncEnabled: formData.get("stagingSyncEnabled") ?? undefined,
+    stagingDigestEnabled: formData.get("stagingDigestEnabled") ?? undefined,
+    stagingDigestSections: formData.getAll("stagingDigestSections"),
     stagingBranch: formData.get("stagingBranch"),
     labelStagingBatch: formData.get("labelStagingBatch"),
     labelStagingOptOut: formData.get("labelStagingOptOut"),
@@ -70,6 +86,8 @@ export async function updateStagingDefaults(formData: FormData) {
       stagingRetargetEnabled: true,
       stagingBatchPrEnabled: true,
       stagingSyncEnabled: true,
+      stagingDigestEnabled: true,
+      stagingDigestSections: true,
       stagingBranch: true,
       labelStagingBatch: true,
       labelStagingOptOut: true,
@@ -101,6 +119,10 @@ export async function updateStagingDefaults(formData: FormData) {
     stagingRetargetEnabled: !!parsed.stagingRetargetEnabled,
     stagingBatchPrEnabled: !!parsed.stagingBatchPrEnabled,
     stagingSyncEnabled: !!parsed.stagingSyncEnabled,
+    stagingDigestEnabled: !!parsed.stagingDigestEnabled,
+    // Normalized through the serializer so the stored order matches the
+    // catalog and a no-op save cannot look like a change in the audit log.
+    stagingDigestSections: serializeDigestSections(parsed.stagingDigestSections),
     stagingBranch: parsed.stagingBranch,
     labelStagingBatch: parsed.labelStagingBatch,
     labelStagingOptOut: parsed.labelStagingOptOut,
@@ -131,6 +153,14 @@ export async function updateStagingDefaults(formData: FormData) {
             before.stagingSyncEnabled,
             after.stagingSyncEnabled,
           ],
+          stagingDigestEnabled: [
+            before.stagingDigestEnabled,
+            after.stagingDigestEnabled,
+          ],
+          stagingDigestSections: [
+            before.stagingDigestSections,
+            after.stagingDigestSections,
+          ],
           stagingBranch: [before.stagingBranch, after.stagingBranch],
           labelStagingBatch: [
             before.labelStagingBatch,
@@ -151,9 +181,14 @@ export async function updateStagingDefaults(formData: FormData) {
       before.stagingRetargetEnabled !== after.stagingRetargetEnabled ||
       before.stagingBranch !== after.stagingBranch,
     retargetNowOn: after.stagingRetargetEnabled,
+    // The digest lives in the aggregate PR body, so changing it has to trigger
+    // a reconcile: otherwise the new section only appears whenever the next PR
+    // happens to merge into staging.
     batchAffecting:
       before.stagingBatchPrEnabled !== after.stagingBatchPrEnabled ||
       before.stagingSyncEnabled !== after.stagingSyncEnabled ||
+      before.stagingDigestEnabled !== after.stagingDigestEnabled ||
+      before.stagingDigestSections !== after.stagingDigestSections ||
       before.stagingBranch !== after.stagingBranch,
   });
 
@@ -170,6 +205,7 @@ const repoSchema = z.object({
   stagingRetargetEnabled: triState,
   stagingBatchPrEnabled: triState,
   stagingSyncEnabled: triState,
+  stagingDigestEnabled: triState,
   stagingBranch: z.union([z.string().length(0), branchName]),
 });
 
@@ -184,6 +220,7 @@ export async function updateRepoStagingSettings(formData: FormData) {
     stagingRetargetEnabled: formData.get("stagingRetargetEnabled"),
     stagingBatchPrEnabled: formData.get("stagingBatchPrEnabled"),
     stagingSyncEnabled: formData.get("stagingSyncEnabled"),
+    stagingDigestEnabled: formData.get("stagingDigestEnabled"),
     stagingBranch: formData.get("stagingBranch") ?? "",
   });
   const { session } = await requireProjectRole(parsed.projectId, "ADMIN");
@@ -196,6 +233,7 @@ export async function updateRepoStagingSettings(formData: FormData) {
       stagingRetargetEnabled: true,
       stagingBatchPrEnabled: true,
       stagingSyncEnabled: true,
+      stagingDigestEnabled: true,
       stagingBranch: true,
     },
   });
@@ -209,6 +247,7 @@ export async function updateRepoStagingSettings(formData: FormData) {
     stagingRetargetEnabled: toOverride(parsed.stagingRetargetEnabled),
     stagingBatchPrEnabled: toOverride(parsed.stagingBatchPrEnabled),
     stagingSyncEnabled: toOverride(parsed.stagingSyncEnabled),
+    stagingDigestEnabled: toOverride(parsed.stagingDigestEnabled),
     stagingBranch: parsed.stagingBranch || null,
   };
 
@@ -235,13 +274,17 @@ export async function updateRepoStagingSettings(formData: FormData) {
             before.stagingSyncEnabled,
             after.stagingSyncEnabled,
           ],
+          stagingDigestEnabled: [
+            before.stagingDigestEnabled,
+            after.stagingDigestEnabled,
+          ],
           stagingBranch: [before.stagingBranch, after.stagingBranch],
         }).filter(([, [a, b]]) => a !== b),
       ),
     },
   });
 
-  // Any of the three can change what this repo does, and re-gating is
+  // Any of the four can change what this repo does, and re-gating is
   // project-wide anyway, so do not try to be clever about which changed.
   await propagateStagingChange({
     projectId: parsed.projectId,

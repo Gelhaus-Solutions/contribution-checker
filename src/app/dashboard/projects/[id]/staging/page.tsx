@@ -20,6 +20,10 @@ import {
   type ResolvedStagingConfig,
 } from "@/lib/github/staging";
 import {
+  DIGEST_SECTIONS,
+  parseDigestSections,
+} from "@/lib/github/staging-digest";
+import {
   compareBranches,
   installationHasContentsWrite,
   repoRef,
@@ -122,6 +126,12 @@ export default async function StagingSettings({
     },
   });
   if (!project) return null;
+
+  // Read straight off the column rather than through resolveStagingConfig,
+  // which reports no sections at all while the digest is switched off. The
+  // form has to keep showing what a project picked so turning the digest back
+  // on restores it.
+  const enabledSections = parseDigestSections(project.stagingDigestSections);
 
   const repos = await prisma.repo.findMany({
     where: { projectId: id },
@@ -322,6 +332,51 @@ export default async function StagingSettings({
                 </span>
               </span>
             </label>
+            <label className="flex items-start gap-3 text-sm">
+              <input
+                type="checkbox"
+                name="stagingDigestEnabled"
+                value="1"
+                defaultChecked={project.stagingDigestEnabled}
+                className="mt-0.5 h-4 w-4 rounded border-border"
+              />
+              <span>
+                <span className="font-medium">
+                  Add a &ldquo;before you merge&rdquo; digest to the aggregate
+                  PR
+                </span>
+                <span className="block text-xs text-muted-foreground">
+                  Under the list of PRs, a second section derived from the
+                  staging diff: what a reviewer has to know before shipping it.
+                  Read from the same comparison the bot already makes, so it
+                  costs no extra GitHub API call, and left out entirely when a
+                  batch turns up nothing notable. Needs the aggregate PR above.
+                </span>
+              </span>
+            </label>
+            <fieldset className="ml-7 space-y-2 border-l border-border pl-4">
+              <legend className="sr-only">Digest sections</legend>
+              {DIGEST_SECTIONS.map((section) => (
+                <label
+                  key={section.id}
+                  className="flex items-start gap-3 text-sm"
+                >
+                  <input
+                    type="checkbox"
+                    name="stagingDigestSections"
+                    value={section.id}
+                    defaultChecked={enabledSections.has(section.id)}
+                    className="mt-0.5 h-4 w-4 rounded border-border"
+                  />
+                  <span>
+                    <span>{section.label}</span>
+                    <span className="block text-xs text-muted-foreground">
+                      {section.hint}
+                    </span>
+                  </span>
+                </label>
+              ))}
+            </fieldset>
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="labelStagingBatch">Batch label</Label>
@@ -491,7 +546,7 @@ export default async function StagingSettings({
 
                 <form
                   action={updateRepoStagingSettings}
-                  className="grid items-end gap-3 sm:grid-cols-5"
+                  className="grid items-end gap-3 sm:grid-cols-6"
                 >
                   <input type="hidden" name="projectId" value={id} />
                   <input type="hidden" name="repoId" value={repo.id} />
@@ -527,6 +582,16 @@ export default async function StagingSettings({
                       name="stagingSyncEnabled"
                       value={repo.stagingSyncEnabled}
                       inheritedLabel={project.stagingSyncEnabled ? "on" : "off"}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor={`digest-${repo.id}`} className="text-xs">
+                      Digest
+                    </Label>
+                    <TriStateSelect
+                      name="stagingDigestEnabled"
+                      value={repo.stagingDigestEnabled}
+                      inheritedLabel={project.stagingDigestEnabled ? "on" : "off"}
                     />
                   </div>
                   <div className="space-y-1.5">

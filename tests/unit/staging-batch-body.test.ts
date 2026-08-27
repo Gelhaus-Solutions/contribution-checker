@@ -4,6 +4,8 @@ import {
   renderBatchBlock,
   selectBatchEntries,
 } from "@/lib/github/staging";
+import { buildStagingDigest } from "@/lib/github/staging-digest";
+import { batchOverview } from "@/lib/github/staging";
 import type { PrSummary } from "@/lib/github/pr-actions";
 
 function pr(overrides: Partial<PrSummary> & { number: number }): PrSummary {
@@ -52,6 +54,50 @@ describe("renderBatchBlock", () => {
 
   it("says so when the batch is empty rather than rendering an empty list", () => {
     expect(renderBatchBlock([])).toContain("No merged PRs in this batch yet");
+  });
+
+  it("adds the heads-up section when the digest has something to say", () => {
+    const digest = buildStagingDigest({
+      files: [
+        {
+          filename: ".env.example",
+          previousFilename: null,
+          status: "modified",
+          additions: 1,
+          deletions: 0,
+          patch: "@@\n+NEW_KEY=1",
+        },
+      ],
+      commits: [],
+      filesTruncated: false,
+    });
+    const block = renderBatchBlock([{ number: 1, author: "a" }], digest);
+    expect(block).toContain("### In this batch");
+    expect(block).toContain("### Before you merge");
+    expect(block).toContain("`NEW_KEY`");
+  });
+
+  it("omits the heading entirely for a batch with nothing notable in it", () => {
+    const digest = buildStagingDigest({
+      files: [
+        {
+          filename: "README.md",
+          previousFilename: null,
+          status: "modified",
+          additions: 1,
+          deletions: 0,
+          patch: "@@\n+docs",
+        },
+      ],
+      commits: [],
+      filesTruncated: false,
+    });
+    expect(renderBatchBlock([{ number: 1, author: "a" }], digest)).not.toContain(
+      "Before you merge",
+    );
+    expect(renderBatchBlock([{ number: 1, author: "a" }], null)).not.toContain(
+      "Before you merge",
+    );
   });
 });
 
@@ -289,5 +335,29 @@ describe("selectBatchEntries", () => {
       excludePrNumber: null,
     });
     expect(entries.map((e) => e.number)).toEqual([3, 5, 9]);
+  });
+});
+
+describe("batchOverview", () => {
+  it("counts the batch, dedupes the authors and finds its span", () => {
+    const o = batchOverview([
+      { number: 3, author: "octocat", mergedAt: "2026-08-20T00:00:00Z" },
+      { number: 1, author: "hubot", mergedAt: "2026-08-12T00:00:00Z" },
+      { number: 2, author: "octocat", mergedAt: "2026-08-25T00:00:00Z" },
+    ]);
+    expect(o.prCount).toBe(3);
+    expect(o.authors).toEqual(["hubot", "octocat"]);
+    expect(o.firstMergedAt).toBe("2026-08-12T00:00:00Z");
+    expect(o.lastMergedAt).toBe("2026-08-25T00:00:00Z");
+  });
+
+  it("survives entries GitHub gave no author or merge time", () => {
+    const o = batchOverview([{ number: 1, author: null }]);
+    expect(o).toEqual({
+      prCount: 1,
+      authors: [],
+      firstMergedAt: null,
+      lastMergedAt: null,
+    });
   });
 });

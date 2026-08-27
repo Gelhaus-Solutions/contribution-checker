@@ -1,6 +1,7 @@
 import * as Sentry from "@sentry/nextjs";
 import { getInstallationOctokit } from "@/lib/github/app";
 import { logger } from "@/lib/logger";
+import type { CompareFile } from "@/lib/github/staging-digest";
 
 export type RepoRef = { owner: string; repo: string; installationId: number };
 
@@ -304,6 +305,48 @@ export async function updatePullRequestBody(
   }
 }
 
+/** GitHub inlines at most this many changed files in a compare response. */
+const COMPARE_FILE_CAP = 300;
+
+type CompareCommitPayload = {
+  sha?: string;
+  parents?: Array<{ sha?: string }>;
+  commit?: { message?: string };
+};
+
+type ComparePayload = {
+  ahead_by?: number;
+  behind_by?: number;
+  total_commits?: number;
+  commits?: CompareCommitPayload[];
+  merge_base_commit?: { commit?: { committer?: { date?: string } } };
+  files?: Array<{
+    filename?: string;
+    previous_filename?: string;
+    status?: string;
+    additions?: number;
+    deletions?: number;
+    patch?: string;
+  }>;
+};
+
+/** Everything the staging reconciler reads out of one compare call. */
+export type CompareResult = {
+  aheadBy: number;
+  behindBy: number;
+  mergeBaseDate: string | null;
+  commitShas: string[];
+  /** sha -> parent shas, for telling a merge apart from what it merged. */
+  commitParents: Record<string, string[]>;
+  /** sha -> full commit message, for spotting breaking-change markers. */
+  commitMessages: Record<string, string>;
+  /** Changed files with patches, capped by GitHub at 300. */
+  files: CompareFile[];
+  /** The file list hit that cap, so it is not the whole diff. */
+  filesTruncated: boolean;
+  truncated: boolean;
+};
+
 /**
  * How far `head` is ahead of `base`, plus the date of their merge base.
  *
@@ -317,6 +360,11 @@ export async function updatePullRequestBody(
  * GitHub inlines at most 250 commits in a compare; `truncated` says the SHA
  * set is incomplete, so callers must not read absence as exclusion.
  *
+ * `files` and `commitMessages` come out of the same response: GitHub returns
+ * the changed files (up to 300, with patches) and the full commit objects
+ * whether we read them or not, so the staging digest built from them costs no
+ * extra request. `filesTruncated` marks the 300-file cap the same way.
+ *
  * Returns null when either branch is missing (404), the "staging does not
  * exist yet" case.
  */
@@ -324,15 +372,7 @@ export async function compareBranches(
   ref: RepoRef,
   base: string,
   head: string,
-): Promise<{
-  aheadBy: number;
-  behindBy: number;
-  mergeBaseDate: string | null;
-  commitShas: string[];
-  /** sha -> parent shas, for telling a merge apart from what it merged. */
-  commitParents: Record<string, string[]>;
-  truncated: boolean;
-} | null> {
+): Promise<CompareResult | null> {
   const octokit = await getInstallationOctokit(ref.installationId);
   try {
     const res = await octokit.request(
@@ -340,30 +380,43 @@ export async function compareBranches(
       { owner: ref.owner, repo: ref.repo, basehead: `${base}...${head}` },
     );
     recordGithubMetric("repo.compare", "ok", ref);
-    const data = res.data as {
-      ahead_by?: number;
-      behind_by?: number;
-      total_commits?: number;
-      commits?: Array<{ sha?: string; parents?: Array<{ sha?: string }> }>;
-      merge_base_commit?: { commit?: { committer?: { date?: string } } };
-    };
+    const data = res.data as ComparePayload;
     const commits = (data.commits ?? []).filter(
-      (c): c is { sha: string; parents?: Array<{ sha?: string }> } =>
+      (c): c is CompareCommitPayload =>
         typeof c.sha === "string" && c.sha.length > 0,
     );
-    const commitShas = commits.map((c) => c.sha);
+    const commitShas = commits.map((c) => c.sha as string);
     const commitParents: Record<string, string[]> = {};
+    const commitMessages: Record<string, string> = {};
     for (const c of commits) {
-      commitParents[c.sha] = (c.parents ?? [])
+      const sha = c.sha as string;
+      commitParents[sha] = (c.parents ?? [])
         .map((p) => p.sha)
         .filter((s): s is string => typeof s === "string" && s.length > 0);
+      const message = c.commit?.message;
+      if (typeof message === "string") commitMessages[sha] = message;
     }
+    const files = (data.files ?? [])
+      .filter((f) => typeof f.filename === "string" && f.filename.length > 0)
+      .map((f) => ({
+        filename: f.filename as string,
+        previousFilename: f.previous_filename ?? null,
+        status: f.status ?? "modified",
+        additions: f.additions ?? 0,
+        deletions: f.deletions ?? 0,
+        patch: f.patch ?? null,
+      }));
     return {
       aheadBy: data.ahead_by ?? 0,
       behindBy: data.behind_by ?? 0,
       mergeBaseDate: data.merge_base_commit?.commit?.committer?.date ?? null,
       commitShas,
       commitParents,
+      commitMessages,
+      files,
+      // GitHub caps the inline file list at 300 and does not say so in the
+      // payload, so the cap itself is the signal.
+      filesTruncated: files.length >= COMPARE_FILE_CAP,
       truncated: (data.total_commits ?? commitShas.length) > commitShas.length,
     };
   } catch (e) {
