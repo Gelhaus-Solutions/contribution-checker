@@ -1,10 +1,18 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ChevronDown, ChevronRight, ExternalLink } from "lucide-react";
+import { ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { StatusBadge } from "@/components/status-badge";
 import { EmptyState } from "@/components/empty-state";
 import { useActionFeedback } from "@/components/ui/use-action-feedback";
@@ -34,11 +42,27 @@ export type QaBoardItem = {
 
 type Filter = "open" | "all" | "failed";
 
+/** A verdict the reviewer has asked for but not yet confirmed. */
+type Pending = { item: QaBoardItem; status: QaStatus };
+
+const VERB: Record<string, string> = {
+  QA_PASSED: "Mark as passed",
+  QA_FAILED: "Mark as failed",
+  QA_SKIPPED: "Skip",
+  QA_PENDING: "Reset to not verified",
+  QA_IN_REVIEW: "Claim",
+};
+
 /**
  * The board. Verdicts are per-row and immediate, so this calls the server
  * actions directly through `useActionFeedback` rather than wrapping every row
- * in a form: a checklist that needed a full page navigation per tick would not
- * get used on a thirty-item batch.
+ * in a form: a checklist needing a page navigation per tick would not get used
+ * on a thirty-item batch.
+ *
+ * Every verdict is confirmed before it is sent. These rows sit next to each
+ * other and the buttons are small, so a misclick is the likely error, and the
+ * consequence of one is a release that claims somebody verified something they
+ * never opened.
  */
 export function QaBoard({
   projectId,
@@ -52,8 +76,8 @@ export function QaBoard({
   canVerify: boolean;
 }) {
   const [filter, setFilter] = useState<Filter>("open");
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  const [failing, setFailing] = useState<string | null>(null);
+  const [detail, setDetail] = useState<QaBoardItem | null>(null);
+  const [pending, setPending] = useState<Pending | null>(null);
   const [note, setNote] = useState("");
   const [error, setError] = useState<string | null>(null);
   const fb = useActionFeedback<string>();
@@ -81,14 +105,28 @@ export function QaBoard({
 
   const droppedCount = items.filter((i) => i.droppedAt).length;
 
-  async function apply(item: QaBoardItem, status: QaStatus, notes?: string) {
+  function ask(item: QaBoardItem, status: QaStatus) {
+    setError(null);
+    setNote(status === "QA_FAILED" ? (item.qaNotes ?? "") : "");
+    setPending({ item, status });
+  }
+
+  async function confirm() {
+    if (!pending) return;
+    const { item, status } = pending;
     setError(null);
     try {
       await fb.run(item.id, () =>
-        setQaStatus({ projectId, itemIds: [item.id], status, notes }),
+        setQaStatus({
+          projectId,
+          itemIds: [item.id],
+          status,
+          notes: note.trim() || undefined,
+        }),
       );
-      setFailing(null);
+      setPending(null);
       setNote("");
+      setDetail(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not save that verdict.");
     }
@@ -119,7 +157,7 @@ export function QaBoard({
         ) : null}
       </div>
 
-      {error ? (
+      {error && !detail ? (
         <p className="border-b border-border bg-destructive/10 px-4 py-2 text-xs text-destructive-strong">
           {error}
         </p>
@@ -143,219 +181,417 @@ export function QaBoard({
         />
       ) : (
         <ul className="divide-y divide-border">
-          {visible.map((item) => {
-            const open = expanded.has(item.id);
-            const busy = fb.isLoading(item.id);
-            return (
-              <li
-                key={item.id}
-                className={cn("px-4 py-3", item.droppedAt && "opacity-60")}
-              >
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <StatusBadge status={item.qaStatus} />
-                      {item.prNumber != null ? (
-                        <a
-                          href={`https://github.com/${repoFullName}/pull/${item.prNumber}`}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="font-mono text-xs text-primary hover:underline"
-                        >
-                          #{item.prNumber}
-                        </a>
-                      ) : (
-                        <Badge variant="outline" className="text-[10px]">
-                          Standing check
-                        </Badge>
-                      )}
-                      <span className="truncate text-sm font-medium">
-                        {item.title}
+          {visible.map((item) => (
+            <li
+              key={item.id}
+              className={cn("px-4 py-3", item.droppedAt && "opacity-60")}
+            >
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <button
+                  type="button"
+                  onClick={() => setDetail(item)}
+                  className="min-w-0 flex-1 text-left"
+                >
+                  <span className="flex flex-wrap items-center gap-2">
+                    <StatusBadge status={item.qaStatus} />
+                    {item.prNumber != null ? (
+                      <span className="font-mono text-xs text-muted-foreground">
+                        #{item.prNumber}
                       </span>
-                    </div>
-
-                    <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                      {item.authorLogin ? <span>@{item.authorLogin}</span> : null}
-                      {item.mergedAt ? <span>merged {item.mergedAt}</span> : null}
-                      {item.linkedIssues.map((n) => (
-                        <a
-                          key={n}
-                          href={`https://github.com/${repoFullName}/issues/${n}`}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="hover:text-foreground"
-                        >
-                          closes #{n}
-                        </a>
-                      ))}
-                      {item.labels.slice(0, 4).map((l) => (
-                        <Badge key={l} variant="secondary" className="text-[10px]">
-                          {l}
-                        </Badge>
-                      ))}
-                      {item.externalUrl ? (
-                        <a
-                          href={item.externalUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="inline-flex items-center gap-0.5 hover:text-foreground"
-                        >
-                          card <ExternalLink className="size-3" aria-hidden="true" />
-                        </a>
-                      ) : null}
-                    </div>
-
-                    {item.qaBy ? (
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        {item.qaStatus === "QA_FAILED" ? "Failed" : "Handled"} by{" "}
-                        {item.qaBy}
-                        {item.qaAt ? ` ${item.qaAt}` : ""}
-                        {item.qaNotes ? `: ${item.qaNotes}` : ""}
-                      </p>
+                    ) : (
+                      <Badge variant="outline" className="text-[10px]">
+                        Standing check
+                      </Badge>
+                    )}
+                    <span className="truncate text-sm font-medium hover:text-primary">
+                      {item.title}
+                    </span>
+                  </span>
+                  <span className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                    {item.authorLogin ? <span>@{item.authorLogin}</span> : null}
+                    {item.mergedAt ? <span>merged {item.mergedAt}</span> : null}
+                    {item.qaSteps ? (
+                      <Badge variant="secondary" className="text-[10px]">
+                        has QA steps
+                      </Badge>
                     ) : null}
-
-                    {item.summary || item.qaSteps ? (
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setExpanded((prev) => {
-                            const next = new Set(prev);
-                            if (next.has(item.id)) next.delete(item.id);
-                            else next.add(item.id);
-                            return next;
-                          })
-                        }
-                        className="mt-1.5 inline-flex items-center gap-0.5 text-xs text-muted-foreground hover:text-foreground"
-                      >
-                        {open ? (
-                          <ChevronDown className="size-3" aria-hidden="true" />
-                        ) : (
-                          <ChevronRight className="size-3" aria-hidden="true" />
-                        )}
-                        {item.qaSteps ? "How to test" : "What this is"}
-                      </button>
+                    {item.linkedIssues.length > 0 ? (
+                      <span>closes #{item.linkedIssues.join(", #")}</span>
                     ) : null}
+                  </span>
+                  {item.qaBy ? (
+                    <span className="mt-1 block text-xs text-muted-foreground">
+                      {item.qaStatus === "QA_FAILED" ? "Failed" : "Handled"} by{" "}
+                      {item.qaBy}
+                      {item.qaAt ? ` ${item.qaAt}` : ""}
+                      {item.qaNotes ? `: ${item.qaNotes}` : ""}
+                    </span>
+                  ) : null}
+                </button>
 
-                    {open ? (
-                      <div className="mt-2 space-y-2 rounded-md bg-muted/40 p-3 text-xs">
-                        {item.summary ? (
-                          <p className="text-muted-foreground">{item.summary}</p>
-                        ) : null}
-                        {item.qaSteps ? (
-                          <pre className="whitespace-pre-wrap font-sans text-foreground">
-                            {item.qaSteps}
-                          </pre>
-                        ) : (
-                          <p className="text-muted-foreground">
-                            The author left no testing notes. Add a{" "}
-                            <code>## QA</code> section to the PR description to
-                            see them here.
-                          </p>
-                        )}
-                      </div>
-                    ) : null}
-                  </div>
-
+                <div className="flex shrink-0 flex-wrap gap-1.5">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setDetail(item)}
+                  >
+                    Details
+                  </Button>
                   {canVerify && !item.droppedAt ? (
-                    <div className="flex shrink-0 flex-wrap gap-1.5">
-                      {item.qaStatus === "QA_PENDING" ? (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={busy}
-                          onClick={() => apply(item, "QA_IN_REVIEW")}
-                        >
-                          Claim
-                        </Button>
-                      ) : null}
-                      <Button
-                        size="sm"
-                        loading={busy}
-                        success={fb.isSuccess(item.id)}
-                        disabled={busy || item.qaStatus === "QA_PASSED"}
-                        onClick={() => apply(item, "QA_PASSED")}
-                      >
-                        Pass
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        disabled={busy}
-                        onClick={() => {
-                          setFailing(failing === item.id ? null : item.id);
-                          setNote(item.qaNotes ?? "");
-                        }}
-                      >
-                        Fail
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        disabled={busy || item.qaStatus === "QA_SKIPPED"}
-                        onClick={() => apply(item, "QA_SKIPPED")}
-                      >
-                        Skip
-                      </Button>
-                      {item.qaStatus !== "QA_PENDING" ? (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          disabled={busy}
-                          onClick={() => apply(item, "QA_PENDING")}
-                        >
-                          Reset
-                        </Button>
-                      ) : null}
-                    </div>
+                    <Actions
+                      item={item}
+                      busy={fb.isLoading(item.id)}
+                      onPick={ask}
+                    />
                   ) : null}
                 </div>
-
-                {failing === item.id ? (
-                  <div className="mt-3 space-y-2 rounded-md border border-border p-3">
-                    <label
-                      htmlFor={`note-${item.id}`}
-                      className="block text-xs font-medium"
-                    >
-                      What went wrong?
-                    </label>
-                    <p className="text-xs text-muted-foreground">
-                      This goes to the release PR and onto the PR that failed, so
-                      write it for whoever has to fix it.
-                    </p>
-                    <Textarea
-                      id={`note-${item.id}`}
-                      rows={3}
-                      value={note}
-                      onChange={(e) => setNote(e.target.value)}
-                      placeholder="Checkout 500s on an empty cart."
-                    />
-                    <div className="flex gap-2">
-                      <Button
-                        size="sm"
-                        variant="destructive"
-                        disabled={busy || note.trim().length === 0}
-                        onClick={() => apply(item, "QA_FAILED", note)}
-                      >
-                        Mark failed
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => {
-                          setFailing(null);
-                          setNote("");
-                        }}
-                      >
-                        Cancel
-                      </Button>
-                    </div>
-                  </div>
-                ) : null}
-              </li>
-            );
-          })}
+              </div>
+            </li>
+          ))}
         </ul>
       )}
+
+      {detail ? (
+        <DetailDialog
+          item={detail}
+          repoFullName={repoFullName}
+          canVerify={canVerify && !detail.droppedAt}
+          busy={fb.isLoading(detail.id)}
+          error={error}
+          onPick={ask}
+          onClose={() => {
+            setDetail(null);
+            setError(null);
+          }}
+        />
+      ) : null}
+
+      {pending ? (
+        <ConfirmDialog
+          pending={pending}
+          note={note}
+          setNote={setNote}
+          busy={fb.isLoading(pending.item.id)}
+          error={error}
+          onConfirm={confirm}
+          onCancel={() => {
+            setPending(null);
+            setNote("");
+            setError(null);
+          }}
+        />
+      ) : null}
     </div>
+  );
+}
+
+function Actions({
+  item,
+  busy,
+  onPick,
+}: {
+  item: QaBoardItem;
+  busy: boolean;
+  onPick: (item: QaBoardItem, status: QaStatus) => void;
+}) {
+  return (
+    <>
+      {item.qaStatus === "QA_PENDING" ? (
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={busy}
+          onClick={() => onPick(item, "QA_IN_REVIEW")}
+        >
+          Claim
+        </Button>
+      ) : null}
+      <Button
+        size="sm"
+        disabled={busy || item.qaStatus === "QA_PASSED"}
+        onClick={() => onPick(item, "QA_PASSED")}
+      >
+        Pass
+      </Button>
+      <Button
+        size="sm"
+        variant="outline"
+        disabled={busy}
+        onClick={() => onPick(item, "QA_FAILED")}
+      >
+        Fail
+      </Button>
+      <Button
+        size="sm"
+        variant="ghost"
+        disabled={busy || item.qaStatus === "QA_SKIPPED"}
+        onClick={() => onPick(item, "QA_SKIPPED")}
+      >
+        Skip
+      </Button>
+      {item.qaStatus !== "QA_PENDING" ? (
+        <Button
+          size="sm"
+          variant="ghost"
+          disabled={busy}
+          onClick={() => onPick(item, "QA_PENDING")}
+        >
+          Reset
+        </Button>
+      ) : null}
+    </>
+  );
+}
+
+/** Everything known about one item, so a reviewer does not have to open GitHub
+ * to find out what they are being asked to verify. */
+function DetailDialog({
+  item,
+  repoFullName,
+  canVerify,
+  busy,
+  error,
+  onPick,
+  onClose,
+}: {
+  item: QaBoardItem;
+  repoFullName: string;
+  canVerify: boolean;
+  busy: boolean;
+  error: string | null;
+  onPick: (item: QaBoardItem, status: QaStatus) => void;
+  onClose: () => void;
+}) {
+  const prUrl =
+    item.prNumber != null
+      ? `https://github.com/${repoFullName}/pull/${item.prNumber}`
+      : null;
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent width="xl">
+        <DialogHeader>
+          <DialogTitle>
+            <span className="flex flex-wrap items-center gap-2">
+              <StatusBadge status={item.qaStatus} />
+              {item.prNumber != null ? (
+                <span className="font-mono text-sm text-muted-foreground">
+                  #{item.prNumber}
+                </span>
+              ) : null}
+              <span>{item.title}</span>
+            </span>
+          </DialogTitle>
+          <DialogDescription>
+            {item.authorLogin ? `by @${item.authorLogin}` : "Standing check"}
+            {item.mergedAt ? ` · merged ${item.mergedAt}` : ""}
+          </DialogDescription>
+        </DialogHeader>
+
+        <DialogBody className="space-y-4">
+          {item.droppedAt ? (
+            <p className="rounded-md bg-muted/50 p-3 text-xs text-muted-foreground">
+              This is no longer part of the batch: its merge reached the default
+              branch by another route on {item.droppedAt}. The verdict is kept
+              for the record.
+            </p>
+          ) : null}
+
+          <div className="flex flex-wrap gap-2">
+            {prUrl ? (
+              <a
+                href={prUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
+              >
+                Open the PR
+                <ExternalLink className="size-3" aria-hidden="true" />
+              </a>
+            ) : null}
+            {item.externalUrl ? (
+              <a
+                href={item.externalUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
+              >
+                Open the card
+                <ExternalLink className="size-3" aria-hidden="true" />
+              </a>
+            ) : null}
+            {item.linkedIssues.map((n) => (
+              <a
+                key={n}
+                href={`https://github.com/${repoFullName}/issues/${n}`}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
+              >
+                closes #{n}
+                <ExternalLink className="size-3" aria-hidden="true" />
+              </a>
+            ))}
+          </div>
+
+          {item.labels.length > 0 ? (
+            <div className="flex flex-wrap gap-1.5">
+              {item.labels.map((l) => (
+                <Badge key={l} variant="secondary" className="text-[10px]">
+                  {l}
+                </Badge>
+              ))}
+            </div>
+          ) : null}
+
+          <section className="space-y-1.5">
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              What this is
+            </h3>
+            <p className="text-sm">
+              {item.summary ?? (
+                <span className="text-muted-foreground">
+                  The PR description had no summary paragraph.
+                </span>
+              )}
+            </p>
+          </section>
+
+          <section className="space-y-1.5">
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              How to test
+            </h3>
+            {item.qaSteps ? (
+              <pre className="whitespace-pre-wrap rounded-md bg-muted/40 p-3 font-sans text-sm">
+                {item.qaSteps}
+              </pre>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                The author left no testing notes. Add a <code>## QA</code>{" "}
+                section to the PR description and they appear here.
+              </p>
+            )}
+          </section>
+
+          {item.qaBy ? (
+            <section className="space-y-1.5">
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Verdict
+              </h3>
+              <p className="text-sm">
+                {item.qaStatus === "QA_FAILED" ? "Failed" : "Handled"} by{" "}
+                {item.qaBy}
+                {item.qaAt ? ` ${item.qaAt}` : ""}
+                {item.qaNotes ? `: ${item.qaNotes}` : ""}
+              </p>
+            </section>
+          ) : null}
+
+          {error ? (
+            <p className="text-sm text-destructive-strong">{error}</p>
+          ) : null}
+
+          {canVerify ? (
+            <div className="flex flex-wrap gap-1.5 border-t border-border pt-4">
+              <Actions item={item} busy={busy} onPick={onPick} />
+            </div>
+          ) : null}
+        </DialogBody>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/**
+ * Confirm before the verdict is sent.
+ *
+ * A failure additionally requires a reason, because the note is what reaches
+ * the release PR and the PR that failed. The server enforces the same rule, so
+ * this is a courtesy rather than the guard.
+ */
+function ConfirmDialog({
+  pending,
+  note,
+  setNote,
+  busy,
+  error,
+  onConfirm,
+  onCancel,
+}: {
+  pending: Pending;
+  note: string;
+  setNote: (v: string) => void;
+  busy: boolean;
+  error: string | null;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  const { item, status } = pending;
+  const failing = status === "QA_FAILED";
+  const name =
+    item.prNumber != null ? `#${item.prNumber} ${item.title}` : item.title;
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onCancel()}>
+      <DialogContent width="md">
+        <DialogHeader>
+          <DialogTitle>{VERB[status] ?? "Update"}</DialogTitle>
+          <DialogDescription>{name}</DialogDescription>
+        </DialogHeader>
+        <DialogBody className="space-y-3">
+          {failing ? (
+            <>
+              <label
+                htmlFor="qa-confirm-note"
+                className="block text-sm font-medium"
+              >
+                What went wrong?
+              </label>
+              <p className="text-xs text-muted-foreground">
+                This goes onto the release PR and onto the PR that failed, so
+                write it for whoever has to fix it.
+              </p>
+              <Textarea
+                id="qa-confirm-note"
+                rows={3}
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+                placeholder="Checkout 500s on an empty cart."
+                autoFocus
+              />
+            </>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              {status === "QA_PASSED"
+                ? "This counts toward the release gate: once everything is resolved and nothing failed, the batch is clear to ship."
+                : status === "QA_SKIPPED"
+                  ? "Skipping counts as resolved. Use it when there is genuinely nothing to verify, not when nobody has got to it yet."
+                  : status === "QA_PENDING"
+                    ? "This clears the existing verdict and who recorded it."
+                    : "You are marking yourself as the person verifying this."}
+            </p>
+          )}
+
+          {error ? (
+            <p className="text-sm text-destructive-strong">{error}</p>
+          ) : null}
+
+          <div className="flex gap-2 pt-1">
+            <Button
+              size="sm"
+              variant={failing ? "destructive" : "default"}
+              loading={busy}
+              disabled={busy || (failing && note.trim().length === 0)}
+              onClick={onConfirm}
+            >
+              {VERB[status] ?? "Confirm"}
+            </Button>
+            <Button size="sm" variant="ghost" disabled={busy} onClick={onCancel}>
+              Cancel
+            </Button>
+          </div>
+        </DialogBody>
+      </DialogContent>
+    </Dialog>
   );
 }
