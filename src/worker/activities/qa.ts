@@ -2,6 +2,14 @@ import { logger } from "@/lib/logger";
 import { syncQaBoards } from "@/lib/qa/board/sync";
 import { signalStagingBatch } from "@/lib/temporal/start";
 import { prisma } from "@/lib/db";
+import {
+  getPullRequest,
+  repoRef,
+  updatePullRequestBody,
+} from "@/lib/github/pr-actions";
+import { toggleTaskInBody } from "@/lib/qa/tasks";
+import { extractQaSteps } from "@/lib/qa/extract";
+import type { QaTaskToggleResult } from "@/lib/temporal/contracts";
 
 /**
  * Activities for the external QA board mirror.
@@ -55,4 +63,74 @@ export async function signalStagingReconcile(args: {
   reason: string;
 }): Promise<void> {
   await signalStagingBatch({ repoId: args.repoId, reason: args.reason });
+}
+
+/**
+ * Tick or untick one checkbox in a PR's `## QA` section.
+ *
+ * Reads the body live rather than trusting the copy on the item row: somebody
+ * may have edited the description since the board rendered, and the whole point
+ * of the `expectedText` guard is to notice that instead of ticking whatever
+ * happens to sit at that index now.
+ *
+ * The local `qaSteps` is refreshed from the body we just wrote, so the board and
+ * the external cards reflect the tick immediately instead of waiting for the
+ * next reconcile. A reconcile would re-derive the same value anyway, which is
+ * what makes a failed write here self-correcting.
+ */
+export async function toggleQaTask(args: {
+  itemId: string;
+  index: number;
+  expectedText: string;
+  checked: boolean;
+}): Promise<QaTaskToggleResult> {
+  const item = await prisma.stagingBatchItem.findUnique({
+    where: { id: args.itemId },
+    select: {
+      id: true,
+      prNumber: true,
+      batch: {
+        select: {
+          repo: { select: { fullName: true, installationId: true } },
+        },
+      },
+    },
+  });
+  if (!item || item.prNumber == null) return { ok: false, reason: "not_found" };
+
+  const { fullName, installationId } = item.batch.repo;
+  if (installationId == null) return { ok: false, reason: "not_found" };
+  const ref = repoRef(fullName, installationId);
+
+  const pr = await getPullRequest(ref, item.prNumber);
+  if (!pr) return { ok: false, reason: "not_found" };
+
+  const result = toggleTaskInBody({
+    body: pr.body ?? "",
+    index: args.index,
+    expectedText: args.expectedText,
+    checked: args.checked,
+  });
+  if (!result.ok) {
+    // `unchanged` is not a failure: two reviewers clicking the same box land
+    // here, and the state they wanted is the state that exists.
+    if (result.reason === "unchanged") return { ok: true, steps: null };
+    logger.info(
+      { itemId: args.itemId, prNumber: item.prNumber, reason: result.reason },
+      "qa task toggle refused",
+    );
+    return { ok: false, reason: result.reason };
+  }
+
+  await updatePullRequestBody(ref, item.prNumber, result.body);
+
+  const steps = extractQaSteps(result.body);
+  await prisma.stagingBatchItem.update({
+    where: { id: item.id },
+    // The external card carries the steps, so clearing the hash makes the next
+    // board sync push the tick out to Notion and Trello.
+    data: { qaSteps: steps, externalHash: null },
+  });
+
+  return { ok: true, steps };
 }

@@ -6,7 +6,11 @@ import { prisma } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { recordAudit } from "@/lib/audit";
 import { requireProjectRole } from "@/lib/authz";
-import { signalQaBoardSync, signalStagingBatch } from "@/lib/temporal/start";
+import {
+  runQaTaskToggle,
+  signalQaBoardSync,
+  signalStagingBatch,
+} from "@/lib/temporal/start";
 import { notifyProjectReviewers } from "@/lib/notifications/inbox";
 import { countQa, isGreen, parseQaStatus, QA_STATUSES } from "@/lib/qa/types";
 import { adapterFor, boardCallbackUrl } from "@/lib/qa/board/sync";
@@ -361,4 +365,76 @@ export async function unlinkQaBoard(args: {
   });
 
   revalidatePath(`/dashboard/projects/${parsed.projectId}/qa`);
+}
+
+// ===== QA step checkboxes =====
+
+const toggleStepSchema = z.object({
+  projectId: z.string().min(1),
+  itemId: z.string().min(1),
+  index: z.number().int().min(0).max(200),
+  expectedText: z.string().min(1).max(500),
+  checked: z.boolean(),
+});
+
+export type ToggleQaStepResult =
+  | { ok: true; steps: string | null }
+  | { ok: false; error: string };
+
+/**
+ * Tick one of the author's `## QA` steps, and write it back to the PR.
+ *
+ * The PR body is the source of truth for these, not a local column: that is
+ * what makes a box ticked on GitHub show up here, and it means there is no
+ * second copy to drift. The write goes through Temporal like every other GitHub
+ * side effect outside the webhook path.
+ */
+export async function toggleQaStep(args: {
+  projectId: string;
+  itemId: string;
+  index: number;
+  expectedText: string;
+  checked: boolean;
+}): Promise<ToggleQaStepResult> {
+  const parsed = toggleStepSchema.parse(args);
+  await requireProjectRole(parsed.projectId, "REVIEWER");
+
+  // Scoped through the batch to the repo to the project, so an item id from
+  // another project cannot be written by guessing it.
+  const item = await prisma.stagingBatchItem.findFirst({
+    where: {
+      id: parsed.itemId,
+      batch: { repo: { projectId: parsed.projectId } },
+    },
+    select: { id: true, batch: { select: { repoId: true } } },
+  });
+  if (!item) return { ok: false, error: "That item is not in this project." };
+
+  const result = await runQaTaskToggle({
+    itemId: item.id,
+    index: parsed.index,
+    expectedText: parsed.expectedText,
+    checked: parsed.checked,
+  });
+
+  if (!result.ok) {
+    return {
+      ok: false,
+      error:
+        result.reason === "text_moved"
+          ? "The PR description changed since this page loaded. Reload to see the current steps."
+          : result.reason === "no_section"
+            ? "That PR no longer has a QA section."
+            : "Could not find that step on the PR any more.",
+    };
+  }
+
+  // Push the tick out to Notion and Trello, which carry the steps on the card.
+  await signalQaBoardSync({
+    repoId: item.batch.repoId,
+    reason: "qa_step_toggled",
+  });
+
+  revalidatePath(`/dashboard/projects/${parsed.projectId}/qa`);
+  return { ok: true, steps: result.steps };
 }

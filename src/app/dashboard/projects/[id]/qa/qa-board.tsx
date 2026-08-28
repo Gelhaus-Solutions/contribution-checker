@@ -14,11 +14,13 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { StatusBadge } from "@/components/status-badge";
+import { Markdown } from "@/components/markdown";
 import { EmptyState } from "@/components/empty-state";
 import { useActionFeedback } from "@/components/ui/use-action-feedback";
 import { cn } from "@/lib/cn";
 import type { QaStatus } from "@/lib/qa/types";
-import { setQaStatus } from "./actions";
+import { setQaStatus, toggleQaStep } from "./actions";
+import { parseTasks, taskProgress } from "@/lib/qa/tasks";
 
 export type QaBoardItem = {
   id: string;
@@ -210,11 +212,7 @@ export function QaBoard({
                   <span className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                     {item.authorLogin ? <span>@{item.authorLogin}</span> : null}
                     {item.mergedAt ? <span>merged {item.mergedAt}</span> : null}
-                    {item.qaSteps ? (
-                      <Badge variant="secondary" className="text-[10px]">
-                        has QA steps
-                      </Badge>
-                    ) : null}
+                    <StepBadge steps={item.qaSteps} />
                     {item.linkedIssues.length > 0 ? (
                       <span>closes #{item.linkedIssues.join(", #")}</span>
                     ) : null}
@@ -253,6 +251,7 @@ export function QaBoard({
 
       {detail ? (
         <DetailDialog
+          projectId={projectId}
           item={detail}
           repoFullName={repoFullName}
           canVerify={canVerify && !detail.droppedAt}
@@ -346,6 +345,7 @@ function Actions({
 /** Everything known about one item, so a reviewer does not have to open GitHub
  * to find out what they are being asked to verify. */
 function DetailDialog({
+  projectId,
   item,
   repoFullName,
   canVerify,
@@ -354,6 +354,7 @@ function DetailDialog({
   onPick,
   onClose,
 }: {
+  projectId: string;
   item: QaBoardItem;
   repoFullName: string;
   canVerify: boolean;
@@ -462,9 +463,11 @@ function DetailDialog({
               How to test
             </h3>
             {item.qaSteps ? (
-              <pre className="whitespace-pre-wrap rounded-md bg-muted/40 p-3 font-sans text-sm">
-                {item.qaSteps}
-              </pre>
+              <QaSteps
+                projectId={projectId}
+                item={item}
+                canVerify={canVerify}
+              />
             ) : (
               <p className="text-sm text-muted-foreground">
                 The author left no testing notes. Add a <code>## QA</code>{" "}
@@ -593,5 +596,127 @@ function ConfirmDialog({
         </DialogBody>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/**
+ * The author's QA steps, interactive when they wrote them as a task list.
+ *
+ * Ticking a box writes straight back to the PR description, because that is
+ * where these live. There is no local copy of the state to drift: the checkbox
+ * characters are in the body, so a box ticked on GitHub shows up here and one
+ * ticked here shows up there, without either side owning a second answer.
+ *
+ * The rendered text is kept in local state only so the click feels immediate;
+ * the server returns the freshly-derived steps and the next reconcile would
+ * re-derive the same thing anyway.
+ */
+function QaSteps({
+  projectId,
+  item,
+  canVerify,
+}: {
+  projectId: string;
+  item: QaBoardItem;
+  canVerify: boolean;
+}) {
+  const [steps, setSteps] = useState(item.qaSteps ?? "");
+  const [busy, setBusy] = useState<number | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const tasks = useMemo(() => parseTasks(steps), [steps]);
+  const progress = useMemo(() => taskProgress(tasks), [tasks]);
+
+  async function toggle(index: number, text: string, checked: boolean) {
+    setError(null);
+    setBusy(index);
+    try {
+      const result = await toggleQaStep({
+        projectId,
+        itemId: item.id,
+        index,
+        expectedText: text,
+        checked,
+      });
+      if (result.ok) {
+        if (result.steps != null) setSteps(result.steps);
+      } else {
+        setError(result.error);
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not update that step.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  // No task list: the author wrote prose or a numbered list, so render it as
+  // the markdown it is and leave it alone.
+  if (tasks.length === 0) {
+    return <Markdown source={steps} className="rounded-md bg-muted/40 p-3" />;
+  }
+
+  return (
+    <div className="space-y-2">
+      <p className="text-xs text-muted-foreground">
+        {progress.done} of {progress.total} steps done. Ticking a box updates
+        the PR description.
+      </p>
+      <ul className="space-y-1.5 rounded-md bg-muted/40 p-3">
+        {tasks.map((task) => (
+          <li key={`${task.index}:${task.text}`}>
+            <label
+              className={cn(
+                "flex items-start gap-2 text-sm",
+                canVerify ? "cursor-pointer" : "cursor-default",
+              )}
+            >
+              <input
+                type="checkbox"
+                checked={task.checked}
+                disabled={!canVerify || busy !== null}
+                onChange={(e) =>
+                  toggle(task.index, task.text, e.target.checked)
+                }
+                className="mt-0.5 h-4 w-4 rounded border-border accent-primary"
+              />
+              <span
+                className={cn(
+                  task.checked && "text-muted-foreground line-through",
+                  busy === task.index && "opacity-50",
+                )}
+              >
+                {task.text}
+              </span>
+            </label>
+          </li>
+        ))}
+      </ul>
+      {error ? (
+        <p className="text-xs text-destructive-strong">{error}</p>
+      ) : null}
+    </div>
+  );
+}
+
+/** Step progress at a glance, so the list answers "how far in is this?"
+ * without opening every item. */
+function StepBadge({ steps }: { steps: string | null }) {
+  const progress = useMemo(() => taskProgress(parseTasks(steps)), [steps]);
+  if (progress.total === 0) {
+    return steps ? (
+      <Badge variant="secondary" className="text-[10px]">
+        has QA steps
+      </Badge>
+    ) : null;
+  }
+  const done = progress.done === progress.total;
+  return (
+    <Badge
+      variant={done ? "success" : "secondary"}
+      className="text-[10px]"
+    >
+      {progress.done}/{progress.total} steps
+    </Badge>
   );
 }

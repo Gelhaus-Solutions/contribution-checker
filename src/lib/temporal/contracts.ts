@@ -23,6 +23,7 @@ export const WF = {
   processInstallation: "processInstallation",
   stagingBatch: "stagingBatch",
   qaBoardSync: "qaBoardSync",
+  qaTaskToggle: "qaTaskToggle",
   ciCheckPr: "ciCheckPr",
   ciReconcile: "ciReconcile",
   outboundWebhookDelivery: "outboundWebhookDelivery",
@@ -387,6 +388,20 @@ export const QA_BOARD_SYNC_DEBOUNCE = "5 seconds";
  * a release is waiting, and costs two API calls per repo per interval.
  */
 export const QA_BOARD_POLL_INTERVAL_MS = 5 * 60_000;
+
+/** Tick or untick one checkbox in a PR's QA section. */
+export type QaTaskToggleInput = {
+  itemId: string;
+  index: number;
+  /** The step text as the board rendered it, so a description edited in the
+   * meantime is detected instead of ticking whatever moved into that slot. */
+  expectedText: string;
+  checked: boolean;
+};
+
+export type QaTaskToggleResult =
+  | { ok: true; steps: string | null }
+  | { ok: false; reason: "no_section" | "not_found" | "text_moved" };
 
 export type ProcessMergeGroupInput = { payload: unknown };
 export type ProcessPushInput = { payload: unknown };

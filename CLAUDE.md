@@ -226,6 +226,16 @@ QA on the staging batch (`src/lib/qa/`, App mode only):
   batch that was already fully verified is the accident this exists to stop: the
   release looked ready, somebody merged one more PR, and nothing on GitHub says
   the answer changed. It drives `qa.items_added`.
+- **QA step checkboxes live in the PR body, not in our database.** When an
+  author writes their `## QA` section as a task list, the board renders it
+  interactively and a tick rewrites that one checkbox character in the PR
+  description (`src/lib/qa/tasks.ts`, through the `qaTaskToggle` workflow).
+  There is deliberately no local per-step column: GitHub is the single answer,
+  so a box ticked there shows up here for free, a failed write self-heals on the
+  next reconcile, and there is no second copy to drift. The rewrite is surgical
+  and bounded to the QA section, so it can never reach the contributor checklist
+  below it, and `expectedText` refuses the write when the description moved
+  under the reviewer rather than ticking whatever slid into that index.
 - **A PR body edit re-derives the record.** `handlePullRequestEvent` lets
   `edited` through when `changes.body` is present, because the `## QA` section
   is routinely written *after* the PR merged and that event is the only signal

@@ -21,6 +21,8 @@ import type {
   CiReconcileInput,
   GithubEventEnvelope,
   OutboundWebhookInput,
+  QaTaskToggleInput,
+  QaTaskToggleResult,
   QualityBackfillInput,
   QualityBackfillResult,
   ReGatePayload,
@@ -220,6 +222,26 @@ export async function signalQaBoardSync(args: {
       "signalQaBoardSync failed"
     );
   }
+}
+
+/**
+ * Tick one QA checkbox and wait for the answer.
+ *
+ * Synchronous, unlike the other staging starters, because a reviewer is looking
+ * at the checkbox: reporting "the description changed, reload" is the whole
+ * value of the guard, and a fire-and-forget write could only revert the tick
+ * silently on the next reconcile.
+ */
+export async function runQaTaskToggle(
+  input: QaTaskToggleInput
+): Promise<QaTaskToggleResult> {
+  const client = await getTemporalClient();
+  const handle = await client.workflow.start(WF.qaTaskToggle, {
+    workflowId: workflowIds.qaTaskToggle(input.itemId, randomUUID()),
+    taskQueue: TASK_QUEUE,
+    args: [input],
+  });
+  return handle.result() as Promise<QaTaskToggleResult>;
 }
 
 export async function dispatchMergeGroupEvent(

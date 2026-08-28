@@ -20,6 +20,8 @@ import type {
   QaBoardSyncInput,
   QaBoardSyncPayload,
   QaBoardSyncState,
+  QaTaskToggleInput,
+  QaTaskToggleResult,
 } from "../../lib/temporal/contracts";
 
 const qaBoardSyncSignal = defineSignal<[QaBoardSyncPayload]>(SIG.qaBoardSync);
@@ -114,4 +116,22 @@ export async function qaBoardSync(
     dirty,
     lastReason,
   });
+}
+
+/**
+ * One checkbox tick, written to the PR body.
+ *
+ * A workflow for a single activity call looks like overhead, and it buys the
+ * house rule: GitHub side effects outside the webhook path go through Temporal,
+ * so a write that fails mid-flight is retried by the same machinery as every
+ * other one rather than being lost with the request that started it.
+ *
+ * The caller awaits the result, because the reviewer clicked a box and deserves
+ * to be told when the description moved under them instead of watching the tick
+ * silently revert on the next reconcile.
+ */
+export async function qaTaskToggle(
+  input: QaTaskToggleInput,
+): Promise<QaTaskToggleResult> {
+  return acts.toggleQaTask(input);
 }

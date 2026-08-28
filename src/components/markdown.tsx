@@ -36,13 +36,52 @@ export function Markdown({
           p: ({ node: _n, ...props }) => (
             <p {...props} className="my-1 first:mt-0 last:mb-0" />
           ),
-          ul: ({ node: _n, ...props }) => (
-            <ul {...props} className="my-1 list-disc pl-5" />
+          // GitHub-flavoured task lists come through as `contains-task-list` /
+          // `task-list-item`, which the sanitize schema allowlists by exact
+          // value. Dropping the marker on those keeps the checkbox from sitting
+          // next to a redundant bullet.
+          ul: ({ node: _n, className: cls, ...props }) => (
+            <ul
+              {...props}
+              className={cn(
+                "my-1",
+                cls?.includes("contains-task-list")
+                  ? "list-none pl-1"
+                  : "list-disc pl-5",
+              )}
+            />
           ),
-          ol: ({ node: _n, ...props }) => (
-            <ol {...props} className="my-1 list-decimal pl-5" />
+          ol: ({ node: _n, className: cls, ...props }) => (
+            <ol
+              {...props}
+              className={cn(
+                "my-1",
+                cls?.includes("contains-task-list")
+                  ? "list-none pl-1"
+                  : "list-decimal pl-5",
+              )}
+            />
           ),
-          li: ({ node: _n, ...props }) => <li {...props} className="my-0.5" />,
+          li: ({ node: _n, className: cls, ...props }) => (
+            <li
+              {...props}
+              className={cn(
+                "my-0.5",
+                cls?.includes("task-list-item") && "list-none",
+              )}
+            />
+          ),
+          // The schema forces `disabled` and `type=checkbox`, so this can only
+          // ever be a task-list box. `readOnly` keeps React from warning about
+          // a `checked` prop with no handler.
+          input: ({ node: _n, ...props }) => (
+            <input
+              {...props}
+              disabled
+              readOnly
+              className="mr-1.5 align-middle accent-primary"
+            />
+          ),
           h1: ({ node: _n, ...props }) => (
             <h3 {...props} className="my-2 text-base font-semibold" />
           ),
