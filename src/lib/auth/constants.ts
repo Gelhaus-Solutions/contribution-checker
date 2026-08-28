@@ -197,6 +197,12 @@ export const NAV_PERMISSION: Record<string, ProjectLeafPermission> = {
   // member's cached ProjectMember.permissions valid: a brand-new leaf would be
   // absent from those rows until they resync, hiding the page from admins.
   "/staging": "project_settings_manage",
+  // QA is a reviewer activity, not an admin one, so it shares the leaf the PR
+  // list already uses rather than the settings leaf staging uses. Sharing an
+  // existing leaf for the same reason as above: a new leaf id would be missing
+  // from every current member's cached permissions until they resync, which
+  // would hide the board from exactly the people who run QA.
+  "/qa": "project_prs_view",
   "/settings": "project_settings_manage",
   "/audit": "project_audit_view",
 };

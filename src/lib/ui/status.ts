@@ -43,6 +43,15 @@ const TONE: Record<string, StatusTone> = {
   REVOKED: "secondary",
   DISPUTED: "destructive",
   SUPERSEDED: "secondary",
+
+  // QA on a staging batch. Prefixed rather than reusing PENDING/APPROVED/DENIED
+  // above: those are application verdicts, and PENDING already renders as
+  // "Not applied", which is nonsense on a release checklist.
+  QA_PENDING: "secondary",
+  QA_IN_REVIEW: "warning",
+  QA_PASSED: "success",
+  QA_FAILED: "destructive",
+  QA_SKIPPED: "outline",
 };
 
 /**
@@ -54,6 +63,11 @@ const LABEL: Record<string, string> = {
   SUBMITTED: "In review",
   CHECK_REQUIRED: "Check required",
   BYPASSED: "Bypassed",
+  QA_PENDING: "Not verified",
+  QA_IN_REVIEW: "Being verified",
+  QA_PASSED: "Verified",
+  QA_FAILED: "Failed",
+  QA_SKIPPED: "Skipped",
 };
 
 export function statusTone(status: string): StatusTone {

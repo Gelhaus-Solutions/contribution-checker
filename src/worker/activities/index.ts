@@ -8,5 +8,6 @@ export * from "./github";
 export * from "./applications";
 export * from "./webhook-delivery";
 export * from "./quality";
+export * from "./qa";
 export * from "./sweeps";
 export * from "./ci";

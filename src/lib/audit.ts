@@ -70,6 +70,14 @@ export type AuditKind =
   | "user.superadmin_revoked"
   | "vault.resolution_failed"
   | "vault.cache_invalidated"
+  // QA on the staging batch
+  | "qa.item_status_changed"
+  | "qa.item_reset"
+  | "qa.batch_shipped"
+  | "qa.settings_changed"
+  | "qa.board_linked"
+  | "qa.board_unlinked"
+  | "qa.board_sync_failed"
   // Temporal durable execution
   | "application.cooldown_elapsed"
   | "workflow.failed";

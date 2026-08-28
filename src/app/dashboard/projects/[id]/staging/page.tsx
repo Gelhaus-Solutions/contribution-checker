@@ -1,5 +1,6 @@
+import Link from "next/link";
 import { prisma } from "@/lib/db";
-import { requireProjectPermission } from "@/lib/authz";
+import { requireProjectPermission, roleAtLeast } from "@/lib/authz";
 import {
   Card,
   CardContent,
@@ -11,6 +12,7 @@ import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { SubmitButton } from "@/components/ui/submit-button";
 import { EmptyState } from "@/components/empty-state";
 import {
@@ -29,8 +31,10 @@ import {
   repoRef,
 } from "@/lib/github/pr-actions";
 import { env } from "@/lib/env";
+import { parseStandingChecks } from "@/lib/qa/settings";
 import {
   reconcileRepoStagingBatch,
+  updateQaSettings,
   updateRepoStagingSettings,
   updateStagingDefaults,
 } from "./actions";
@@ -112,7 +116,8 @@ export default async function StagingSettings({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  await requireProjectPermission(id, "project_settings_manage");
+  const { role } = await requireProjectPermission(id, "project_settings_manage");
+  const canEdit = roleAtLeast(role, "ADMIN");
 
   const project = await prisma.project.findUnique({
     where: { id },
@@ -132,6 +137,9 @@ export default async function StagingSettings({
   // form has to keep showing what a project picked so turning the digest back
   // on restores it.
   const enabledSections = parseDigestSections(project.stagingDigestSections);
+  // Same reasoning: shown from the column so the list survives switching QA off
+  // and back on.
+  const standingChecks = parseStandingChecks(project.qaStandingChecks);
 
   const repos = await prisma.repo.findMany({
     where: { projectId: id },
@@ -416,6 +424,108 @@ export default async function StagingSettings({
 
       <Card>
         <CardHeader>
+          <CardTitle className="text-base">QA</CardTitle>
+          <CardDescription>
+            Track, per PR in the batch, whether anyone has actually verified it.
+            The manifest says what a release ships; this says whether it has
+            been tested. Reviewers work it on the{" "}
+            <Link
+              href={`/dashboard/projects/${project.id}/qa`}
+              className="text-primary underline underline-offset-4"
+            >
+              QA board
+            </Link>
+            .
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form action={updateQaSettings} className="space-y-4">
+            <fieldset disabled={!canEdit} className="space-y-4">
+              <input type="hidden" name="projectId" value={project.id} />
+
+              <label className="flex items-start gap-3 text-sm">
+                <input
+                  type="checkbox"
+                  name="stagingQaEnabled"
+                  value="1"
+                  defaultChecked={project.stagingQaEnabled}
+                  className="mt-0.5 h-4 w-4 rounded border-border"
+                />
+                <span>
+                  <span className="font-medium">Record QA for each batch</span>
+                  <span className="block text-xs text-muted-foreground">
+                    Builds a checklist from the PRs the batch ships, carrying
+                    each author&rsquo;s own <code>## QA</code> section where they
+                    wrote one, and prints the state into the aggregate PR body.
+                    Derived from the data the bot already fetches, so it costs no
+                    extra GitHub API call. Needs the aggregate PR above.
+                  </span>
+                </span>
+              </label>
+
+              <label className="flex items-start gap-3 text-sm">
+                <input
+                  type="checkbox"
+                  name="qaCheckEnabled"
+                  value="1"
+                  defaultChecked={project.qaCheckEnabled}
+                  className="mt-0.5 h-4 w-4 rounded border-border"
+                />
+                <span>
+                  <span className="font-medium">
+                    Publish <code>contribution-checker / qa</code> on the
+                    aggregate PR
+                  </span>
+                  <span className="block text-xs text-muted-foreground">
+                    Require it in branch protection and an unverified release
+                    cannot merge. Separate from the switch above so that turning
+                    QA on to see the state does not start blocking releases the
+                    same afternoon.
+                  </span>
+                </span>
+              </label>
+
+              <div className="space-y-2">
+                <Label htmlFor="qaFailedLabel">Failed label</Label>
+                <Input
+                  id="qaFailedLabel"
+                  name="qaFailedLabel"
+                  defaultValue={project.qaFailedLabel}
+                  className="font-mono"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Put on the PR that failed and on the aggregate PR carrying it,
+                  and taken off again when the failure clears. Cannot use the{" "}
+                  <code>contribution:</code> prefix, which the gate owns and
+                  strips.
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="qaStandingChecks">Standing checks</Label>
+                <Textarea
+                  id="qaStandingChecks"
+                  name="qaStandingChecks"
+                  rows={4}
+                  defaultValue={standingChecks.join("\n")}
+                  placeholder={"Sign-in works\nCheckout completes\nEmails send"}
+                />
+                <p className="text-xs text-muted-foreground">
+                  One per line. Added to every batch alongside the PRs, so the
+                  smoke tests that are not tied to any one change get signed off
+                  too. Editing a line retires the old check and starts a fresh
+                  one, because an edited question is a different question.
+                </p>
+              </div>
+
+              <SubmitButton disabled={!canEdit}>Save QA settings</SubmitButton>
+            </fieldset>
+          </form>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
           <CardTitle className="text-base">Per-repo settings</CardTitle>
           <CardDescription>
             Override the project defaults for one repo, or leave a field on
@@ -595,6 +705,16 @@ export default async function StagingSettings({
                       name="stagingDigestEnabled"
                       value={repo.stagingDigestEnabled}
                       inheritedLabel={project.stagingDigestEnabled ? "on" : "off"}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor={`qa-${repo.id}`} className="text-xs">
+                      QA
+                    </Label>
+                    <TriStateSelect
+                      name="stagingQaEnabled"
+                      value={repo.stagingQaEnabled}
+                      inheritedLabel={project.stagingQaEnabled ? "on" : "off"}
                     />
                   </div>
                   <div className="space-y-1.5">

@@ -22,6 +22,7 @@ export const WF = {
   processPush: "processPush",
   processInstallation: "processInstallation",
   stagingBatch: "stagingBatch",
+  qaBoardSync: "qaBoardSync",
   ciCheckPr: "ciCheckPr",
   ciReconcile: "ciReconcile",
   outboundWebhookDelivery: "outboundWebhookDelivery",
@@ -53,6 +54,9 @@ export const SIG = {
   // stagingBatch signal: the repo's staging batch may have changed, re-derive
   // the aggregate PR. Carries no state; the reconcile reads live GitHub.
   stagingReconcile: "stagingReconcile",
+  // qaBoardSync signal: something changed on either side of the external QA
+  // board mirror, so run a sync sooner than the poll would.
+  qaBoardSync: "qaBoardSync",
 } as const;
 
 /** Query names for reading an entity workflow's durable state (ops/debugging).
@@ -63,6 +67,7 @@ export const QRY = {
   contributorGateState: "contributorGateState",
   projectGateState: "projectGateState",
   stagingBatchState: "stagingBatchState",
+  qaBoardSyncState: "qaBoardSyncState",
 } as const;
 
 /** Temporal patch ids (workflow versioning via patched()/deprecatePatch).
@@ -343,6 +348,45 @@ export const STAGING_RECONCILE_DEBOUNCE = "5 seconds";
  * entity idling out between pushes.
  */
 export const STAGING_SYNC_WINDOW_MS = 6 * 60 * 60_000;
+
+/** A request to mirror the QA board. Like the staging reconcile, `reason` is
+ * observability only: the sync is a full reconciliation of both sides, so no
+ * request carries data the next one would not subsume. */
+export type QaBoardSyncPayload = { reason: string };
+
+/** Per-repo QA board mirror entity, keyed by the local `Repo.id`. */
+export type QaBoardSyncInput = {
+  repoId: string;
+  dirty?: boolean;
+  lastReason?: string | null;
+};
+
+/** qaBoardSync durable state, exposed via QRY.qaBoardSyncState. */
+export type QaBoardSyncState = {
+  repoId: string;
+  dirty: boolean;
+  lastReason: string | null;
+  syncs: number;
+  /** Verdicts pulled from the provider across this run. */
+  applied: number;
+};
+
+/** Debounce before a mirror pass, for the same reason the staging reconcile has
+ * one: a reviewer ticking off six items in twenty seconds should cost one pass
+ * over the provider API, not six. */
+export const QA_BOARD_SYNC_DEBOUNCE = "5 seconds";
+
+/**
+ * How often to poll the provider while a batch is open.
+ *
+ * The pull is a reconciling read, not an event handler: provider webhooks only
+ * ever make a pass happen sooner. Notion offers integrations no per-database
+ * webhook at all, and a Trello hook can be deleted or silently stop, so the
+ * poll is what actually guarantees a verdict recorded on a card reaches the
+ * release gate. Five minutes is well inside the time it takes anyone to notice
+ * a release is waiting, and costs two API calls per repo per interval.
+ */
+export const QA_BOARD_POLL_INTERVAL_MS = 5 * 60_000;
 
 export type ProcessMergeGroupInput = { payload: unknown };
 export type ProcessPushInput = { payload: unknown };

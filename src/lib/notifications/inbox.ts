@@ -22,7 +22,9 @@ export type NotificationKind =
   | "cla.roster_disputed"
   | "cla.resign_required"
   | "cla.pending_change"
-  | "cla.signature_required";
+  | "cla.signature_required"
+  | "qa.items_added"
+  | "qa.batch_ready";
 
 /** Human labels for notification kinds (shared by the inbox page + the bell). */
 export const KIND_LABELS: Record<string, string> = {
@@ -36,6 +38,8 @@ export const KIND_LABELS: Record<string, string> = {
   "application.appeal_rejected": "Appeal declined",
   "project.invited": "Invited to a project",
   "pr.blocked": "PR blocked",
+  "qa.items_added": "New work in a verified batch",
+  "qa.batch_ready": "Release batch is verified",
   "cla.ccla_signed": "Corporate CLA signed",
   "cla.ccla_approved": "Corporate CLA approved",
   "cla.ccla_rejected": "Corporate CLA rejected",
@@ -76,6 +80,12 @@ export function notificationHref(
   }
   if (kind === "project.invited" && projectId) {
     return `/dashboard/projects/${projectId}`;
+  }
+  if (kind.startsWith("qa.") && projectId) {
+    const repoId = str("repoId");
+    return repoId
+      ? `/dashboard/projects/${projectId}/qa?repo=${repoId}`
+      : `/dashboard/projects/${projectId}/qa`;
   }
   if (
     (kind === "cla.signature_required" || kind === "cla.resign_required") &&

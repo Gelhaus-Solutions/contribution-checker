@@ -7,6 +7,7 @@ const PROJECT = {
   stagingSyncEnabled: true,
   stagingDigestEnabled: true,
   stagingDigestSections: '["env","stats"]',
+  stagingQaEnabled: true,
   stagingBranch: "staging",
 };
 
@@ -15,6 +16,7 @@ const NO_OVERRIDES = {
   stagingBatchPrEnabled: null,
   stagingSyncEnabled: null,
   stagingDigestEnabled: null,
+  stagingQaEnabled: null,
   stagingBranch: null,
 };
 
@@ -29,6 +31,7 @@ describe("resolveStagingConfig", () => {
       batchPrEnabled: false,
       syncEnabled: false,
       digestEnabled: false,
+      qaEnabled: false,
       stagingBranch: false,
     });
   });

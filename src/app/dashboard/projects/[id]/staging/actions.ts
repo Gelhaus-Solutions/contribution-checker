@@ -11,6 +11,7 @@ import {
   serializeDigestSections,
   type DigestSectionId,
 } from "@/lib/github/staging-digest";
+import { parseStandingChecksInput } from "@/lib/qa/settings";
 
 /**
  * Git forbids whitespace, `~^:?*[`, backslash, `..`, a leading `-` or `/`, a
@@ -206,6 +207,7 @@ const repoSchema = z.object({
   stagingBatchPrEnabled: triState,
   stagingSyncEnabled: triState,
   stagingDigestEnabled: triState,
+  stagingQaEnabled: triState,
   stagingBranch: z.union([z.string().length(0), branchName]),
 });
 
@@ -221,6 +223,7 @@ export async function updateRepoStagingSettings(formData: FormData) {
     stagingBatchPrEnabled: formData.get("stagingBatchPrEnabled"),
     stagingSyncEnabled: formData.get("stagingSyncEnabled"),
     stagingDigestEnabled: formData.get("stagingDigestEnabled"),
+    stagingQaEnabled: formData.get("stagingQaEnabled"),
     stagingBranch: formData.get("stagingBranch") ?? "",
   });
   const { session } = await requireProjectRole(parsed.projectId, "ADMIN");
@@ -234,6 +237,7 @@ export async function updateRepoStagingSettings(formData: FormData) {
       stagingBatchPrEnabled: true,
       stagingSyncEnabled: true,
       stagingDigestEnabled: true,
+      stagingQaEnabled: true,
       stagingBranch: true,
     },
   });
@@ -248,6 +252,7 @@ export async function updateRepoStagingSettings(formData: FormData) {
     stagingBatchPrEnabled: toOverride(parsed.stagingBatchPrEnabled),
     stagingSyncEnabled: toOverride(parsed.stagingSyncEnabled),
     stagingDigestEnabled: toOverride(parsed.stagingDigestEnabled),
+    stagingQaEnabled: toOverride(parsed.stagingQaEnabled),
     stagingBranch: parsed.stagingBranch || null,
   };
 
@@ -278,13 +283,14 @@ export async function updateRepoStagingSettings(formData: FormData) {
             before.stagingDigestEnabled,
             after.stagingDigestEnabled,
           ],
+          stagingQaEnabled: [before.stagingQaEnabled, after.stagingQaEnabled],
           stagingBranch: [before.stagingBranch, after.stagingBranch],
         }).filter(([, [a, b]]) => a !== b),
       ),
     },
   });
 
-  // Any of the four can change what this repo does, and re-gating is
+  // Any of these can change what this repo does, and re-gating is
   // project-wide anyway, so do not try to be clever about which changed.
   await propagateStagingChange({
     projectId: parsed.projectId,
@@ -347,4 +353,109 @@ async function propagateStagingChange(args: {
       reason: "staging_settings_changed",
     });
   }
+}
+
+/**
+ * QA settings. Its own action rather than more fields on
+ * `updateStagingDefaults`, because it is its own card and its own decision: a
+ * project can run a batch for a year before anyone wants to gate it.
+ */
+const qaSchema = z.object({
+  projectId: z.string().min(1),
+  stagingQaEnabled: z.string().optional(),
+  qaCheckEnabled: z.string().optional(),
+  qaFailedLabel: stagingLabel,
+  qaStandingChecks: z.string().max(8000),
+});
+
+export async function updateQaSettings(formData: FormData) {
+  const parsed = qaSchema.parse({
+    projectId: formData.get("projectId"),
+    stagingQaEnabled: formData.get("stagingQaEnabled") ?? undefined,
+    qaCheckEnabled: formData.get("qaCheckEnabled") ?? undefined,
+    qaFailedLabel: formData.get("qaFailedLabel"),
+    qaStandingChecks: formData.get("qaStandingChecks") ?? "",
+  });
+  const { session } = await requireProjectRole(parsed.projectId, "ADMIN");
+
+  const before = await prisma.project.findUnique({
+    where: { id: parsed.projectId },
+    select: {
+      stagingQaEnabled: true,
+      qaCheckEnabled: true,
+      qaFailedLabel: true,
+      qaStandingChecks: true,
+      labelPending: true,
+      labelApproved: true,
+      labelDenied: true,
+      labelEvaluate: true,
+      labelStagingBatch: true,
+      labelStagingOptOut: true,
+    },
+  });
+  if (!before) throw new Error("Project not found");
+
+  // Same collision check the staging labels get. Two labels with one name means
+  // one of the two features silently stops being able to find its own PRs.
+  const allLabels = [
+    before.labelPending,
+    before.labelApproved,
+    before.labelDenied,
+    before.labelEvaluate,
+    before.labelStagingBatch,
+    before.labelStagingOptOut,
+    parsed.qaFailedLabel,
+  ];
+  if (new Set(allLabels).size !== allLabels.length) {
+    throw new Error(
+      "The QA label must differ from the staging and PR labels.",
+    );
+  }
+
+  const after = {
+    stagingQaEnabled: !!parsed.stagingQaEnabled,
+    qaCheckEnabled: !!parsed.qaCheckEnabled,
+    qaFailedLabel: parsed.qaFailedLabel,
+    // Normalized through the parser so a no-op save cannot look like a change
+    // in the audit log, and so blank lines never become empty checks.
+    qaStandingChecks: JSON.stringify(
+      parseStandingChecksInput(parsed.qaStandingChecks),
+    ),
+  };
+
+  await prisma.project.update({
+    where: { id: parsed.projectId },
+    data: after,
+  });
+
+  await recordAudit({
+    projectId: parsed.projectId,
+    actorId: session.user.id,
+    kind: "qa.settings_changed",
+    payload: {
+      changed: Object.fromEntries(
+        Object.entries({
+          stagingQaEnabled: [before.stagingQaEnabled, after.stagingQaEnabled],
+          qaCheckEnabled: [before.qaCheckEnabled, after.qaCheckEnabled],
+          qaFailedLabel: [before.qaFailedLabel, after.qaFailedLabel],
+          qaStandingChecks: [
+            before.qaStandingChecks,
+            after.qaStandingChecks,
+          ],
+        }).filter(([, [a, b]]) => a !== b),
+      ),
+    },
+  });
+
+  // Rebuild every batch so the change shows up without waiting for a push:
+  // turning QA on with no reconcile leaves an empty board and looks broken.
+  await propagateStagingChange({
+    projectId: parsed.projectId,
+    retargetAffecting: false,
+    retargetNowOn: false,
+    batchAffecting: true,
+  });
+
+  revalidatePath(`/dashboard/projects/${parsed.projectId}/staging`);
+  revalidatePath(`/dashboard/projects/${parsed.projectId}/qa`);
 }

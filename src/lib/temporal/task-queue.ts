@@ -28,6 +28,7 @@ export const workflowIds = {
   /** Per-repo staging batch entity. Keyed by the local `Repo.id` (not
    * ghRepoId): the reconcile needs the Repo row anyway, and a CI-mode repo
    * with no ghRepoId must still get a stable id. */
+  qaBoardSync: (repoId: string) => `qa-board:${repoId}`,
   stagingBatch: (repoId: string) => `staging:${repoId}`,
   ciCheckPr: (projectSlug: string, prNumber: number, headSha: string) =>
     `ci-check:${projectSlug}:${prNumber}:${headSha}`,

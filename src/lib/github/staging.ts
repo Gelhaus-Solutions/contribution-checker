@@ -30,6 +30,16 @@ import {
   type PrSummary,
   type RepoRef,
 } from "@/lib/github/pr-actions";
+import {
+  loadBatchItemsForRender,
+  markBatchShipped,
+  syncBatchRecord,
+} from "@/lib/qa/batch-record";
+import { renderQaLines, type QaRenderItem } from "@/lib/qa/render";
+import { parseStandingChecks } from "@/lib/qa/settings";
+import { syncQaLabels } from "@/lib/qa/labels";
+import { publishQaCheck } from "@/lib/github/check-run";
+import { env } from "@/lib/env";
 
 /**
  * Staging branch routing. Two cooperating halves, toggled independently on the
@@ -64,6 +74,12 @@ export type StagingProject = {
   stagingSyncEnabled: boolean;
   stagingDigestEnabled: boolean;
   stagingDigestSections: string;
+  stagingQaEnabled: boolean;
+  /** Whether Check Runs publish at all for this project. */
+  checksEnabled: boolean;
+  qaCheckEnabled: boolean;
+  qaFailedLabel: string;
+  qaStandingChecks: string;
   stagingBranch: string;
   labelStagingBatch: string;
   labelStagingOptOut: string;
@@ -75,6 +91,7 @@ export type StagingRepoOverrides = {
   stagingBatchPrEnabled: boolean | null;
   stagingSyncEnabled: boolean | null;
   stagingDigestEnabled: boolean | null;
+  stagingQaEnabled: boolean | null;
   stagingBranch: string | null;
 };
 
@@ -86,6 +103,11 @@ export const stagingProjectSelect = {
   stagingSyncEnabled: true,
   stagingDigestEnabled: true,
   stagingDigestSections: true,
+  stagingQaEnabled: true,
+  checksEnabled: true,
+  qaCheckEnabled: true,
+  qaFailedLabel: true,
+  qaStandingChecks: true,
   stagingBranch: true,
   labelStagingBatch: true,
   labelStagingOptOut: true,
@@ -96,6 +118,7 @@ export const stagingRepoSelect = {
   stagingBatchPrEnabled: true,
   stagingSyncEnabled: true,
   stagingDigestEnabled: true,
+  stagingQaEnabled: true,
   stagingBranch: true,
 } as const;
 
@@ -109,6 +132,8 @@ export type ResolvedStagingConfig = {
   digestEnabled: boolean;
   /** Which digest sections print. Empty when the digest is off. */
   digestSections: Set<DigestSectionId>;
+  /** Track, per item in the batch, whether anyone has verified it. */
+  qaEnabled: boolean;
   stagingBranch: string;
   /** Staging routing does anything at all for this repo. `syncEnabled` alone
    * does not qualify: syncing a branch nothing routes through is a write to
@@ -120,6 +145,7 @@ export type ResolvedStagingConfig = {
     batchPrEnabled: boolean;
     syncEnabled: boolean;
     digestEnabled: boolean;
+    qaEnabled: boolean;
     stagingBranch: boolean;
   };
 };
@@ -138,6 +164,7 @@ export function resolveStagingConfig(
     | "stagingSyncEnabled"
     | "stagingDigestEnabled"
     | "stagingDigestSections"
+    | "stagingQaEnabled"
     | "stagingBranch"
   >,
   repo: StagingRepoOverrides | null,
@@ -154,6 +181,10 @@ export function resolveStagingConfig(
   const digestEnabled =
     batchPrEnabled &&
     (repo?.stagingDigestEnabled ?? project.stagingDigestEnabled);
+  // Same gate, same reason: QA is recorded against the batch, and a repo that
+  // only retargets has no batch to record it against.
+  const qaEnabled =
+    batchPrEnabled && (repo?.stagingQaEnabled ?? project.stagingQaEnabled);
   return {
     retargetEnabled,
     batchPrEnabled,
@@ -163,6 +194,7 @@ export function resolveStagingConfig(
     digestSections: digestEnabled
       ? parseDigestSections(project.stagingDigestSections)
       : new Set<DigestSectionId>(),
+    qaEnabled,
     stagingBranch: branch || project.stagingBranch,
     anyEnabled,
     overridden: {
@@ -170,6 +202,7 @@ export function resolveStagingConfig(
       batchPrEnabled: repo?.stagingBatchPrEnabled != null,
       syncEnabled: repo?.stagingSyncEnabled != null,
       digestEnabled: repo?.stagingDigestEnabled != null,
+      qaEnabled: repo?.stagingQaEnabled != null,
       stagingBranch: !!branch,
     },
   };
@@ -213,6 +246,8 @@ export function renderBatchBlock(
   entries: BatchEntry[],
   digest?: StagingDigest | null,
   sections?: ReadonlySet<DigestSectionId>,
+  /** QA lines, already rendered. Empty or absent prints no QA section. */
+  qaLines?: string[],
 ): string {
   const lines =
     entries.length === 0
@@ -228,12 +263,18 @@ export function renderBatchBlock(
     digestLines.length === 0
       ? []
       : ["", "### Before you merge", "", ...digestLines];
+  // Last, because it is the part that changes most often. Keeping it at the
+  // bottom means a verdict does not reflow the manifest above it in the diff
+  // GitHub shows for the edit.
+  const qa =
+    !qaLines || qaLines.length === 0 ? [] : ["", "### QA", "", ...qaLines];
   return [
     BLOCK_START,
     "### In this batch",
     "",
     ...lines,
     ...heads,
+    ...qa,
     BLOCK_END,
   ].join("\n");
 }
@@ -539,7 +580,7 @@ function mergeAlreadyOnDefault(args: {
  *
  * Closed-without-merging PRs are excluded for the same reason.
  */
-export function selectBatchEntries(args: {
+export function selectBatchPrs(args: {
   prs: PrSummary[];
   stagingBranch: string;
   since: Date | null;
@@ -548,7 +589,7 @@ export function selectBatchEntries(args: {
   /** sha -> parents, for the same commit range. */
   batchParents: Record<string, string[]> | null;
   excludePrNumber: number | null;
-}): BatchEntry[] {
+}): PrSummary[] {
   const kept = args.prs.filter((pr) => {
     if (pr.number === args.excludePrNumber) return false;
     if (pr.baseRef !== args.stagingBranch) return false;
@@ -567,7 +608,26 @@ export function selectBatchEntries(args: {
   // Ascending PR number reads as chronological and keeps the body stable
   // across reconciles (the list endpoint sorts by updated-at, which churns).
   kept.sort((a, b) => a.number - b.number);
-  return kept.map((pr) => ({
+  return kept;
+}
+
+/**
+ * The manifest's view of the batch: PR number, author, merge time.
+ *
+ * Split from `selectBatchPrs` because the QA record needs the whole `PrSummary`
+ * (title, body, labels, merge commit) and the manifest needs almost none of it.
+ * Both read the same membership decision, so they cannot disagree about which
+ * PRs are in the batch, which is the property worth protecting here.
+ */
+export function selectBatchEntries(args: {
+  prs: PrSummary[];
+  stagingBranch: string;
+  since: Date | null;
+  batchShas: Set<string> | null;
+  batchParents: Record<string, string[]> | null;
+  excludePrNumber: number | null;
+}): BatchEntry[] {
+  return selectBatchPrs(args).map((pr) => ({
     number: pr.number,
     author: pr.authorLogin,
     mergedAt: pr.mergedAt,
@@ -1123,6 +1183,103 @@ function safeDigest(cmp: CompareResult, repoId: string): StagingDigest | null {
 }
 
 /**
+ * Update the QA record and render its lines, or print nothing.
+ *
+ * Wrapped for the same reason `safeDigest` is, and it matters more here because
+ * this one writes to the database: a failed upsert, a lock timeout or a bad row
+ * must cost the release PR its QA section and nothing else. The manifest is the
+ * part of the body that has to survive every bug in the parts around it.
+ */
+type QaPass = {
+  batchId: string;
+  items: QaRenderItem[];
+  lines: string[];
+};
+
+async function safeQa(args: {
+  repoId: string;
+  projectId: string;
+  prs: PrSummary[];
+  standingChecks: string[];
+  aggregatePrNumber: number | null;
+}): Promise<QaPass | null> {
+  try {
+    const result = await syncBatchRecord(args);
+    const items = await loadBatchItemsForRender(result.batchId);
+    if (result.regressed) {
+      // Worth its own log line: the batch was green, somebody merged more work
+      // into staging, and the release PR's checks were about to say "ready".
+      logger.info(
+        { repoId: args.repoId, batchId: result.batchId, added: result.added },
+        "staging batch regressed: new items landed in a verified batch",
+      );
+    }
+    return { batchId: result.batchId, items, lines: renderQaLines(items) };
+  } catch (e) {
+    logger.warn({ err: e, repoId: args.repoId }, "staging QA record failed");
+    return null;
+  }
+}
+
+/**
+ * Put the QA verdict where GitHub can act on it: the check branch protection
+ * reads, and a label on both the PR that failed and the release PR carrying it.
+ *
+ * The label is applied and removed rather than only applied, so it describes the
+ * current state instead of accumulating. Both directions are idempotent, and the
+ * whole thing is swallowed: QA feedback is advisory, the aggregate PR is not.
+ */
+async function safeQaGithub(args: {
+  ref: RepoRef;
+  repoId: string;
+  installationId: number;
+  repoFullName: string;
+  project: { id: string; checksEnabled: boolean; qaCheckEnabled: boolean };
+  failedLabel: string;
+  stagingBranch: string;
+  aggregatePrNumber: number;
+  pass: QaPass;
+}): Promise<void> {
+  try {
+    // The batch is recorded before the aggregate PR is found or created, so
+    // this is the first point at which its number is known. Stamping it now
+    // means the board links to the release on the same pass rather than the
+    // next one.
+    await prisma.stagingBatch.updateMany({
+      where: { id: args.pass.batchId, prNumber: null },
+      data: { prNumber: args.aggregatePrNumber },
+    });
+
+    const boardUrl =
+      `${env.PUBLIC_BASE_URL.replace(/\/$/, "")}` +
+      `/dashboard/projects/${args.project.id}/qa?repo=${args.repoId}`;
+
+    // The aggregate PR's head IS the staging branch, so its tip is the SHA the
+    // check belongs on. `PrSummary` does not carry a head sha, and this is one
+    // cheap call rather than widening that type for every caller.
+    const headSha = await getBranchSha(args.ref, args.stagingBranch);
+    await publishQaCheck({
+      installationId: args.installationId,
+      repoFullName: args.repoFullName,
+      batchId: args.pass.batchId,
+      headSha,
+      project: args.project,
+      items: args.pass.items,
+      boardUrl,
+    });
+
+    await syncQaLabels({
+      ref: args.ref,
+      batchId: args.pass.batchId,
+      failedLabel: args.failedLabel,
+      aggregatePrNumber: args.aggregatePrNumber,
+    });
+  } catch (e) {
+    logger.warn({ err: e, repoId: args.repoId }, "staging QA feedback failed");
+  }
+}
+
+/**
  * Re-derive a repo's aggregate staging PR from live GitHub state: ensure it
  * exists while staging is ahead, and keep its manifest block accurate. Called
  * only from the per-repo `stagingBatch` entity workflow, so runs for one repo
@@ -1266,6 +1423,31 @@ export async function reconcileStagingBatch(args: {
     // depend on which PR we exclude. Null when the project has the digest off,
     // which is also the point at which the work is skipped entirely.
     const baseDigest = cfg.digestEnabled ? safeDigest(cmp, repo.id) : null;
+
+    // The QA record is derived from the same membership decision as the
+    // manifest, so the two can never disagree about what is in the batch. It is
+    // synced BEFORE the body renders, because the QA section is part of that
+    // body and a PR we are about to open should be born carrying it.
+    //
+    // Wrapped like the digest is: QA bookkeeping is advisory, the manifest is
+    // not. A bug in here must never cost the release PR its list of PRs.
+    const qa = cfg.qaEnabled
+      ? await safeQa({
+          repoId: repo.id,
+          projectId: project.id,
+          prs: selectBatchPrs({
+            prs,
+            stagingBranch: cfg.stagingBranch,
+            since,
+            batchShas,
+            batchParents: cmp.commitParents,
+            excludePrNumber: repo.stagingBatchPrNumber,
+          }),
+          standingChecks: parseStandingChecks(project.qaStandingChecks),
+          aggregatePrNumber: repo.stagingBatchPrNumber,
+        })
+      : null;
+
     const renderFor = (excludePrNumber: number | null): string => {
       const entries = selectBatchEntries({
         prs,
@@ -1279,6 +1461,7 @@ export async function reconcileStagingBatch(args: {
         entries,
         baseDigest && { ...baseDigest, overview: batchOverview(entries) },
         cfg.digestSections,
+        qa?.lines,
       );
     };
 
@@ -1375,6 +1558,27 @@ export async function reconcileStagingBatch(args: {
         "refreshed aggregate PR manifest",
       );
     }
+
+    // Last, because it needs the aggregate PR's number, which only exists once
+    // the find-or-create above has settled.
+    if (qa) {
+      await safeQaGithub({
+        ref,
+        repoId: repo.id,
+        installationId: repo.installationId,
+        repoFullName: repo.fullName,
+        project: {
+          id: project.id,
+          checksEnabled: project.checksEnabled,
+          qaCheckEnabled: project.qaCheckEnabled,
+        },
+        failedLabel: project.qaFailedLabel,
+        stagingBranch: cfg.stagingBranch,
+        aggregatePrNumber: aggregate.number,
+        pass: qa,
+      });
+    }
+
     return paced;
   } catch (e) {
     logger.warn({ err: e, repoId: args.repoId }, "reconcileStagingBatch failed");
@@ -1397,7 +1601,7 @@ export async function handleAggregatePrClosed(args: {
 }): Promise<boolean> {
   const repo = await prisma.repo.findUnique({
     where: { id: args.repoId },
-    select: { stagingBatchPrNumber: true },
+    select: { stagingBatchPrNumber: true, projectId: true },
   });
   if (!repo || repo.stagingBatchPrNumber !== args.prNumber) return false;
   await prisma.repo.update({
@@ -1407,6 +1611,23 @@ export async function handleAggregatePrClosed(args: {
       ...(args.merged ? { stagingBatchSince: args.mergedAt ?? new Date() } : {}),
     },
   });
+
+  // Only a merge ships a batch. A close without merging leaves the commits
+  // exactly where they were, so the next reconcile opens a fresh aggregate PR
+  // over the same content and the QA already recorded against it still holds:
+  // freezing the batch here would throw that work away and start the release
+  // over from nothing verified.
+  if (args.merged) {
+    await markBatchShipped({
+      repoId: args.repoId,
+      projectId: repo.projectId,
+      prNumber: args.prNumber,
+      shippedAt: args.mergedAt ?? new Date(),
+    }).catch((e) =>
+      logger.warn({ err: e, repoId: args.repoId }, "qa batch ship record failed"),
+    );
+  }
+
   logger.info(
     { repoId: args.repoId, prNumber: args.prNumber, merged: args.merged },
     "aggregate staging PR closed",

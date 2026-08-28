@@ -195,6 +195,33 @@ export async function signalStagingBatch(args: {
   }
 }
 
+/**
+ * Ask the repo's QA board mirror to run now.
+ *
+ * Best-effort like `signalStagingBatch`: the mirror polls anyway, so a failed
+ * signal costs at most one poll interval of latency. It must never be able to
+ * fail a server action recording a verdict, which is the local source of truth.
+ */
+export async function signalQaBoardSync(args: {
+  repoId: string;
+  reason: string;
+}): Promise<void> {
+  try {
+    await signalWithStartTolerant(WF.qaBoardSync, {
+      workflowId: workflowIds.qaBoardSync(args.repoId),
+      taskQueue: TASK_QUEUE,
+      signal: SIG.qaBoardSync,
+      signalArgs: [{ reason: args.reason }],
+      args: [{ repoId: args.repoId }],
+    });
+  } catch (e) {
+    logger.warn(
+      { err: e, repoId: args.repoId, reason: args.reason },
+      "signalQaBoardSync failed"
+    );
+  }
+}
+
 export async function dispatchMergeGroupEvent(
   repoId: string,
   headSha: string,

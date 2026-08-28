@@ -96,6 +96,7 @@ model User {
   auditedEvents   AuditEvent[]
   formTemplates   FormTemplate[]
   claSignatures   ClaSignature[]
+  qaVerdicts      StagingBatchItem[]
 }
 
 model Project {
@@ -167,6 +168,27 @@ model Project {
   // than relying on the empty-string fallback.
   stagingDigestEnabled   Boolean @default(false)
   stagingDigestSections  String  @default("[\"overview\",\"env\",\"breaking\",\"migrations\",\"schema\",\"dependencies\",\"workflows\",\"infra\",\"tooling\",\"stats\"]")
+
+  // ----- QA on the staging batch -----
+  // Records, per PR in the batch, whether anyone has actually verified it.
+  // Gated on stagingBatchPrEnabled the same way the digest is: the batch is the
+  // unit of QA, and without an aggregate PR there is nothing to gate. Off by
+  // default for the same reason the digest is: it changes the shape of a release
+  // description people are used to reading.
+  stagingQaEnabled Boolean @default(false)
+  // Publish `contribution-checker / qa` on the aggregate PR, so branch
+  // protection can block a release with unverified items. Separately opt-in:
+  // turning QA on to *see* the state must not start failing a required check on
+  // a project that never asked to be gated by it.
+  qaCheckEnabled   Boolean @default(false)
+  // Carried by both the source PR and the aggregate PR while an item is failed.
+  // Outside the `contribution:` namespace for the same reason the staging labels
+  // are: setLabels() strips every `contribution:*` label it did not just set.
+  qaFailedLabel    String  @default("qa:failed")
+  // The project's own standing smoke tests ("sign-in works"), regenerated into
+  // every batch as CHECK items. JSON array of strings; parse it with
+  // parseStandingChecks in src/lib/qa/settings.ts, never a bare JSON.parse.
+  qaStandingChecks String  @default("[]")
 
   // Disable switch: when checkerEnabled=false, every PR is treated as APPROVED.
   // Tracking (PrCheck rows + quality scoring) only runs if trackWhenDisabled=true.
@@ -375,6 +397,9 @@ model Repo {
   // prints stays project-wide: a per-repo section list would be four more
   // columns of configuration for a body nobody reads differently per repo.
   stagingDigestEnabled   Boolean?
+  // Overrides the project's QA switch. Which items QA covers, and the standing
+  // checks, stay project-wide for the same reason the digest sections do.
+  stagingQaEnabled       Boolean?
   // Staging routing state. `stagingBatchPrNumber` is the open aggregate PR
   // (null = no batch in flight). `stagingBatchSince` is when the previous
   // aggregate PR merged: PRs merged into staging before it are already in the
@@ -393,6 +418,8 @@ model Repo {
   project          Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
   prChecks         PrCheck[]
   stagingRetargets StagingRetarget[]
+  stagingBatches   StagingBatch[]
+  qaBoardLinks     QaBoardLink[]
 
   @@unique([projectId, fullName])
   @@index([projectId])
@@ -638,6 +665,160 @@ model StagingRetarget {
   repo Repo @relation(fields: [repoId], references: [id], onDelete: Cascade)
 
   @@unique([repoId, prNumber])
+}
+
+/**
+ * One release's worth of staging work, and the QA state recorded against it.
+ *
+ * A batch is the *content range* (`default...staging`), not the aggregate PR.
+ * That distinction matters: an aggregate PR closed without merging leaves the
+ * commits exactly where they were, so the next reconcile opens a new PR over
+ * the same content and the QA already done on it is still valid. Only a merge
+ * ships the batch and closes it.
+ */
+model StagingBatch {
+  id     String @id @default(cuid())
+  repoId String
+  /// "OPEN" | "SHIPPED".
+  status String @default("OPEN")
+  /// The aggregate PR as of the last reconcile. Denormalized rather than read
+  /// from Repo.stagingBatchPrNumber because that column is nulled the moment the
+  /// PR closes, and a shipped batch still has to say which PR shipped it.
+  prNumber Int?
+  /// Check Run id for `contribution-checker / qa`, so upsertCheckRun PATCHes one
+  /// run instead of creating a new one per verdict.
+  qaCheckRunId String?
+  /// Whether the failure label is currently on the aggregate PR. Same purpose
+  /// as StagingBatchItem.qaLabelApplied.
+  qaLabelApplied Boolean @default(false)
+
+  openedAt  DateTime  @default(now())
+  shippedAt DateTime?
+  updatedAt DateTime  @updatedAt
+
+  repo  Repo               @relation(fields: [repoId], references: [id], onDelete: Cascade)
+  items StagingBatchItem[]
+
+  @@index([repoId, status])
+  @@index([repoId, openedAt])
+}
+
+/**
+ * One thing somebody has to verify before the batch ships: a merged PR, or a
+ * standing smoke test the project runs every release.
+ *
+ * Re-derived on every reconcile like the manifest itself, so a dropped webhook
+ * cannot leave it stale. The QA columns are the exception to that re-derivation:
+ * they are human input and are never overwritten by a reconcile, with one
+ * deliberate exception (see `mergeCommitSha`).
+ */
+model StagingBatchItem {
+  id      String @id @default(cuid())
+  batchId String
+  /// Stable identity across reconciles: "pr:123" or "standing:<slug>". Keyed
+  /// this way rather than by prNumber so standing checks live in the same table
+  /// and answer to the same QA verbs.
+  key  String
+  /// "PR" | "CHECK".
+  kind String
+
+  prNumber Int?
+  title    String
+  authorLogin String?
+  /// The merge commit the verdict was recorded against. When a reconcile finds a
+  /// different one the PR was re-merged, the code under test is not the code
+  /// that was verified, and the verdict is reset.
+  mergeCommitSha String?
+  mergedAt       DateTime?
+  /// JSON string array.
+  labels       String @default("[]")
+  /// JSON number array, from `closes|fixes|resolves #N` in the PR body. Lets the
+  /// board group several PRs under the one feature they implement.
+  linkedIssues String @default("[]")
+  /// First real paragraph of the PR body.
+  summary String?
+  /// The author's own "## QA" / "## Testing" section, verbatim.
+  qaSteps String?
+
+  /// "QA_PENDING" | "QA_IN_REVIEW" | "QA_PASSED" | "QA_FAILED" | "QA_SKIPPED".
+  qaStatus String  @default("QA_PENDING")
+  qaById   String?
+  /// Attribution when the verdict arrived from Notion or Trello, where the actor
+  /// has no local User row.
+  qaByExternal String?
+  qaAt         DateTime?
+  qaNotes      String?
+
+  /// Whether the failure label is currently on the PR, as far as we know.
+  /// Compared against the desired state so a reconcile makes zero label calls
+  /// when nothing changed, the same way the body is PATCHed only on a real
+  /// diff. Without it, every reconcile would cost one call per PR in the batch.
+  qaLabelApplied Boolean @default(false)
+
+  /// Set when an item leaves the derived set, which happens when its merge
+  /// reaches the default branch by another route and `mergeAlreadyOnDefault`
+  /// starts excluding it. Kept rather than deleted so a verdict someone recorded
+  /// is never silently lost; cleared if the item comes back.
+  droppedAt DateTime?
+
+  /// External board mirror. `externalHash` is the hash of the fields last pushed:
+  /// the push is skipped when it still matches, which is what stops our own edit
+  /// echoing back through the provider and driving an endless push/pull cycle.
+  externalProvider String?
+  externalId       String?
+  externalUrl      String?
+  externalHash     String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  batch StagingBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  qaBy  User?        @relation(fields: [qaById], references: [id], onDelete: SetNull)
+
+  @@unique([batchId, key])
+  @@index([batchId, qaStatus])
+  @@index([externalProvider, externalId])
+}
+
+/**
+ * A link between a repo's QA board and an external tool. Two-way: items are
+ * pushed as cards, and verdicts recorded on the card are pulled back.
+ *
+ * Credentials are plain columns, following the ProjectWebhook.secret precedent.
+ * They are read only inside the sync activity, so they never enter Temporal
+ * workflow history, and never leave the server.
+ */
+model QaBoardLink {
+  id       String @id @default(cuid())
+  repoId   String
+  /// "notion" | "trello".
+  provider String
+  /// Notion database id, or Trello list id.
+  targetId String
+
+  token  String
+  /// Trello needs a key alongside the token; Notion does not.
+  apiKey String?
+  /// Provider-side webhook registration id, so unlinking can delete it.
+  hookId String?
+  /// JSON map of QA status -> the provider's option or label name. Parse with
+  /// parseStatusMap in src/lib/qa/board/types.ts, never a bare JSON.parse.
+  statusMap String @default("{}")
+
+  enabled      Boolean   @default(true)
+  /// High-water mark for the reconciling poll.
+  lastPulledAt DateTime?
+  /// Last failure, surfaced on the settings page. A link that has been failing
+  /// for a day should say so rather than looking healthy.
+  lastErrorAt  DateTime?
+  lastError    String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  repo Repo @relation(fields: [repoId], references: [id], onDelete: Cascade)
+
+  @@unique([repoId, provider])
 }
 
 model AuditEvent {

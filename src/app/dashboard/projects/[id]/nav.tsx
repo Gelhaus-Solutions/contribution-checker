@@ -19,6 +19,7 @@ const items: { href: string; label: string }[] = [
   { href: "/quality", label: "Quality" },
   { href: "/cla", label: "CLA" },
   { href: "/staging", label: "Staging" },
+  { href: "/qa", label: "QA" },
   { href: "/settings", label: "Settings" },
   { href: "/audit", label: "Audit log" },
 ];

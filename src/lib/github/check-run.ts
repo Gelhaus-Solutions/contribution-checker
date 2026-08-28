@@ -8,6 +8,7 @@ import {
   type CheckRunConclusion,
 } from "@/lib/github/pr-actions";
 import type { PrDecision } from "@/lib/applications/decide-pr";
+import { buildQaCheckPayload, type QaRenderItem } from "@/lib/qa/render";
 
 export const CHECK_RUN_NAME = "contribution-checker / decision";
 // A second, independent Check Run dedicated to the CLA gate so maintainers can
@@ -340,5 +341,79 @@ export async function publishClaCheck(args: {
     }
   } catch (e) {
     logger.warn({ err: e, prCheckId: args.prCheckId }, "publishClaCheck failed");
+  }
+}
+
+// ===== Dedicated QA Check Run =====
+
+/**
+ * A third independent check reporting whether the staging batch has actually
+ * been verified, so a maintainer can require it in branch protection on the
+ * default branch and stop a release nobody has tested.
+ *
+ * Published only on the aggregate PR. Ordinary contributions are not batches
+ * and have nothing to report here.
+ */
+export const QA_CHECK_RUN_NAME = "contribution-checker / qa";
+
+/**
+ * Publish the QA check for a repo's open batch.
+ *
+ * Feature-detected and swallowed like its siblings: an installation without
+ * `checks:write` gets no check rather than an error, which is the same "fourth
+ * state" the decision check has (no check published at all).
+ *
+ * Gated on `Project.qaCheckEnabled` separately from QA itself. Turning QA on to
+ * *see* the state must not silently start failing a required check on a project
+ * that never asked to be gated by it.
+ */
+export async function publishQaCheck(args: {
+  installationId: number;
+  repoFullName: string;
+  batchId: string;
+  headSha: string | null;
+  project: { id: string; checksEnabled: boolean; qaCheckEnabled: boolean };
+  items: QaRenderItem[];
+  boardUrl: string;
+}): Promise<void> {
+  if (!args.project.checksEnabled || !args.project.qaCheckEnabled) return;
+  if (!args.headSha) return;
+  if (!(await installationHasChecksWrite(args.installationId))) return;
+
+  const payload = buildQaCheckPayload({
+    items: args.items,
+    boardUrl: args.boardUrl,
+  });
+
+  // Reused across verdicts so the release PR accumulates one check that
+  // changes, not one per time somebody ticked something off.
+  const batch = await prisma.stagingBatch.findUnique({
+    where: { id: args.batchId },
+    select: { qaCheckRunId: true },
+  });
+
+  const ref = repoRef(args.repoFullName, args.installationId);
+  try {
+    const newId = await upsertCheckRun(
+      ref,
+      {
+        headSha: args.headSha,
+        name: QA_CHECK_RUN_NAME,
+        status: payload.status,
+        conclusion: payload.conclusion,
+        title: payload.title,
+        summary: payload.summary,
+        detailsUrl: args.boardUrl,
+      },
+      batch?.qaCheckRunId ?? null,
+    );
+    if (newId && newId !== batch?.qaCheckRunId) {
+      await prisma.stagingBatch.update({
+        where: { id: args.batchId },
+        data: { qaCheckRunId: newId },
+      });
+    }
+  } catch (e) {
+    logger.warn({ err: e, batchId: args.batchId }, "publishQaCheck failed");
   }
 }
