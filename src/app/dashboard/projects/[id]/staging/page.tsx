@@ -400,9 +400,12 @@ export default async function StagingSettings({
                   className="font-mono"
                 />
                 <p className="text-xs text-muted-foreground">
-                  Add it to a PR to keep that PR on the default branch. Cannot
-                  use the <code>contribution:</code> prefix, which the gate owns
-                  and strips.
+                  Add it to a PR to keep that PR on the default branch. Add it
+                  after the bot has already retargeted one and the PR goes back
+                  to the branch it was opened against; remove it and the PR is
+                  routed to staging again. Cannot use the{" "}
+                  <code>contribution:</code> prefix, which the gate owns and
+                  strips.
                 </p>
               </div>
             </div>
@@ -647,6 +650,13 @@ export default async function StagingSettings({
             <code className="font-mono">{project.labelStagingOptOut}</code>{" "}
             label to settle it permanently. Repeated fights trip a fuse and the
             bot backs off.
+          </p>
+          <p>
+            The label works after the fact too: put it on a PR the bot has
+            already retargeted and the PR is moved back to the branch it was
+            opened against. Only PRs the bot itself moved are moved back, so one
+            opened against staging on purpose stays there. Take the label off
+            again and the PR is routed to staging as usual.
           </p>
           <p>
             The aggregate PR is exempt from the gate and from retargeting, and

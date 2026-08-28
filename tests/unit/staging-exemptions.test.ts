@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   isAggregatePr,
+  optOutRequestsRevert,
   stagingRetargetSkipReason,
 } from "@/lib/github/staging";
 
@@ -147,5 +148,35 @@ describe("isAggregatePr", () => {
 
   it("does not match a staging -> other-branch PR", () => {
     expect(isAggregatePr({ ...base, baseRef: "release-2" })).toBe(false);
+  });
+});
+
+describe("optOutRequestsRevert", () => {
+  const revertArgs = (overrides: Record<string, unknown> = {}) => ({
+    baseRef: "staging",
+    stagingBranch: "staging",
+    prLabels: ["staging:opt-out"],
+    optOutLabel: "staging:opt-out",
+    ...overrides,
+  });
+
+  it("wants a PR already sitting on staging put back", () => {
+    // The skip reason can only prevent a retarget. Once the base is staging,
+    // labelling the PR would otherwise do nothing at all.
+    expect(optOutRequestsRevert(revertArgs())).toBe(true);
+  });
+
+  it("wants nothing when the PR is not on staging", () => {
+    expect(optOutRequestsRevert(revertArgs({ baseRef: "main" }))).toBe(false);
+  });
+
+  it("wants nothing without the label", () => {
+    expect(optOutRequestsRevert(revertArgs({ prLabels: [] }))).toBe(false);
+  });
+
+  it("is not fooled by a label that merely looks like the opt-out one", () => {
+    expect(
+      optOutRequestsRevert(revertArgs({ prLabels: ["staging:opt-out-later"] })),
+    ).toBe(false);
   });
 });

@@ -390,8 +390,9 @@ model Repo {
 
   createdAt DateTime @default(now())
 
-  project  Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  prChecks PrCheck[]
+  project          Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  prChecks         PrCheck[]
+  stagingRetargets StagingRetarget[]
 
   @@unique([projectId, fullName])
   @@index([projectId])
@@ -606,6 +607,37 @@ model PrQuality {
   prCheck PrCheck @relation(fields: [prCheckId], references: [id], onDelete: Cascade)
 
   @@index([prCheckId])
+}
+
+/**
+ * One PR the bot moved onto the staging branch, and the base it moved it off.
+ *
+ * Written only when a retarget actually succeeds, which is what makes the
+ * opt-out label reversible: labelling a PR after the fact repoints it at
+ * `fromBase`, and a PR the bot never touched is left exactly where its author
+ * put it. Inferring this from "the base is staging" would move PRs opened
+ * against staging on purpose down to the default branch, which is a release,
+ * not a routing change.
+ *
+ * Not on PrCheck, because retargeting runs *before* the gate: on `opened`
+ * there is no PrCheck row yet, and when the checker is disabled without
+ * `trackWhenDisabled` there never will be.
+ */
+model StagingRetarget {
+  id       String @id @default(cuid())
+  repoId   String
+  prNumber Int
+  /** The base the PR had before the bot rewrote it: where a revert sends it. */
+  fromBase String
+  /** The staging branch it was pointed at, for the record. */
+  toBase   String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  repo Repo @relation(fields: [repoId], references: [id], onDelete: Cascade)
+
+  @@unique([repoId, prNumber])
 }
 
 model AuditEvent {

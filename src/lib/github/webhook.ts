@@ -462,6 +462,7 @@ export async function handlePullRequestEvent(
 ): Promise<PrEventResult> {
   const action = payload.action ?? "";
   const isReEvalLabel = action === "labeled";
+  const isUnlabeled = action === "unlabeled";
   const isEdited = action === "edited";
   if (
     !payload.pull_request ||
@@ -476,6 +477,7 @@ export async function handlePullRequestEvent(
         "closed",
       ].includes(action) ||
       isReEvalLabel ||
+      isUnlabeled ||
       isEdited
     )
   ) {
@@ -494,21 +496,35 @@ export async function handlePullRequestEvent(
   const prNumber = payload.pull_request.number;
   const author = payload.pull_request.user;
 
-  // For "labeled" events we only care about the project's evaluate label.
-  // Anything else (the bot's own status labels included) must short-circuit
-  // before we touch the DB or run the decision pipeline.
-  if (isReEvalLabel) {
+  // Label events matter for exactly two labels: the project's evaluate label
+  // (re-run the gate) and its staging opt-out label, which routes in both
+  // directions. Added, it puts a PR the bot already retargeted back where it
+  // was; removed, it releases the PR into routing again, which is what makes
+  // the opt-out reversible without waiting for the PR's next push. Anything
+  // else (the bot's own status labels included) must short-circuit before we
+  // touch the DB or run the decision pipeline.
+  //
+  // The opt-out label routes only: it says nothing about the contributor, so
+  // running the gate again on it would be work for no decision. Losing a label
+  // decides nothing about the contributor either, which is why `unlabeled`
+  // recognizes only that one label and never reaches the gate: the evaluate
+  // label is removed by the bot itself after every re-eval, and re-gating on
+  // that echo would loop.
+  let stagingLabelOnly = false;
+  if (isReEvalLabel || isUnlabeled) {
     const labelName = payload.label?.name;
     if (!labelName) return NOT_TERMINAL;
     const repoForLabelGate = await prisma.repo.findUnique({
       where: { ghRepoId },
-      select: { project: { select: { labelEvaluate: true } } },
+      select: {
+        project: { select: { labelEvaluate: true, labelStagingOptOut: true } },
+      },
     });
-    if (
-      !repoForLabelGate ||
-      repoForLabelGate.project.labelEvaluate !== labelName
-    ) {
-      return NOT_TERMINAL;
+    if (!repoForLabelGate) return NOT_TERMINAL;
+    const { labelEvaluate, labelStagingOptOut } = repoForLabelGate.project;
+    if (isUnlabeled || labelEvaluate !== labelName) {
+      if (labelStagingOptOut !== labelName) return NOT_TERMINAL;
+      stagingLabelOnly = true;
     }
   }
 
@@ -562,8 +578,10 @@ export async function handlePullRequestEvent(
   }
 
   // A title edit changes nothing the gate cares about: the batch manifest was
-  // already refreshed above, so stop before the decision pipeline.
-  if (isEdited) return notTerminal(staging);
+  // already refreshed above, so stop before the decision pipeline. The staging
+  // opt-out label is the same story: routing has had its say, and the label
+  // carries no information about the contributor.
+  if (isEdited || stagingLabelOnly) return notTerminal(staging);
 
   await convergePr({
     ghRepoId,

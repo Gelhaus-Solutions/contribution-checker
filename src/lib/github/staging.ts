@@ -374,6 +374,102 @@ export function stagingRetargetSkipReason(args: {
 }
 
 /**
+ * Does the opt-out label want a PR the bot already moved put back?
+ *
+ * `stagingRetargetSkipReason` only ever *prevents* a retarget, so labelling a
+ * PR that is already on staging did nothing: the base is no longer the default
+ * branch, so every later pass short-circuits on `base_not_default` and the PR
+ * ships in the batch anyway. The label has to work in both directions to mean
+ * what it says.
+ *
+ * Pure, and deliberately says nothing about whether the bot is the one that
+ * moved this PR: that lives in the `StagingRetarget` record, because a PR
+ * opened against staging on purpose must stay there.
+ */
+export function optOutRequestsRevert(args: {
+  baseRef: string;
+  stagingBranch: string;
+  prLabels: string[];
+  optOutLabel: string;
+}): boolean {
+  return (
+    args.prLabels.includes(args.optOutLabel) &&
+    args.baseRef === args.stagingBranch
+  );
+}
+
+/**
+ * Put a PR the bot retargeted back on the base it was opened against, because
+ * it now carries the opt-out label. Returns the outcome, or null when there is
+ * nothing to undo.
+ *
+ * The `StagingRetarget` row is the whole safety condition: without one, this
+ * PR reached staging some other way (its author opened it there, a maintainer
+ * moved it) and rewriting its base would redirect someone's change at the
+ * default branch, which is a release rather than a routing decision.
+ *
+ * Loop-safe like the retarget itself: our PATCH echoes back as
+ * `pull_request.edited` with the base already off staging, where
+ * `optOutRequestsRevert` is false and `stagingRetargetSkipReason` returns
+ * `opt_out_label` before anything can move it again.
+ */
+async function revertRetarget(args: {
+  repoId: string;
+  ghRepoId: number;
+  ref: RepoRef;
+  prNumber: number;
+  stagingBranch: string;
+}): Promise<"opt_out_reverted" | "revert_impossible" | null> {
+  const record = await prisma.stagingRetarget.findUnique({
+    where: {
+      repoId_prNumber: { repoId: args.repoId, prNumber: args.prNumber },
+    },
+    select: { fromBase: true },
+  });
+  if (!record || record.fromBase === args.stagingBranch) return null;
+
+  try {
+    await setPullRequestBase(args.ref, args.prNumber, record.fromBase);
+  } catch (e) {
+    // Staging has since been merged into the original base, so the PR would
+    // have no diff against it. The record is kept: the PR is still on staging,
+    // and a later push may make the revert possible after all.
+    if (isNoNewCommitsError(e)) {
+      logger.warn(
+        {
+          ghRepoId: args.ghRepoId,
+          prNumber: args.prNumber,
+          fromBase: record.fromBase,
+        },
+        `staging opt-out revert impossible: the PR has no diff against ` +
+          `${record.fromBase} any more. It stays on staging; move it by hand ` +
+          `if it must not ship in the batch.`,
+      );
+      return "revert_impossible";
+    }
+    throw e;
+  }
+
+  // Dropped only once the PR is actually off staging, so a failed revert stays
+  // retryable and a later retarget writes a fresh row.
+  await prisma.stagingRetarget.delete({
+    where: {
+      repoId_prNumber: { repoId: args.repoId, prNumber: args.prNumber },
+    },
+  });
+  logger.info(
+    {
+      ghRepoId: args.ghRepoId,
+      prNumber: args.prNumber,
+      from: args.stagingBranch,
+      to: record.fromBase,
+    },
+    "reverted staging retarget: PR carries the opt-out label",
+  );
+  return "opt_out_reverted";
+}
+
+/**
  * Ping-pong fuse. "Rewrite the base back unless opt-out-labeled" is, against a
  * determined human or a competing automation that enforces base == default, an
  * unbounded two-cycle. Our own echo is already stopped structurally (the base
@@ -568,6 +664,8 @@ async function ensureStagingBranch(args: {
  */
 export type StagingRoutingOutcome =
   | "retargeted"
+  | "opt_out_reverted"
+  | "revert_impossible"
   | "not_managed"
   | "pr_closed"
   | "default_branch_unknown"
@@ -666,6 +764,30 @@ export async function applyStagingRouting(ctx: {
       isAggregatePr: isAggregate && cfg.batchPrEnabled,
       touchesStaging: ctx.baseRef === cfg.stagingBranch,
     };
+    // The label applied after the fact. Checked before `retargetEnabled`,
+    // because this undoes a write the bot already made: turning retargeting
+    // off afterwards must not strand a PR on staging that has been explicitly
+    // opted out. The aggregate PR is exempt: it lives on staging by design and
+    // has no retarget record to undo.
+    if (
+      !isAggregate &&
+      optOutRequestsRevert({
+        baseRef: ctx.baseRef,
+        stagingBranch: cfg.stagingBranch,
+        prLabels: ctx.prLabels,
+        optOutLabel: project.labelStagingOptOut,
+      })
+    ) {
+      const outcome = await revertRetarget({
+        repoId: repo.id,
+        ghRepoId: ctx.ghRepoId,
+        ref,
+        prNumber: ctx.prNumber,
+        stagingBranch: cfg.stagingBranch,
+      });
+      if (outcome) return { ...base, retargeted: false, outcome };
+    }
+
     if (!cfg.retargetEnabled) {
       return { ...base, retargeted: false, outcome: "retarget_disabled" };
     }
@@ -739,6 +861,30 @@ export async function applyStagingRouting(ctx: {
       }
       throw e;
     }
+    // Remember where it came from, so the opt-out label can put it back. Best
+    // effort on purpose: the PR is already moved, and a bookkeeping row is not
+    // worth failing the routing pass (and with it the batch signal) over.
+    try {
+      await prisma.stagingRetarget.upsert({
+        where: {
+          repoId_prNumber: { repoId: repo.id, prNumber: ctx.prNumber },
+        },
+        create: {
+          repoId: repo.id,
+          prNumber: ctx.prNumber,
+          fromBase: ctx.baseRef,
+          toBase: cfg.stagingBranch,
+        },
+        update: { fromBase: ctx.baseRef, toBase: cfg.stagingBranch },
+      });
+    } catch (e) {
+      logger.warn(
+        { err: e, ghRepoId: ctx.ghRepoId, prNumber: ctx.prNumber },
+        "staging retarget recorded on GitHub but not in the database: the " +
+          "opt-out label will not be able to revert this PR",
+      );
+    }
+
     logger.info(
       {
         ghRepoId: ctx.ghRepoId,

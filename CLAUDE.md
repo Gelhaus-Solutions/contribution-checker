@@ -174,6 +174,23 @@ Staging routing (`src/lib/github/staging.ts`, App mode only):
   `PrEventResult.staging`, so it lands in the `convergePrEvent` activity result
   and is readable from Temporal workflow history when logs are not. `retargeted:
   false` alone cannot answer "why is this PR still on the default branch?".
+- **The opt-out label works in both directions.** `Project.labelStagingOptOut`
+  (default `staging:opt-out`) keeps a PR off staging, and applied *after* a
+  retarget it moves the PR back to the base it was opened against
+  (`optOutRequestsRevert` + the revert half of `applyStagingRouting`, outcomes
+  `opt_out_reverted` / `revert_impossible`). Only PRs the bot moved are moved
+  back: every successful retarget writes a `StagingRetarget` row (repo + PR ->
+  `fromBase`), and no row means the PR reached staging some other way and is
+  left alone. Do not replace that row with "the base is staging", which would
+  redirect a PR opened against staging on purpose at the default branch. The
+  row is its own table because retargeting runs *before* the gate, so there is
+  no `PrCheck` row yet on `opened`. Removing the label routes the PR again on
+  the spot rather than at its next push, which is the only reason
+  `handlePullRequestEvent` handles `unlabeled` at all: it recognizes that one
+  label and nothing else there, because the bot removes its own `labelEvaluate`
+  after every re-eval and re-gating on that echo would loop. Both label paths
+  route only and never reach the gate: a label the contributor cannot set says
+  nothing about the contributor.
 - `already_in_staging`: GitHub rejects a base change that would leave the PR
   with an empty diff (422, "no new commits between"), which happens when the
   head branch was already merged into staging by an earlier PR. Such a PR can

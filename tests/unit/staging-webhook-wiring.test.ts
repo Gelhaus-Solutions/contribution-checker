@@ -3,6 +3,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const repoFindUnique = vi.fn();
 const repoUpdate = vi.fn();
 const prCheckFindUnique = vi.fn();
+const retargetFindUnique = vi.fn();
+const retargetUpsert = vi.fn();
+const retargetDelete = vi.fn();
 
 const setPullRequestBase = vi.fn();
 const getBranchSha = vi.fn();
@@ -19,6 +22,11 @@ vi.mock("@/lib/db", () => ({
       update: (...a: unknown[]) => repoUpdate(...a),
     },
     prCheck: { findUnique: (...a: unknown[]) => prCheckFindUnique(...a) },
+    stagingRetarget: {
+      findUnique: (...a: unknown[]) => retargetFindUnique(...a),
+      upsert: (...a: unknown[]) => retargetUpsert(...a),
+      delete: (...a: unknown[]) => retargetDelete(...a),
+    },
   },
 }));
 
@@ -117,11 +125,42 @@ function prNumbered(number: number) {
   return { ...p, pull_request: { ...p.pull_request, number } };
 }
 
+/** An `unlabeled` event: the label is gone from `pull_request.labels`, and the
+ * PR is back on the default branch after the revert moved it. */
+function unlabeled(number: number, label: string) {
+  const p = payload();
+  return {
+    ...p,
+    action: "unlabeled",
+    label: { name: label },
+    pull_request: { ...p.pull_request, number, labels: [] },
+  };
+}
+
+/** A `labeled` event on a PR already sitting on staging. */
+function labeled(number: number, label: string) {
+  const p = payload();
+  return {
+    ...p,
+    action: "labeled",
+    label: { name: label },
+    pull_request: {
+      ...p.pull_request,
+      number,
+      base: { ref: "staging", repo: { default_branch: "main" } },
+      labels: [{ name: label }],
+    },
+  };
+}
+
 beforeEach(() => {
   for (const fn of [
     repoFindUnique,
     repoUpdate,
     prCheckFindUnique,
+    retargetFindUnique,
+    retargetUpsert,
+    retargetDelete,
     setPullRequestBase,
     getBranchSha,
     installationHasContentsWrite,
@@ -137,6 +176,9 @@ beforeEach(() => {
   repoFindUnique.mockResolvedValue({ ...REPO });
   repoUpdate.mockResolvedValue({});
   prCheckFindUnique.mockResolvedValue(null);
+  retargetFindUnique.mockResolvedValue(null);
+  retargetUpsert.mockResolvedValue({});
+  retargetDelete.mockResolvedValue({});
   getBranchSha.mockResolvedValue("sha-staging");
   // Stop the gate pipeline immediately; these tests are about staging wiring.
   decideForPR.mockResolvedValue({ status: "IGNORED", reason: "test" });
@@ -320,6 +362,106 @@ describe("staging routing wiring in handlePullRequestEvent", () => {
     await handlePullRequestEvent(payload() as never);
     expect(setPullRequestBase).not.toHaveBeenCalled();
     expect(decideForPR).toHaveBeenCalled();
+  });
+
+  it("records where a retargeted PR came from", async () => {
+    await handlePullRequestEvent(prNumbered(45) as never);
+    expect(retargetUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          repoId: "repo1",
+          prNumber: 45,
+          fromBase: "main",
+          toBase: "staging",
+        }),
+      }),
+    );
+  });
+
+  /** A label added to a PR that is already on staging: the skip reason cannot
+   * help there, so without the revert the label silently does nothing. */
+  it("puts a PR it retargeted back on the default branch when the opt-out label arrives", async () => {
+    retargetFindUnique.mockResolvedValue({ fromBase: "main" });
+    const res = await handlePullRequestEvent(
+      labeled(46, "staging:opt-out") as never,
+    );
+    expect(setPullRequestBase).toHaveBeenCalledWith(
+      expect.anything(),
+      46,
+      "main",
+    );
+    expect(retargetDelete).toHaveBeenCalled();
+    expect(res.staging).toEqual({
+      retargeted: false,
+      outcome: "opt_out_reverted",
+    });
+    // The label routes; it says nothing about the contributor.
+    expect(decideForPR).not.toHaveBeenCalled();
+  });
+
+  it("leaves a PR the bot never moved where its author pointed it", async () => {
+    retargetFindUnique.mockResolvedValue(null);
+    const res = await handlePullRequestEvent(
+      labeled(47, "staging:opt-out") as never,
+    );
+    expect(setPullRequestBase).not.toHaveBeenCalled();
+    expect(res.staging).toEqual({
+      retargeted: false,
+      outcome: "opt_out_label",
+    });
+  });
+
+  it("keeps the record when the revert is refused, so it can be retried", async () => {
+    retargetFindUnique.mockResolvedValue({ fromBase: "main" });
+    setPullRequestBase.mockRejectedValueOnce(
+      Object.assign(
+        new Error(
+          `Validation Failed: {"message":"There are no new commits between ` +
+            `base branch 'main' and head branch 'feature'"}`,
+        ),
+        { status: 422 },
+      ),
+    );
+    const res = await handlePullRequestEvent(
+      labeled(48, "staging:opt-out") as never,
+    );
+    expect(retargetDelete).not.toHaveBeenCalled();
+    expect(res.staging).toEqual({
+      retargeted: false,
+      outcome: "revert_impossible",
+    });
+  });
+
+  it("routes the PR again when the opt-out label is removed", async () => {
+    const res = await handlePullRequestEvent(
+      unlabeled(50, "staging:opt-out") as never,
+    );
+    expect(setPullRequestBase).toHaveBeenCalledWith(
+      expect.anything(),
+      50,
+      "staging",
+    );
+    expect(res.staging).toEqual({ retargeted: true, outcome: "retargeted" });
+    expect(decideForPR).not.toHaveBeenCalled();
+  });
+
+  // The bot removes its own evaluate label after every re-eval. Re-gating on
+  // that echo would be an unbounded loop.
+  it("ignores the removal of any other label, the evaluate label included", async () => {
+    const res = await handlePullRequestEvent(
+      unlabeled(51, "contribution:evaluate") as never,
+    );
+    expect(setPullRequestBase).not.toHaveBeenCalled();
+    expect(decideForPR).not.toHaveBeenCalled();
+    expect(res.staging).toBeUndefined();
+  });
+
+  it("ignores a label that is neither the evaluate nor the opt-out label", async () => {
+    const res = await handlePullRequestEvent(
+      labeled(49, "needs-review") as never,
+    );
+    expect(setPullRequestBase).not.toHaveBeenCalled();
+    expect(res.staging).toBeUndefined();
   });
 });
 
