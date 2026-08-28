@@ -202,11 +202,90 @@ Staging routing (`src/lib/github/staging.ts`, App mode only):
   set, so a staging label there would be wiped by the next converge.
   `updateLabelSettings` rejects the prefix.
 
+QA on the staging batch (`src/lib/qa/`, App mode only):
+- The manifest says what a release ships; the QA record says whether anyone has
+  verified it. `syncBatchRecord` builds one `StagingBatchItem` per merged PR
+  from the `PrSummary` objects `reconcileStagingBatch` **already holds**
+  (`listPullRequests` returns titles, bodies, labels and merge SHAs whether we
+  read them or not), so the whole feature costs no extra GitHub call. That is
+  why `selectBatchEntries` is now a `.map()` over `selectBatchPrs`: both halves
+  read one membership decision, so the board and the manifest cannot disagree
+  about what is in the batch.
+- **A reconcile never overwrites a verdict.** `qaStatus` / `qaById` / `qaAt` /
+  `qaNotes` are human input; everything else on the row is re-derived on every
+  pass. The single exception is a changed `mergeCommitSha`, which means the PR
+  was merged again and the code in staging is not the code anyone tested, so the
+  verdict resets to pending with a `qa.item_reset` audit. Without the exception
+  the release PR states something false; without the rule a push to the default
+  branch erases a morning of testing.
+- **Items that leave the batch are marked `droppedAt`, never deleted.** A merge
+  that reaches the default branch by another route stops shipping here, but the
+  verdict somebody recorded against it is still worth keeping, and it comes back
+  if the item does.
+- **`wasGreen && added > 0` is the alert worth having.** New work landing in a
+  batch that was already fully verified is the accident this exists to stop: the
+  release looked ready, somebody merged one more PR, and nothing on GitHub says
+  the answer changed. It drives `qa.items_added`.
+- **No per-PR file lists.** Classifying each PR's files through the digest's
+  `GROUPS` would cost one `GET /pulls/{n}/files` per PR per reconcile, which on
+  a thirty-PR batch reconciled on every push is a rate-limit incident. The
+  batch-level digest already answers "what risky files does this ship".
+- Statuses are `QA_`-prefixed in `src/lib/ui/status.ts` on purpose: bare
+  `PENDING` already renders as "Not applied" and `APPROVED`/`DENIED` are
+  application verdicts, so sharing them would corrupt the map for every page.
+- `qaEnabled` resolves through `resolveStagingConfig` gated on `batchPrEnabled`,
+  exactly like `digestEnabled`: the batch is the unit of QA. `qaCheckEnabled` is
+  a **second, separate** switch, because turning QA on to see the state must not
+  start failing a required check on a project that never asked to be gated.
+- **Label state is tracked on the row** (`qaLabelApplied` on both the item and
+  the batch). Reconciles run on every push, so recomputing labels by listing or
+  by unconditionally issuing add/remove would cost calls per PR every time; the
+  comparison makes the steady state free, which is the same bargain the body
+  PATCH makes by diffing first. A failed call leaves the flag unset so the next
+  pass retries.
+- The QA section renders **last** inside the existing `staging-batch` markers,
+  and must stay deterministic (sorted, capped, notes flattened) for the same
+  reason the digest must: it is compared before the body is PATCHed, so any
+  instability turns every reconcile into a visible edit on the release PR.
+
+External QA boards (`src/lib/qa/board/`, Notion and Trello, two-way):
+- Built as a **reconciling poll that webhooks only hurry along**, not an event
+  handler with a poll bolted on. Notion gives an integration no per-database
+  webhook at all and a Trello hook can be deleted out from under us, so the poll
+  is what actually guarantees delivery; a late, duplicated or unverifiable
+  callback then costs latency and never state. Same philosophy as "re-derived on
+  every run, so a dropped webhook cannot leave it stale".
+- **Loop safety is the `externalHash`.** Push writes a card, the provider fires
+  a change, the pull reads it back, the push fires again. It is broken the same
+  way the PR body avoids edit storms: write only when the rendered content
+  actually changed. A pull that applies a verdict also *settles* the hash to
+  what a push would now send, so reading a card never causes a write back to it.
+  In the other direction the pull applies a change only when it decodes to a
+  **different** status than the one held locally. One side needs a hash
+  mismatch, the other a status difference, so neither can drive the other.
+- Conflicts are last-writer-wins on timestamp, and a tie goes to us: local is
+  the side with an audit trail and a named user. An externally-sourced verdict
+  is audited with `actorId: null` and lands in `qaByExternal`, never in `qaById`.
+- Credentials are plain columns on `QaBoardLink` (the `ProjectWebhook.secret`
+  precedent) read only inside the sync, so they never enter workflow history and
+  never reach a client component.
+- Trello models status as **list membership**, not labels, because dragging a
+  card between columns is what people actually do on a QA board. `targetId` is
+  the board id and the status map holds list names, which are created on demand.
+
 GitHub side effects (all Octokit calls):
 - `src/lib/github/pr-actions.ts`: close/reopen, labels, comments, Check Runs
 - `src/lib/github/check-run.ts`: `buildDecisionCheckPayload` (pure mapping)
   and `publishDecisionCheck` (App-mode publisher with feature-detect)
 - `src/lib/github/collaborators.ts`: LRU-cached collaborator probe
+
+QA modules:
+- `src/lib/qa/types.ts`: the `QaStatus` union and the counting helpers
+- `src/lib/qa/extract.ts`: pure `## QA` / closing-keyword / summary extraction
+- `src/lib/qa/batch-record.ts`: derive and persist the batch, preserve verdicts
+- `src/lib/qa/render.ts`: the PR body block and `buildQaCheckPayload`
+- `src/lib/qa/labels.ts`: the failure label on both PRs, diffed before writing
+- `src/lib/qa/board/`: the Notion and Trello adapters and the two-way sync
 
 Quality (heuristic-only, no LLMs):
 - `src/lib/quality/types.ts`: `Heuristic`, `PrContext`, `SignalsRaw`
@@ -420,7 +499,16 @@ and `contents:read` is required for PR Quality scoring (file diff fetching).
 ## Known gaps / follow-ups
 
 - Staging routing is App mode only. CI mode (`src/lib/ci/check-pr-core.ts` and
-  the generated workflow YAML) neither retargets nor maintains a batch PR.
+  the generated workflow YAML) neither retargets nor maintains a batch PR. QA
+  rides on the batch, so it is App mode only for the same reason.
+- QA verdicts are recorded on the dashboard or on a linked Notion/Trello board.
+  There is deliberately no PR-body checkbox or `/qa` comment surface: the
+  aggregate PR's `pull_request.edited` body changes are short-circuited in
+  `handlePullRequestEvent`, and no `issue_comment` event is subscribed.
+- A Trello board's cards are read in full on every poll, because Trello has no
+  server-side "changed since" filter for cards. That is one request per board
+  per interval, which is fine for a board holding one release, and would want
+  revisiting for a board holding a year of them.
 - Retargeting only reaches existing open PRs through `reGateProjectPrs`, which
   fans out over `PrCheck` rows. PRs with no row (opened before the App was
   installed) retarget on their next event instead.
