@@ -30,6 +30,7 @@ export const workflowIds = {
    * with no ghRepoId must still get a stable id. */
   qaBoardSync: (repoId: string) => `qa-board:${repoId}`,
   qaTaskToggle: (itemId: string, nonce: string) => `qa-task:${itemId}:${nonce}`,
+  aiRun: (taskId: string, subjectId: string) => `ai:${taskId}:${subjectId}`,
   stagingBatch: (repoId: string) => `staging:${repoId}`,
   ciCheckPr: (projectSlug: string, prNumber: number, headSha: string) =>
     `ci-check:${projectSlug}:${prNumber}:${headSha}`,

@@ -78,6 +78,11 @@ export type AuditKind =
   | "qa.board_linked"
   | "qa.board_unlinked"
   | "qa.board_sync_failed"
+  // AI (OpenRouter). Only real calls are audited: a cache hit changes nothing
+  // and would fill the log with rows saying so.
+  | "ai.run_completed"
+  | "ai.run_failed"
+  | "ai.settings_changed"
   // Temporal durable execution
   | "application.cooldown_elapsed"
   | "workflow.failed";

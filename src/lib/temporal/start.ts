@@ -17,6 +17,8 @@ import type {
   DecisionChangedPayload,
 } from "./contracts";
 import type {
+  AiRunInput,
+  AiRunResultPayload,
   CiCheckPrInput,
   CiReconcileInput,
   GithubEventEnvelope,
@@ -242,6 +244,40 @@ export async function runQaTaskToggle(
     args: [input],
   });
   return handle.result() as Promise<QaTaskToggleResult>;
+}
+
+/**
+ * Run one AI task and wait for the answer.
+ *
+ * Synchronous on purpose, following the `runQaTaskToggle` precedent above: this
+ * is a person pressing "Run AI analysis" and watching a spinner, so the server
+ * action needs the result to render on the same request. Temporal is still worth
+ * having in the path for the retry policy, the timeout and the history.
+ *
+ * The workflow id is deterministic per task and subject, with no nonce. Two
+ * clicks a second apart therefore collide on the id rather than starting two
+ * runs, which is a cheaper first line of defence than the unique index in the
+ * database, and both are in place because they fail at different moments.
+ */
+export async function runAiTaskWorkflow(input: AiRunInput): Promise<AiRunResultPayload> {
+  const client = await getTemporalClient();
+  try {
+    const handle = await client.workflow.start(WF.aiRun, {
+      workflowId: workflowIds.aiRun(input.taskId, input.subjectId),
+      taskQueue: TASK_QUEUE,
+      args: [input],
+      // Without this a completed run's id stays reserved, and the next request
+      // for the same subject (a force re-run, or a genuinely changed input)
+      // would be rejected as a duplicate rather than starting.
+      workflowIdReusePolicy: WorkflowIdReusePolicy.ALLOW_DUPLICATE,
+    });
+    return (await handle.result()) as AiRunResultPayload;
+  } catch (e) {
+    if (e instanceof WorkflowExecutionAlreadyStartedError) {
+      return { status: "SKIPPED", reason: "already_running" };
+    }
+    throw e;
+  }
 }
 
 export async function dispatchMergeGroupEvent(

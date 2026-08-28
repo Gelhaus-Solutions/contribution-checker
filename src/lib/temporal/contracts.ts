@@ -28,6 +28,7 @@ export const WF = {
   ciReconcile: "ciReconcile",
   outboundWebhookDelivery: "outboundWebhookDelivery",
   qualityBackfill: "qualityBackfill",
+  aiRun: "aiRun",
   reconcileSweep: "reconcileSweep",
   claSweep: "claSweep",
   pruneProcessedDeliveries: "pruneProcessedDeliveries",
@@ -400,6 +401,27 @@ export type QaTaskToggleInput = {
 export type QaTaskToggleResult =
   | { ok: true; steps: string | null }
   | { ok: false; reason: "no_section" | "not_found" | "text_moved" };
+
+/**
+ * One AI task run, for one subject.
+ *
+ * Deliberately carries ids and not content. The payload the model sees is built
+ * inside the activity from the database, so a large diff never enters workflow
+ * history, and neither does anything a contributor wrote. The API key is
+ * resolved in the activity for the same reason.
+ */
+export type AiRunInput = {
+  taskId: string;
+  projectId: string;
+  subjectId: string;
+  triggeredById: string | null;
+  force?: boolean;
+};
+
+export type AiRunResultPayload =
+  | { status: "OK"; cached: boolean; costMicros: number }
+  | { status: "SKIPPED"; reason: string }
+  | { status: "FAILED"; error: string; retryable: boolean };
 
 export type ProcessMergeGroupInput = { payload: unknown };
 export type ProcessPushInput = { payload: unknown };
