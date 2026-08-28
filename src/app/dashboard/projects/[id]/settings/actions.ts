@@ -8,6 +8,8 @@ import { recordAudit } from "@/lib/audit";
 import { slugSchema } from "@/lib/slug";
 import { enqueueProjectWebhook } from "@/lib/notifications/webhooks";
 import { reGateProjectPrs } from "@/lib/temporal/start";
+import { ALL_AI_TASKS } from "@/lib/ai/registry";
+import { serializeAiConfig } from "@/lib/ai/config";
 import {
   assertSafeOutboundUrl,
   UnsafeOutboundUrlError,
@@ -479,6 +481,68 @@ export async function sendTestWebhook(formData: FormData) {
     actorId: session.user.id,
     kind: "webhook.test_sent",
     payload: parsed.endpointId ? { endpointId: parsed.endpointId } : undefined,
+  });
+
+  revalidatePath(`/dashboard/projects/${parsed.projectId}/settings`);
+}
+
+const aiSchema = z.object({
+  projectId: z.string().min(1),
+  aiEnabled: z.string().optional(),
+  aiAutoRun: z.string().optional(),
+});
+
+/**
+ * AI settings.
+ *
+ * Task toggles are read from the catalog rather than from a fixed list, exactly
+ * as `updateQualityHeuristics` reads `ALL_HEURISTICS`, so adding a task to
+ * `ALL_AI_TASKS` makes its checkbox work here with no change to this function.
+ *
+ * The config is written through `serializeAiConfig` rather than `JSON.stringify`
+ * so key order is stable: the audit payload below diffs before against after,
+ * and an unstable order would make every save look like a change.
+ */
+export async function updateAiSettings(formData: FormData) {
+  const parsed = aiSchema.parse({
+    projectId: formData.get("projectId"),
+    aiEnabled: formData.get("aiEnabled") ?? undefined,
+    aiAutoRun: formData.get("aiAutoRun") ?? undefined,
+  });
+  const { session } = await requireProjectRole(parsed.projectId, "ADMIN");
+
+  const before = await prisma.project.findUnique({
+    where: { id: parsed.projectId },
+    select: { aiEnabled: true, aiAutoRun: true, aiConfig: true },
+  });
+  if (!before) throw new Error("Project not found");
+
+  const config: Record<string, { enabled: boolean }> = {};
+  for (const task of ALL_AI_TASKS) {
+    config[task.id] = { enabled: formData.get(`enabled.${task.id}`) === "1" };
+  }
+
+  const after = {
+    aiEnabled: !!parsed.aiEnabled,
+    aiAutoRun: !!parsed.aiAutoRun,
+    aiConfig: serializeAiConfig(config),
+  };
+
+  await prisma.project.update({ where: { id: parsed.projectId }, data: after });
+
+  await recordAudit({
+    projectId: parsed.projectId,
+    actorId: session.user.id,
+    kind: "ai.settings_changed",
+    payload: {
+      changed: Object.fromEntries(
+        Object.entries({
+          aiEnabled: [before.aiEnabled, after.aiEnabled],
+          aiAutoRun: [before.aiAutoRun, after.aiAutoRun],
+          aiConfig: [before.aiConfig, after.aiConfig],
+        }).filter(([, [a, b]]) => a !== b)
+      ),
+    },
   });
 
   revalidatePath(`/dashboard/projects/${parsed.projectId}/settings`);

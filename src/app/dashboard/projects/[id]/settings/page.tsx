@@ -9,6 +9,9 @@ import { Button } from "@/components/ui/button";
 import { SubmitButton } from "@/components/ui/submit-button";
 import { Badge } from "@/components/ui/badge";
 import { Select } from "@/components/ui/select";
+import { env } from "@/lib/env";
+import { ALL_AI_TASKS, isAiTaskEnabled } from "@/lib/ai/registry";
+import { parseAiConfig } from "@/lib/ai/config";
 import {
   updateProjectSettings,
   addProjectWebhook,
@@ -18,6 +21,7 @@ import {
   updateLabelSettings,
   updateBypassSettings,
   updateGatingSettings,
+  updateAiSettings,
 } from "./actions";
 
 export default async function ProjectSettings({
@@ -38,6 +42,8 @@ export default async function ProjectSettings({
     where: { projectId: id },
     orderBy: { createdAt: "asc" },
   });
+
+  const aiConfig = parseAiConfig(project.aiConfig);
 
   const bypassHandles = (() => {
     try {
@@ -225,6 +231,95 @@ export default async function ProjectSettings({
             </label>
             <SubmitButton>Save gating</SubmitButton>
           </form>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">AI assistance</CardTitle>
+          <CardDescription>
+            Optional model-generated summaries and triage notes, shown only in
+            this dashboard. AI never approves, denies or closes anything: it
+            produces a note a reviewer reads before deciding.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {!env.aiConfigured ? (
+            <p className="text-sm text-muted-foreground">
+              No AI provider is configured. Set <code>OPENROUTER_API_KEY</code>{" "}
+              in the environment (or point{" "}
+              <code>VAULT_OPENROUTER_API_KEY_PATH</code> at it) to enable these
+              features.
+            </p>
+          ) : (
+            <form action={updateAiSettings} className="space-y-4">
+              <input type="hidden" name="projectId" value={project.id} />
+              <label className="flex items-start gap-3 text-sm">
+                <input
+                  type="checkbox"
+                  name="aiEnabled"
+                  value="1"
+                  defaultChecked={project.aiEnabled}
+                  className="mt-0.5 h-4 w-4 rounded border-border"
+                />
+                <span>
+                  <span className="font-medium">Enable AI assistance</span>
+                  <span className="block text-xs text-muted-foreground">
+                    Master switch. When off, nothing below runs and no calls are
+                    made.
+                  </span>
+                </span>
+              </label>
+              <label className="flex items-start gap-3 pl-7 text-sm">
+                <input
+                  type="checkbox"
+                  name="aiAutoRun"
+                  value="1"
+                  defaultChecked={project.aiAutoRun}
+                  className="mt-0.5 h-4 w-4 rounded border-border"
+                />
+                <span>
+                  <span className="font-medium">Run automatically</span>
+                  <span className="block text-xs text-muted-foreground">
+                    Off by default: every run is someone pressing a button.
+                    Turning this on spends money without anyone asking, so leave
+                    it off until you know what the output is worth to you.
+                  </span>
+                </span>
+              </label>
+
+              <div className="space-y-3 border-t border-border pt-4">
+                <p className="text-xs font-medium text-muted-foreground">
+                  Tasks
+                </p>
+                {ALL_AI_TASKS.map((task) => (
+                  <label
+                    key={task.id}
+                    className="flex items-start gap-3 text-sm"
+                  >
+                    <input
+                      type="checkbox"
+                      name={`enabled.${task.id}`}
+                      value="1"
+                      defaultChecked={isAiTaskEnabled(
+                        task,
+                        { aiEnabled: true },
+                        aiConfig
+                      )}
+                      className="mt-0.5 h-4 w-4 rounded border-border"
+                    />
+                    <span>
+                      <span className="font-medium">{task.label}</span>
+                      <span className="block text-xs text-muted-foreground">
+                        {task.description}
+                      </span>
+                    </span>
+                  </label>
+                ))}
+              </div>
+              <SubmitButton>Save AI settings</SubmitButton>
+            </form>
+          )}
         </CardContent>
       </Card>
 

@@ -18,6 +18,10 @@ import {
   refreshContributorCooldown,
 } from "@/lib/temporal/start";
 import { recordAudit } from "@/lib/audit";
+import { logger } from "@/lib/logger";
+import { rateLimit } from "@/lib/ratelimit";
+import { runAiTaskWorkflow } from "@/lib/temporal/start";
+import { triageTask } from "@/lib/ai/tasks/triage";
 import { notifyProjectReviewers, notifyUser } from "@/lib/notifications/inbox";
 import {
   submitReviewSchema,
@@ -642,4 +646,68 @@ async function projectSlug(projectId: string) {
     select: { slug: true },
   });
   return p?.slug ?? null;
+}
+
+const triageSchema = z.object({
+  projectId: z.string().min(1),
+  appId: z.string().min(1),
+  force: z.string().optional(),
+});
+
+/**
+ * Run AI triage on an application, and wait for the answer.
+ *
+ * REVIEWER rather than ADMIN: this is a reading aid for the person already
+ * allowed to approve or deny, and gating it higher would mean the reviewer who
+ * needs it cannot ask for it.
+ *
+ * Rate-limited per project because it is the one AI surface a logged-in human
+ * can trigger in a loop, and each press is a paid call. The limit is generous
+ * enough that nobody reviewing applications will notice it.
+ *
+ * Deliberately returns nothing and throws nothing on a model failure. The result
+ * is read from the database by the page on revalidate, so a failed run leaves
+ * the card showing its previous state with no error boundary and no lost work.
+ */
+export async function runApplicationTriage(formData: FormData) {
+  const parsed = triageSchema.parse({
+    projectId: formData.get("projectId"),
+    appId: formData.get("appId"),
+    force: formData.get("force") ?? undefined,
+  });
+  await requireProjectRole(parsed.projectId, "REVIEWER");
+  const session = await requireSession();
+  await ensureApplicationInProject(parsed.projectId, parsed.appId);
+
+  const gate = await rateLimit({
+    key: `ai:${parsed.projectId}`,
+    limit: 60,
+    windowMs: 60 * 60 * 1000,
+  });
+  if (!gate.ok) {
+    revalidatePath(
+      `/dashboard/projects/${parsed.projectId}/applications/${parsed.appId}`
+    );
+    return;
+  }
+
+  try {
+    await runAiTaskWorkflow({
+      taskId: triageTask.id,
+      projectId: parsed.projectId,
+      subjectId: parsed.appId,
+      triggeredById: session.user.id,
+      force: !!parsed.force,
+    });
+  } catch (e) {
+    // The run records its own failure row and its own audit event. Rethrowing
+    // here would replace the whole application page with an error boundary,
+    // which is a wildly disproportionate response to a model being briefly
+    // unavailable while somebody is trying to review an application.
+    logger.warn({ err: e, appId: parsed.appId }, "application triage failed");
+  }
+
+  revalidatePath(
+    `/dashboard/projects/${parsed.projectId}/applications/${parsed.appId}`
+  );
 }

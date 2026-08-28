@@ -21,6 +21,7 @@ import {
   allowResubmitAction,
   resolveAppealAction,
   addNoteAction,
+  runApplicationTriage,
 } from "./actions";
 import { computeScore } from "@/lib/quality/score";
 import { ALL_HEURISTICS, parseQualityConfig } from "@/lib/quality/registry";
@@ -28,12 +29,35 @@ import type { SignalsRaw } from "@/lib/quality/types";
 import { countApprovingReviewers } from "@/lib/applications/decide";
 import { getClaStatus } from "@/lib/cla/status";
 import { StatusBadge } from "@/components/status-badge";
-import { formatDate } from "@/lib/ui/format";
+import { formatDate, formatDateTime } from "@/lib/ui/format";
+import { parseAiConfig } from "@/lib/ai/config";
+import { isAiTaskEnabled } from "@/lib/ai/registry";
+import { latestAiResult } from "@/lib/ai/run";
+import { subjectKeys } from "@/lib/ai/prompt";
+import { triageTask } from "@/lib/ai/tasks/triage";
 import { FieldThread, type FieldThreadNote } from "./_components/field-thread";
 import { NoteCard } from "./_components/note-card";
 import { ReviewComposer, type DraftComment } from "./_components/review-composer";
 import { ReviewsList, type ReviewListItem } from "./_components/reviews-list";
 
+
+/**
+ * The model answers with an enum; these are what a reviewer reads. Kept apart
+ * from src/lib/ui/status.ts on purpose: that module maps *record* statuses, and
+ * putting an advisory AI label in there would let it leak onto a badge that is
+ * supposed to mean an application really was approved.
+ */
+const EFFORT_LABEL: Record<string, string> = {
+  SUBSTANTIVE: "Substantive answers",
+  MINIMAL: "Minimal answers",
+  TEMPLATED: "Looks templated",
+};
+
+const RECOMMENDATION_LABEL: Record<string, string> = {
+  NOTHING_STOOD_OUT: "Nothing stood out",
+  WORTH_A_LOOK: "Worth a look",
+  NEEDS_SCRUTINY: "Needs scrutiny",
+};
 
 export default async function ApplicationDetail({
   params,
@@ -64,6 +88,8 @@ export default async function ApplicationDetail({
           cooldownDays: true,
           qualityEnabled: true,
           qualityConfig: true,
+          aiEnabled: true,
+          aiConfig: true,
           requireApprovalCount: true,
           claEnabled: true,
           claRequired: true,
@@ -211,6 +237,22 @@ export default async function ApplicationDetail({
       }),
     };
   });
+  // The stored triage note, if the feature is on and somebody has run it. This
+  // is a plain database read: the page never calls a model, so it costs nothing
+  // and cannot be slowed down by a provider having a bad day.
+  const aiTriage = await (async () => {
+    const cfg = parseAiConfig(app.project.aiConfig);
+    const available = isAiTaskEnabled(triageTask, app.project, cfg);
+    if (!available) return { available: false as const, result: null };
+    return {
+      available: true as const,
+      result: await latestAiResult({
+        task: triageTask,
+        subjectKey: subjectKeys.application(app.id),
+      }),
+    };
+  })();
+
   const scored = userPrSummaries.filter((s) => s.score !== null) as Array<
     typeof userPrSummaries[number] & { score: number }
   >;
@@ -679,6 +721,75 @@ export default async function ApplicationDetail({
           </CardContent>
         </Card>
       )}
+
+        {aiTriage.available ? (
+          <Card>
+            <CardHeader className="flex-row items-start justify-between gap-3">
+              <div>
+                <CardTitle className="text-base">AI triage</CardTitle>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  A reading aid, not a decision. Check it against the answers
+                  before you act on it.
+                </p>
+              </div>
+              <form action={runApplicationTriage}>
+                <input type="hidden" name="projectId" value={app.project.id} />
+                <input type="hidden" name="appId" value={app.id} />
+                {aiTriage.result ? (
+                  <input type="hidden" name="force" value="1" />
+                ) : null}
+                <SubmitButton variant="outline" size="sm">
+                  {aiTriage.result ? "Run again" : "Run AI triage"}
+                </SubmitButton>
+              </form>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {!aiTriage.result ? (
+                <p className="text-sm text-muted-foreground">
+                  Nothing generated yet for this application.
+                </p>
+              ) : (
+                <>
+                  {aiTriage.result.output.promptInjectionSuspected ? (
+                    <p className="rounded-md bg-destructive/12 px-3 py-2 text-xs text-destructive-strong">
+                      These answers contain text addressed to an AI system.
+                      Treat the summary below with extra suspicion and read the
+                      raw answers yourself.
+                    </p>
+                  ) : null}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant="outline">
+                      {EFFORT_LABEL[aiTriage.result.output.effort]}
+                    </Badge>
+                    <Badge variant="outline">
+                      {RECOMMENDATION_LABEL[aiTriage.result.output.recommendation]}
+                    </Badge>
+                  </div>
+                  <p className="text-sm">{aiTriage.result.output.summary}</p>
+                  {aiTriage.result.output.concerns.length > 0 ? (
+                    <div>
+                      <p className="text-xs font-medium text-muted-foreground">
+                        Worth checking
+                      </p>
+                      <ul className="mt-1 list-disc space-y-1 pl-5 text-sm">
+                        {aiTriage.result.output.concerns.map((c, i) => (
+                          <li key={i}>{c}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+                  <p className="text-xs text-muted-foreground">
+                    Generated {formatDateTime(aiTriage.result.computedAt)}
+                    {aiTriage.result.modelId
+                      ? ` by ${aiTriage.result.modelId}`
+                      : ""}
+                    .
+                  </p>
+                </>
+              )}
+            </CardContent>
+          </Card>
+        ) : null}
 
       {app.project.qualityEnabled && (
         <Card>
