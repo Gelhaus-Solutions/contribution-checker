@@ -53,6 +53,31 @@ const QA_COMMENT_RE = /<!--\s*qa\s*:?\s*([\s\S]*?)-->/i;
 const CLOSING_RE =
   /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\b\s*:?\s+#(\d{1,7})\b/gi;
 
+/**
+ * Lines a PR template supplies as guidance, which the author never wrote.
+ *
+ * These matter more than they look. A template that opens with
+ * `eg: Bug fix, feature, docs update, ...` under its first heading makes that
+ * the first "real" paragraph in every PR in the repo, so the board would show
+ * the same meaningless sentence on every row and look broken. Saying nothing is
+ * the better answer: it is at least true.
+ */
+const BOILERPLATE = [
+  // Example markers: "eg:", "e.g.", "ex:", "i.e.".
+  /^(?:eg|e\.g|ex|i\.e)[.:]/i,
+  // Instruction voice. A description's opening paragraph almost never opens
+  // this way unless a template wrote it.
+  /^please\s/i,
+  /^put an? ["']?x["']?\s/i,
+  /^describe\s+(?:your|the)\s/i,
+  /^explain\s+(?:why|what|how)\b/i,
+  /^(?:list|link)\s+(?:any|the|related)\b/i,
+];
+
+function isBoilerplate(line: string): boolean {
+  return BOILERPLATE.some((re) => re.test(line));
+}
+
 /** Strip fenced code blocks, so a `# heading` inside a diff sample is not one. */
 function withoutFences(body: string): string {
   return body.replace(/^```[\s\S]*?^```/gm, "\n");
@@ -169,6 +194,12 @@ export function extractSummary(body: string | null | undefined): string | null {
       continue;
     }
     if (/^!?\[[^\]]*\]\([^)]*\)\s*$/.test(line)) continue; // lone image or link
+    // Template guidance is not a description. Skip it and keep looking, rather
+    // than stopping, so a PR that fills in a later section is still summarized.
+    if (isBoilerplate(line)) {
+      if (para.length > 0) break;
+      continue;
+    }
     para.push(line);
   }
   if (para.length === 0) return null;

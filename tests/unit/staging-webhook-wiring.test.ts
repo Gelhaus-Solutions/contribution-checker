@@ -258,12 +258,32 @@ describe("staging routing wiring in handlePullRequestEvent", () => {
     );
   });
 
-  it("ignores an edit that changed neither the base nor the title", async () => {
+  it("ignores an edit that changed none of base, title or body", async () => {
     await handlePullRequestEvent(
-      payload({ action: "edited", changes: { body: { from: "x" } } }) as never,
+      payload({ action: "edited", changes: {} }) as never,
     );
     expect(repoFindUnique).not.toHaveBeenCalled();
     expect(setPullRequestBase).not.toHaveBeenCalled();
+  });
+
+  it("refreshes the batch when a PR on staging has its body edited", async () => {
+    // The body carries the author's own `## QA` section and the issues the PR
+    // closes, and it is routinely filled in AFTER the PR merged. Without this
+    // the QA record keeps the empty version until something unrelated happens
+    // to touch the batch, which reads as the dashboard being broken.
+    await handlePullRequestEvent(
+      payload({
+        action: "edited",
+        changes: { body: { from: "old body" } },
+        pull_request: {
+          ...payload().pull_request,
+          base: { ref: "staging", repo: { default_branch: "main" } },
+        },
+      }) as never,
+    );
+    expect(signalStagingBatch).toHaveBeenCalled();
+    // A description says nothing about the contributor, so the gate stays out.
+    expect(decideForPR).not.toHaveBeenCalled();
   });
 
   it("never runs the gate for a title edit", async () => {

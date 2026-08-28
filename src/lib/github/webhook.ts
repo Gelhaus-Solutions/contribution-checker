@@ -68,6 +68,8 @@ type WebhookPayload = {
   changes?: {
     base?: { ref?: { from?: string } };
     title?: { from?: string };
+    /** Present when the description changed; carries the previous text. */
+    body?: { from?: string };
   };
   label?: { name: string };
   repositories?: Array<{ id: number; full_name: string }>;
@@ -484,11 +486,23 @@ export async function handlePullRequestEvent(
     return NOT_TERMINAL;
   }
 
-  // `edited` fires on every description tweak too. Only a base change (staging
-  // routing must re-assert itself) or a title change (the batch manifest shows
-  // titles) is interesting; everything else short-circuits on the payload
-  // alone, before any DB work.
-  if (isEdited && !payload.changes?.base && !payload.changes?.title) {
+  // `edited` fires on every description tweak too. Three changes are
+  // interesting: the base (staging routing must re-assert itself), the title
+  // (the batch manifest shows titles), and the body, which carries the author's
+  // own `## QA` section and the issues the PR closes. A body edit is usually
+  // somebody filling that in *after* the PR merged, which is exactly when the
+  // QA record needs re-deriving and the only event that says so. Everything
+  // else short-circuits on the payload alone, before any DB work.
+  //
+  // This cannot echo the bot's own writes: the only body the bot edits is the
+  // aggregate PR's, whose base is the default branch, so `touchesStaging` is
+  // false for it and no reconcile is signalled.
+  if (
+    isEdited &&
+    !payload.changes?.base &&
+    !payload.changes?.title &&
+    !payload.changes?.body
+  ) {
     return NOT_TERMINAL;
   }
 

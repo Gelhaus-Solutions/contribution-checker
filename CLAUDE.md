@@ -226,6 +226,12 @@ QA on the staging batch (`src/lib/qa/`, App mode only):
   batch that was already fully verified is the accident this exists to stop: the
   release looked ready, somebody merged one more PR, and nothing on GitHub says
   the answer changed. It drives `qa.items_added`.
+- **A PR body edit re-derives the record.** `handlePullRequestEvent` lets
+  `edited` through when `changes.body` is present, because the `## QA` section
+  is routinely written *after* the PR merged and that event is the only signal
+  that it changed. It cannot echo the bot's own writes: the only body the bot
+  edits is the aggregate PR's, whose base is the default branch, so
+  `touchesStaging` is false for it and no reconcile is signalled.
 - **No per-PR file lists.** Classifying each PR's files through the digest's
   `GROUPS` would cost one `GET /pulls/{n}/files` per PR per reconcile, which on
   a thirty-PR batch reconciled on every push is a rate-limit incident. The

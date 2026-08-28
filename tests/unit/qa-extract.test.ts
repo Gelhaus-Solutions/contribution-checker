@@ -163,4 +163,70 @@ describe("extractSummary", () => {
   it.each([null, undefined, ""])("handles %s", (body) => {
     expect(extractSummary(body)).toBeNull();
   });
+
+  it.each([
+    "eg: Bug fix, feature, docs update, ...",
+    "e.g. a bug fix",
+    "Please link to related issues when possible.",
+    "Describe your changes here.",
+    "Explain why this was needed.",
+    "List any related issues.",
+  ])("skips template guidance (%s)", (line) => {
+    expect(extractSummary(line)).toBeNull();
+  });
+});
+
+describe("a real PR template", () => {
+  // The gitroomhq/postiz-app template, which defeated the first version of
+  // extractSummary: every PR in the repo would have shown the same
+  // "eg: Bug fix, feature, docs update" line as its summary.
+  const TEMPLATE = [
+    "### What kind of change does this PR introduce?",
+    "",
+    "eg: Bug fix, feature, docs update, ...",
+    "",
+    "### Why was this change needed?",
+    "",
+    "Please link to related issues when possible, and explain WHY you changed things, not WHAT you changed.",
+    "",
+    "### Other information:",
+    "",
+    "eg: Did you discuss this change with anybody before working on it?",
+    "",
+    "### QA",
+    "",
+    "1. Verify Sentry initiatives",
+    "2. Verify Temporal activities send logs",
+    "3. Verify all normal console.log functions still submit logs to sentry",
+    "",
+    "### Checklist:",
+    "",
+    'Put a "X" in the boxes below to indicate you have followed the checklist;',
+    "",
+    "- [ ] I have read the CONTRIBUTING guide.",
+  ].join("\n");
+
+  it("says nothing rather than quoting the template at the reviewer", () => {
+    expect(extractSummary(TEMPLATE)).toBeNull();
+  });
+
+  it("still finds the QA steps the author actually wrote", () => {
+    expect(extractQaSteps(TEMPLATE)).toBe(
+      [
+        "1. Verify Sentry initiatives",
+        "2. Verify Temporal activities send logs",
+        "3. Verify all normal console.log functions still submit logs to sentry",
+      ].join("\n"),
+    );
+  });
+
+  it("picks up a real description once the author fills one in", () => {
+    const filled = TEMPLATE.replace(
+      "eg: Bug fix, feature, docs update, ...",
+      "Fixes the Sentry logging tags so console.log reaches Sentry.",
+    );
+    expect(extractSummary(filled)).toBe(
+      "Fixes the Sentry logging tags so console.log reaches Sentry.",
+    );
+  });
 });
