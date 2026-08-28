@@ -1,5 +1,5 @@
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
   // "native" covers local dev; "debian-openssl-3.0.x" is the production runtime
   // (node:24-slim / Debian bookworm). Pinned explicitly so the generated client
   // always ships the engine the container needs, regardless of where generate
@@ -88,8 +88,8 @@ model User {
   memberships     ProjectMember[]
   applications    Application[]
   notifications   Notification[]
-  decidedApps     Application[]      @relation("ApplicationDecidedBy")
-  decidedManual   ManualDecision[]   @relation("ManualDecisionDecidedBy")
+  decidedApps     Application[]       @relation("ApplicationDecidedBy")
+  decidedManual   ManualDecision[]    @relation("ManualDecisionDecidedBy")
   appNotes        ApplicationNote[]
   appReviews      ApplicationReview[]
   resolvedAppeals ApplicationAppeal[] @relation("AppealResolvedBy")
@@ -97,6 +97,7 @@ model User {
   formTemplates   FormTemplate[]
   claSignatures   ClaSignature[]
   qaVerdicts      StagingBatchItem[]
+  aiRuns          AiResult[]
 }
 
 model Project {
@@ -106,28 +107,28 @@ model Project {
   description String?
 
   // Form schema: Field[] (see src/lib/applications/schema.ts)
-  formSchema    String  @default("[]")
-  templateId    String?
+  formSchema String  @default("[]")
+  templateId String?
 
   // Default cooldown applied to new denials when "Allow resubmitting" is checked.
   // Null = no cooldown (instant resubmit if resubmitting is allowed).
   // Per-denial behavior is captured in Application.allowResubmit + cooldownUntil.
-  cooldownDays  Int?
+  cooldownDays Int?
 
   // Bypass list: JSON-stringified array of GitHub login patterns (supports * glob)
   bypassHandles String  @default("[]")
   bypassCollabs Boolean @default(true)
 
   // PR labels
-  labelsEnabled Boolean @default(true)
-  labelPending  String  @default("contribution:pending")
-  labelApproved String  @default("contribution:approved")
-  labelDenied   String  @default("contribution:denied")
+  labelsEnabled      Boolean @default(true)
+  labelPending       String  @default("contribution:pending")
+  labelApproved      String  @default("contribution:approved")
+  labelDenied        String  @default("contribution:denied")
   // Manual re-eval trigger: admins add this label to a PR to force the
   // checker to re-run (reopens closed-by-app PRs that now pass, or evaluates
   // PRs opened before the App was installed). Always removed by the bot
   // after processing, regardless of labelsEnabled.
-  labelEvaluate String  @default("contribution:evaluate")
+  labelEvaluate      String  @default("contribution:evaluate")
   // Staging labels deliberately live OUTSIDE the `contribution:` namespace:
   // setLabels() owns that namespace and strips every `contribution:*` label it
   // did not just set, so a staging label placed there would be wiped by the
@@ -136,10 +137,10 @@ model Project {
   // Carried by the bot's own staging -> default aggregate PR, so the retarget
   // path can recognize it and the reconciler can find it again if the tracked
   // number is lost.
-  labelStagingBatch  String @default("staging:batch")
+  labelStagingBatch  String  @default("staging:batch")
   // Escape hatch: a PR carrying this label is never retargeted to staging,
   // and keeps targeting the default branch.
-  labelStagingOptOut String @default("staging:opt-out")
+  labelStagingOptOut String  @default("staging:opt-out")
 
   // Staging routing. Two independent switches:
   //  - stagingRetargetEnabled rewrites PRs based on the default branch to
@@ -199,17 +200,29 @@ model Project {
   checksEnabled Boolean @default(true)
 
   // PR Quality scoring (heuristic-based, anti-slop style).
-  qualityEnabled      Boolean @default(false)
+  qualityEnabled          Boolean @default(false)
   // JSON: { [heuristicId]: { enabled: boolean, threshold?: any } }
-  qualityConfig       String  @default("{}")
+  qualityConfig           String  @default("{}")
   // Score below this triggers a public PR comment with breakdown. Default 20.
-  qualityCommentMin   Int     @default(20)
+  qualityCommentMin       Int     @default(20)
   // JSON array of strings: hidden honeypot tokens injected into the project's
   // PR template; PRs whose body contains any of these score `pr.honeypot_hit`.
-  prTemplateHoneypots String  @default("[]")
+  prTemplateHoneypots     String  @default("[]")
   // Fuzzy match strictness (0–100) for `pr.uses_template` checkbox matching.
   // 100 = exact substring match; lower = tolerate typos/edits. Default 80.
-  qualityTemplateMatchPct Int @default(80)
+  qualityTemplateMatchPct Int     @default(80)
+
+  // AI features (OpenRouter). Off by default and independently of every other
+  // switch: turning on the checker must not start spending money.
+  aiEnabled Boolean @default(false)
+  // Whether AI tasks may run automatically on webhook events. Off means every
+  // run is a person pressing a button, which is the default posture: the model
+  // never speaks unless somebody asked it to.
+  aiAutoRun Boolean @default(false)
+  // JSON: { [taskId]: { enabled: boolean } }. Parsed with parseAiConfig in
+  // src/lib/ai/config.ts, never a bare JSON.parse. Unknown ids are dropped so a
+  // task can be retired with no data migration, exactly like digest sections.
+  aiConfig  String  @default("{}")
 
   // PR-style review gate: minimum number of distinct approving reviews
   // (excluding the actor) required before approveApplication is allowed.
@@ -229,47 +242,47 @@ model Project {
   allowAppeals Boolean @default(false)
 
   // ----- CLA (Contributor License Agreement) -----
-  claEnabled             Boolean @default(false)
+  claEnabled                   Boolean @default(false)
   // Gate (block PRs / approval until signed) vs record-only.
-  claRequired            Boolean @default(true)
+  claRequired                  Boolean @default(true)
   // Allow the Corporate CLA path (company signs + maintains an employee roster).
-  claCorporateEnabled    Boolean @default(true)
+  claCorporateEnabled          Boolean @default(true)
   // Whether a newly signed Corporate CLA must be approved by an admin before it
   // confers coverage. When true, new CCLAs start PENDING; an admin approves
   // (-> ACTIVE) or rejects (-> REJECTED). When false they go straight to ACTIVE.
   claCorporateRequiresApproval Boolean @default(true)
   // Placement: a required acceptance step embedded in the application form,
   // and/or a standalone signing page at /p/<slug>/cla.
-  claPlacementEmbed      Boolean @default(true)
-  claPlacementStandalone Boolean @default(true)
+  claPlacementEmbed            Boolean @default(true)
+  claPlacementStandalone       Boolean @default(true)
   // Separate label for "approved but CLA/DCO unsigned" PRs (distinct from
   // labelPending so the two block reasons are visually distinct on GitHub).
-  labelClaPending        String  @default("contribution:cla-pending")
+  labelClaPending              String  @default("contribution:cla-pending")
   // DERIVED/ADVISORY (no longer the gate): lowest signature version per kind that
   // still satisfied the gate under the old monotonic-floor model. Coverage now
   // reads ClaDocumentVersion.resignRequired per-version (see src/lib/cla/status.ts).
   // Still written by publishClaVersion for backward-compat and UI hints.
-  minIclaVersion         Int     @default(0)
-  minCclaVersion         Int     @default(0)
+  minIclaVersion               Int     @default(0)
+  minCclaVersion               Int     @default(0)
   // Denormalized pointers to the active published document per kind (fast gate).
-  currentIclaVersionId   String?
-  currentCclaVersionId   String?
+  currentIclaVersionId         String?
+  currentCclaVersionId         String?
   // When a repo-file CLA auto-versions on push, whether that forces re-sign. In
   // review mode this only pre-fills the approval form's re-sign default.
   claAutoVersionRequiresResign Boolean @default(false)
   // When true, a detected repo-file change (push or manual sync) creates a
   // pending ClaPendingChange for admin review instead of auto-publishing. Takes
   // precedence over claAutoVersionRequiresResign for the publish-vs-queue choice.
-  claRepoFileReviewMode  Boolean @default(false)
+  claRepoFileReviewMode        Boolean @default(false)
   // Whether an ICLA requires a typed signature (full legal name). When false,
   // the "I agree" checkbox alone is a valid individual click-wrap. (CCLA always
   // requires the full executed signature block.)
-  claIclaRequireSignature Boolean @default(true)
+  claIclaRequireSignature      Boolean @default(true)
   // Admin-defined custom fields collected at signing time, as JSON Field[]
   // (same schema as the application form; see src/lib/applications/schema.ts).
   // Answers are stored immutably on ClaSignature.customFields.
-  claIclaCustomFields String @default("[]")
-  claCclaCustomFields String @default("[]")
+  claIclaCustomFields          String  @default("[]")
+  claCclaCustomFields          String  @default("[]")
 
   // ----- DCO (Developer Certificate of Origin): independent of CLA -----
   dcoEnabled Boolean @default(false)
@@ -283,14 +296,14 @@ model Project {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  members      ProjectMember[]
-  repos        Repo[]
-  applications Application[]
-  appeals      ApplicationAppeal[]
-  audits       AuditEvent[]
-  webhookEndpoints  ProjectWebhook[]
-  manualDecisions  ManualDecision[]
-  template     FormTemplate?    @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  members             ProjectMember[]
+  repos               Repo[]
+  applications        Application[]
+  appeals             ApplicationAppeal[]
+  audits              AuditEvent[]
+  webhookEndpoints    ProjectWebhook[]
+  manualDecisions     ManualDecision[]
+  template            FormTemplate?        @relation(fields: [templateId], references: [id], onDelete: SetNull)
   claDocumentVersions ClaDocumentVersion[]
   claSignatures       ClaSignature[]
   corporateClas       CorporateCla[]
@@ -298,28 +311,29 @@ model Project {
   claWaivers          ClaWaiver[]
   claEvents           ClaEventLog[]
   claPendingChanges   ClaPendingChange[]
+  aiResults           AiResult[]
 }
 
 /**
  * Outbound webhook endpoint. Each project can have any number of these.
  * `kind` controls payload formatting and signing:
- *   - "generic": JSON body identical to the legacy single-webhook contract,
- *     signed with HMAC-SHA256 in `X-ContribCheck-Signature` when `secret` is set.
- *   - "discord": body transformed to a Discord-compatible message (content +
- *     embed). No signing; `secret` is ignored.
+ * - "generic": JSON body identical to the legacy single-webhook contract,
+ * signed with HMAC-SHA256 in `X-ContribCheck-Signature` when `secret` is set.
+ * - "discord": body transformed to a Discord-compatible message (content +
+ * embed). No signing; `secret` is ignored.
  */
 model ProjectWebhook {
-  id        String  @id @default(cuid())
+  id        String   @id @default(cuid())
   projectId String
   name      String?
-  kind      String  @default("generic") // "generic" | "discord"
+  kind      String   @default("generic") // "generic" | "discord"
   url       String
   secret    String?
-  enabled   Boolean @default(true)
+  enabled   Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  project    Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   @@index([projectId])
 }
@@ -332,9 +346,9 @@ model ProjectWebhook {
 model ManualDecision {
   id          String   @id @default(cuid())
   projectId   String
-  ghLogin     String   // canonical lowercase GH login
-  ghId        Int?     // captured opportunistically
-  status      String   // "APPROVED" | "DENIED"
+  ghLogin     String // canonical lowercase GH login
+  ghId        Int? // captured opportunistically
+  status      String // "APPROVED" | "DENIED"
   reason      String?
   decidedById String?
   createdAt   DateTime @default(now())
@@ -374,8 +388,8 @@ model Repo {
   id                 String  @id @default(cuid())
   projectId          String
   ghRepoId           Int?    @unique // numeric GH id (survives renames); null until App is installed
-  fullName           String          // "owner/name", cached
-  installationId     Int?            // GH App installation id; null = manually entered, App not installed yet
+  fullName           String // "owner/name", cached
+  installationId     Int? // GH App installation id; null = manually entered, App not installed yet
   requireOwnApproval Boolean @default(false)
   active             Boolean @default(true) // false if installation was uninstalled
 
@@ -404,14 +418,14 @@ model Repo {
   // (null = no batch in flight). `stagingBatchSince` is when the previous
   // aggregate PR merged: PRs merged into staging before it are already in the
   // default branch and are excluded from the next batch's manifest.
-  stagingBatchPrNumber Int?
-  stagingBatchSince    DateTime?
+  stagingBatchPrNumber   Int?
+  stagingBatchSince      DateTime?
   // When the staging branch was last actually moved onto the default branch
   // (fast-forwarded or merged). The sync batching window is measured from
   // here rather than from entity-workflow state, because that workflow
   // completes as soon as the batch settles and a fresh run would forget it,
   // syncing again on the very next push to the default branch.
-  stagingLastSyncAt    DateTime?
+  stagingLastSyncAt      DateTime?
 
   createdAt DateTime @default(now())
 
@@ -426,14 +440,14 @@ model Repo {
 }
 
 model Application {
-  id        String   @id @default(cuid())
+  id        String  @id @default(cuid())
   projectId String
   userId    String
-  repoId    String?  // set if requireOwnApproval was hit (per-repo opt-out)
-  status    String   @default("SUBMITTED") // "SUBMITTED" | "APPROVED" | "DENIED"
+  repoId    String? // set if requireOwnApproval was hit (per-repo opt-out)
+  status    String  @default("SUBMITTED") // "SUBMITTED" | "APPROVED" | "DENIED"
 
   // JSON-stringified { fieldId: value }
-  answers   String   @default("{}")
+  answers String @default("{}")
 
   decidedById String?
   decidedAt   DateTime?
@@ -449,12 +463,12 @@ model Application {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  project   Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  user      User                @relation(fields: [userId], references: [id], onDelete: Cascade)
-  decidedBy User?               @relation("ApplicationDecidedBy", fields: [decidedById], references: [id], onDelete: SetNull)
-  notes     ApplicationNote[]
-  reviews   ApplicationReview[]
-  appeal    ApplicationAppeal?
+  project       Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user          User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  decidedBy     User?               @relation("ApplicationDecidedBy", fields: [decidedById], references: [id], onDelete: SetNull)
+  notes         ApplicationNote[]
+  reviews       ApplicationReview[]
+  appeal        ApplicationAppeal?
   claSignatures ClaSignature[]
 
   @@index([projectId, status])
@@ -467,20 +481,19 @@ model Application {
  * by the unique applicationId). Carries a free-text message plus revised
  * answers (JSON-stringified { fieldId: value }, validated against the
  * project's current formSchema at submit time via buildAnswersSchema).
- *
  * Lifecycle: created PENDING by submitAppeal (src/lib/applications/lifecycle.ts).
  * Resolved by resolveAppeal (src/lib/applications/decide.ts) to one of:
- *   GRANTED          (application approved; answers replaced with the revised
- *                     ones, then approveApplication runs and reopens PRs)
- *   RESUBMIT_ALLOWED (allowApplicationResubmit ran; application stays DENIED)
- *   REJECTED         (appeal closed; application stays DENIED)
+ * GRANTED          (application approved; answers replaced with the revised
+ * ones, then approveApplication runs and reopens PRs)
+ * RESUBMIT_ALLOWED (allowApplicationResubmit ran; application stays DENIED)
+ * REJECTED         (appeal closed; application stays DENIED)
  * resolvedById/resolvedAt/resolutionNote are set on any resolution.
  */
 model ApplicationAppeal {
-  id            String   @id @default(cuid())
-  applicationId String   @unique
+  id            String @id @default(cuid())
+  applicationId String @unique
   projectId     String
-  status        String   @default("PENDING") // "PENDING" | "GRANTED" | "RESUBMIT_ALLOWED" | "REJECTED"
+  status        String @default("PENDING") // "PENDING" | "GRANTED" | "RESUBMIT_ALLOWED" | "REJECTED"
 
   // Free-text appeal message from the applicant.
   message String
@@ -505,17 +518,15 @@ model ApplicationAppeal {
 
 /**
  * Comment on an application. Either:
- *  - a free-form internal note (reviewId=null, fieldId=null, parentId=null)
- *  - a per-field review comment (fieldId set; matches fieldIdSchema in
- *    src/lib/applications/schema.ts). Stays a draft until linked to a
- *    submitted ApplicationReview via reviewId.
- *  - a threaded reply (parentId set). Visibility inherits from the parent;
- *    when the parent is APPLICANT-visible, the application's applicant is
- *    allowed to author replies (no project role required).
- *
+ * - a free-form internal note (reviewId=null, fieldId=null, parentId=null)
+ * - a per-field review comment (fieldId set; matches fieldIdSchema in
+ * src/lib/applications/schema.ts). Stays a draft until linked to a
+ * submitted ApplicationReview via reviewId.
+ * - a threaded reply (parentId set). Visibility inherits from the parent;
+ * when the parent is APPLICANT-visible, the application's applicant is
+ * allowed to author replies (no project role required).
  * visibility: "INTERNAL" (project members only) | "APPLICANT" (also visible
  * to the applicant on the apply/status page).
- *
  * Edits are in-place: updatedAt > createdAt ⇒ render an "edited" marker.
  * Deletes are soft (deletedAt set) so threads stay coherent; UI renders a
  * tombstone in place of the body.
@@ -550,11 +561,9 @@ model ApplicationNote {
  * body (markdown). Per-field comments (ApplicationNote rows with fieldId
  * set) are linked to a review via ApplicationNote.reviewId at submission
  * time, and inherit visibility from the review's state:
- *
- *   APPROVED          ⇒ INTERNAL (LGTM signal between reviewers)
- *   CHANGES_REQUESTED ⇒ APPLICANT (feedback the applicant can see + reply to)
- *   COMMENTED         ⇒ author chooses INTERNAL or APPLICANT per submit
- *
+ * APPROVED          ⇒ INTERNAL (LGTM signal between reviewers)
+ * CHANGES_REQUESTED ⇒ APPLICANT (feedback the applicant can see + reply to)
+ * COMMENTED         ⇒ author chooses INTERNAL or APPLICANT per submit
  * Reviews can be soft-dismissed (deletedAt set) by an ADMIN; dismissed
  * reviews don't count toward the approval gate.
  */
@@ -562,7 +571,7 @@ model ApplicationReview {
   id            String    @id @default(cuid())
   applicationId String
   authorId      String
-  state         String    // "APPROVED" | "CHANGES_REQUESTED" | "COMMENTED"
+  state         String // "APPROVED" | "CHANGES_REQUESTED" | "COMMENTED"
   body          String?
   visibility    String    @default("INTERNAL") // "INTERNAL" | "APPLICANT"
   submittedAt   DateTime  @default(now())
@@ -578,14 +587,14 @@ model ApplicationReview {
 }
 
 model PrCheck {
-  id            String   @id @default(cuid())
+  id            String  @id @default(cuid())
   repoId        String
   prNumber      Int
   prNodeId      String
   authorGhLogin String
   authorGhId    Int
   status        String // "PENDING" | "APPROVED" | "DENIED" | "BYPASSED" | "CHECK_REQUIRED"
-  closedByApp   Boolean  @default(false)
+  closedByApp   Boolean @default(false)
   // For CHECK_REQUIRED PRs (CLA/DCO): why the Check is failing, so re-checks
   // and sweeps can find affected PRs. "cla_required" | "cla_stale" | "dco_missing".
   // Null for all other statuses (which use the close-PR machinery instead).
@@ -593,13 +602,13 @@ model PrCheck {
 
   // GitHub Check Run id (string to avoid BigInt JSON pitfalls). Null when the
   // check publishing is disabled or the installation lacks `checks:write`.
-  checkRunId String?
+  checkRunId    String?
   // Separate Check Run id for the dedicated "contribution-checker / cla" check
   // (published independently of the overall decision check so CLA can be a
   // standalone required status check in branch protection).
   claCheckRunId String?
   // Latest commit SHA evaluated; used to detect re-eval on push (synchronize).
-  headSha    String?
+  headSha       String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -619,10 +628,10 @@ model PrCheck {
  * instantly, no recompute job.
  */
 model PrQuality {
-  id         String   @id @default(cuid())
-  prCheckId  String   @unique
+  id              String    @id @default(cuid())
+  prCheckId       String    @unique
   // JSON: { [heuristicId]: { failed: boolean, value?: any, reason?: string } }
-  signalsRaw String   @default("{}")
+  signalsRaw      String    @default("{}")
   // JSON: cached fetched data (PR files+commits, account snapshot) so re-eval
   // doesn't require re-fetching everything on synchronize.
   fetchedRaw      String    @default("{}")
@@ -638,14 +647,12 @@ model PrQuality {
 
 /**
  * One PR the bot moved onto the staging branch, and the base it moved it off.
- *
  * Written only when a retarget actually succeeds, which is what makes the
  * opt-out label reversible: labelling a PR after the fact repoints it at
  * `fromBase`, and a PR the bot never touched is left exactly where its author
  * put it. Inferring this from "the base is staging" would move PRs opened
  * against staging on purpose down to the default branch, which is a release,
  * not a routing change.
- *
  * Not on PrCheck, because retargeting runs *before* the gate: on `opened`
  * there is no PrCheck row yet, and when the checker is disabled without
  * `trackWhenDisabled` there never will be.
@@ -654,9 +661,13 @@ model StagingRetarget {
   id       String @id @default(cuid())
   repoId   String
   prNumber Int
-  /** The base the PR had before the bot rewrote it: where a revert sends it. */
+  /**
+   * The base the PR had before the bot rewrote it: where a revert sends it.
+   */
   fromBase String
-  /** The staging branch it was pointed at, for the record. */
+  /**
+   * The staging branch it was pointed at, for the record.
+   */
   toBase   String
 
   createdAt DateTime @default(now())
@@ -669,7 +680,6 @@ model StagingRetarget {
 
 /**
  * One release's worth of staging work, and the QA state recorded against it.
- *
  * A batch is the *content range* (`default...staging`), not the aggregate PR.
  * That distinction matters: an aggregate PR closed without merging leaves the
  * commits exactly where they were, so the next reconcile opens a new PR over
@@ -677,17 +687,17 @@ model StagingRetarget {
  * ships the batch and closes it.
  */
 model StagingBatch {
-  id     String @id @default(cuid())
-  repoId String
+  id             String  @id @default(cuid())
+  repoId         String
   /// "OPEN" | "SHIPPED".
-  status String @default("OPEN")
+  status         String  @default("OPEN")
   /// The aggregate PR as of the last reconcile. Denormalized rather than read
   /// from Repo.stagingBatchPrNumber because that column is nulled the moment the
   /// PR closes, and a shipped batch still has to say which PR shipped it.
-  prNumber Int?
+  prNumber       Int?
   /// Check Run id for `contribution-checker / qa`, so upsertCheckRun PATCHes one
   /// run instead of creating a new one per verdict.
-  qaCheckRunId String?
+  qaCheckRunId   String?
   /// Whether the failure label is currently on the aggregate PR. Same purpose
   /// as StagingBatchItem.qaLabelApplied.
   qaLabelApplied Boolean @default(false)
@@ -706,7 +716,6 @@ model StagingBatch {
 /**
  * One thing somebody has to verify before the batch ships: a merged PR, or a
  * standing smoke test the project runs every release.
- *
  * Re-derived on every reconcile like the manifest itself, so a dropped webhook
  * cannot leave it stale. The QA columns are the exception to that re-derivation:
  * they are human input and are never overwritten by a reconcile, with one
@@ -718,31 +727,31 @@ model StagingBatchItem {
   /// Stable identity across reconciles: "pr:123" or "standing:<slug>". Keyed
   /// this way rather than by prNumber so standing checks live in the same table
   /// and answer to the same QA verbs.
-  key  String
+  key     String
   /// "PR" | "CHECK".
-  kind String
+  kind    String
 
-  prNumber Int?
-  title    String
-  authorLogin String?
+  prNumber       Int?
+  title          String
+  authorLogin    String?
   /// The merge commit the verdict was recorded against. When a reconcile finds a
   /// different one the PR was re-merged, the code under test is not the code
   /// that was verified, and the verdict is reset.
   mergeCommitSha String?
   mergedAt       DateTime?
   /// JSON string array.
-  labels       String @default("[]")
+  labels         String    @default("[]")
   /// JSON number array, from `closes|fixes|resolves #N` in the PR body. Lets the
   /// board group several PRs under the one feature they implement.
-  linkedIssues String @default("[]")
+  linkedIssues   String    @default("[]")
   /// First real paragraph of the PR body.
-  summary String?
+  summary        String?
   /// The author's own "## QA" / "## Testing" section, verbatim.
-  qaSteps String?
+  qaSteps        String?
 
   /// "QA_PENDING" | "QA_IN_REVIEW" | "QA_PASSED" | "QA_FAILED" | "QA_SKIPPED".
-  qaStatus String  @default("QA_PENDING")
-  qaById   String?
+  qaStatus     String    @default("QA_PENDING")
+  qaById       String?
   /// Attribution when the verdict arrived from Notion or Trello, where the actor
   /// has no local User row.
   qaByExternal String?
@@ -783,7 +792,6 @@ model StagingBatchItem {
 /**
  * A link between a repo's QA board and an external tool. Two-way: items are
  * pushed as cards, and verdicts recorded on the card are pulled back.
- *
  * Credentials are plain columns, following the ProjectWebhook.secret precedent.
  * They are read only inside the sync activity, so they never enter Temporal
  * workflow history, and never leave the server.
@@ -796,14 +804,14 @@ model QaBoardLink {
   /// Notion database id, or Trello list id.
   targetId String
 
-  token  String
+  token     String
   /// Trello needs a key alongside the token; Notion does not.
-  apiKey String?
+  apiKey    String?
   /// Provider-side webhook registration id, so unlinking can delete it.
-  hookId String?
+  hookId    String?
   /// JSON map of QA status -> the provider's option or label name. Parse with
   /// parseStatusMap in src/lib/qa/board/types.ts, never a bare JSON.parse.
-  statusMap String @default("{}")
+  statusMap String  @default("{}")
 
   enabled      Boolean   @default(true)
   /// High-water mark for the reconciling poll.
@@ -826,13 +834,13 @@ model AuditEvent {
   // Null = app-level event (e.g. Vault resolution failure) not tied to a project.
   projectId String?
   actorId   String? // null = system
-  kind      String  // e.g. "application.approved"
+  kind      String // e.g. "application.approved"
   // JSON-stringified
-  payload   String  @default("{}")
+  payload   String   @default("{}")
   createdAt DateTime @default(now())
 
   project Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  actor   User?   @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  actor   User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
 
   @@index([projectId, createdAt])
 }
@@ -852,13 +860,13 @@ model FormTemplate {
 }
 
 model Notification {
-  id      String   @id @default(cuid())
-  userId  String
-  kind    String
+  id        String    @id @default(cuid())
+  userId    String
+  kind      String
   // JSON-stringified
-  payload String   @default("{}")
-  readAt  DateTime?
-  createdAt DateTime @default(now())
+  payload   String    @default("{}")
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -895,12 +903,12 @@ model ProcessedWebhookDelivery {
  * repo file (e.g. CLA.md); for repo files the text is snapshotted at publish.
  */
 model ClaDocumentVersion {
-  id          String  @id @default(cuid())
-  projectId   String
-  kind        String  // "ICLA" | "CCLA"
-  version     Int
-  bodyMarkdown String  // snapshot of the exact text signed (even for repo-file source)
-  contentHash String  // sha256(bodyMarkdown): the version hash
+  id           String @id @default(cuid())
+  projectId    String
+  kind         String // "ICLA" | "CCLA"
+  version      Int
+  bodyMarkdown String // snapshot of the exact text signed (even for repo-file source)
+  contentHash  String // sha256(bodyMarkdown): the version hash
 
   sourceType      String  @default("manual") // "manual" | "repo_file"
   sourceRepoId    String?
@@ -908,19 +916,19 @@ model ClaDocumentVersion {
   sourceRef       String?
   sourceCommitSha String?
 
-  requireResign Boolean @default(false) // immutable: whether THIS publish forced re-sign at the time
+  requireResign  Boolean  @default(false) // immutable: whether THIS publish forced re-sign at the time
   // Mutable per-version gate input: when true, a signature on this version no
   // longer satisfies coverage (the signer must re-sign). The current version is
   // never marked. This replaces the monotonic floor as the source of truth for
   // coverage; see src/lib/cla/status.ts. Toggled via setVersionResign (laddered
   // as doc.resign_set) or selected at publish time.
-  resignRequired Boolean @default(false)
-  publishedById String?                 // actor (plain snapshot, no FK)
-  publishedAt   DateTime @default(now())
-  createdAt     DateTime @default(now())
+  resignRequired Boolean  @default(false)
+  publishedById  String? // actor (plain snapshot, no FK)
+  publishedAt    DateTime @default(now())
+  createdAt      DateTime @default(now())
 
-  project    Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  signatures ClaSignature[]
+  project       Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  signatures    ClaSignature[]
   corporateClas CorporateCla[]
 
   @@unique([projectId, kind, version])
@@ -944,11 +952,11 @@ model ClaSignature {
   ghLogin       String
   emailSnapshot String?
 
-  legalName       String  // printed full legal name (the signer's identity)
-  affirmation     String  // exact "I agree ..." text shown at signing
+  legalName       String // printed full legal name (the signer's identity)
+  affirmation     String // exact "I agree ..." text shown at signing
   agreed          Boolean @default(true)
-  documentVersion Int     // snapshot of the version number signed
-  contentHash     String  // snapshot of the version hash signed
+  documentVersion Int // snapshot of the version number signed
+  contentHash     String // snapshot of the version hash signed
 
   // Signature capture. A typed name is not always a legally valid signature, so
   // contributors may type, draw, or upload one. signatureKind selects which:
@@ -969,7 +977,7 @@ model ClaSignature {
   // ({ [fieldId]: value }), snapshotted at signing time. Null when none.
   customFields String?
 
-  status       String  @default("ACTIVE") // "ACTIVE" | "REVOKED"
+  status       String    @default("ACTIVE") // "ACTIVE" | "REVOKED"
   revokedById  String?
   revokedAt    DateTime?
   revokeReason String?
@@ -977,11 +985,11 @@ model ClaSignature {
   signedAt  DateTime @default(now())
   createdAt DateTime @default(now())
 
-  project     Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  version     ClaDocumentVersion @relation(fields: [versionId], references: [id], onDelete: Restrict)
-  user        User?              @relation(fields: [userId], references: [id], onDelete: SetNull)
-  application Application?       @relation(fields: [applicationId], references: [id], onDelete: SetNull)
-  corporateSignatory CorporateCla? @relation("CclaSignatory")
+  project            Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  version            ClaDocumentVersion @relation(fields: [versionId], references: [id], onDelete: Restrict)
+  user               User?              @relation(fields: [userId], references: [id], onDelete: SetNull)
+  application        Application?       @relation(fields: [applicationId], references: [id], onDelete: SetNull)
+  corporateSignatory CorporateCla?      @relation("CclaSignatory")
 
   @@index([projectId, ghId, status])
   @@index([ghId])
@@ -1006,11 +1014,11 @@ model CorporateCla {
   // signature; the signing Date is the linked ClaSignature.signedAt (immutable
   // server timestamp). Nullable for backward compatibility; required for new
   // signings via the Zod validator.
-  companyName       String  // Legal Entity (full legal name)
+  companyName       String // Legal Entity (full legal name)
   registeredAddress String?
   country           String?
   contactName       String? // Point of contact (name)
-  contactEmail      String  // Point of contact (email)
+  contactEmail      String // Point of contact (email)
   signatoryTitle    String? // Authorized representative's Title
   signatureText     String? // Authorized representative's typed signature
 
@@ -1019,15 +1027,15 @@ model CorporateCla {
   // REJECTED. REVOKED is the post-active maintainer override. Only ACTIVE
   // confers coverage on the roster. @default("ACTIVE") grandfathers pre-existing
   // rows; recordCclaSignature sets PENDING explicitly when approval is required.
-  status      String @default("ACTIVE") // "PENDING" | "ACTIVE" | "REJECTED" | "REVOKED"
+  status       String    @default("ACTIVE") // "PENDING" | "ACTIVE" | "REJECTED" | "REVOKED"
   approvedById String?
   approvedAt   DateTime?
   rejectedById String?
   rejectedAt   DateTime?
   rejectReason String?
-  revokedById String?
-  revokedAt   DateTime?
-  createdAt   DateTime @default(now())
+  revokedById  String?
+  revokedAt    DateTime?
+  createdAt    DateTime  @default(now())
 
   project   Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
   version   ClaDocumentVersion @relation(fields: [versionId], references: [id], onDelete: Restrict)
@@ -1054,7 +1062,7 @@ model CclaRosterMember {
   status String @default("ACTIVE") // "ACTIVE" | "REVOKED" | "DISPUTED"
 
   addedById   String?
-  addedAt     DateTime @default(now())
+  addedAt     DateTime  @default(now())
   revokedById String?
   revokedAt   DateTime?
   disputedAt  DateTime?
@@ -1080,8 +1088,8 @@ model ClaWaiver {
   reason    String
 
   grantedById String?
-  grantedAt   DateTime @default(now())
-  status      String   @default("ACTIVE") // "ACTIVE" | "REVOKED"
+  grantedAt   DateTime  @default(now())
+  status      String    @default("ACTIVE") // "ACTIVE" | "REVOKED"
   revokedById String?
   revokedAt   DateTime?
 
@@ -1143,24 +1151,89 @@ model ClaPendingChange {
   projectId String
   kind      String // "ICLA" | "CCLA"
 
-  sourceRepoId    String
-  sourcePath      String
-  sourceRef       String?
+  sourceRepoId      String
+  sourcePath        String
+  sourceRef         String?
   detectedCommitSha String?
   detectedContent   String
   contentHash       String // sha256(detectedContent) at detection time
 
   status String @default("PENDING") // "PENDING" | "APPROVED" | "REJECTED" | "SUPERSEDED"
 
-  detectedAt   DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-  reviewedById String?
-  reviewedAt   DateTime?
+  detectedAt         DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  reviewedById       String?
+  reviewedAt         DateTime?
   publishedVersionId String? // set on approve (plain pointer, no FK)
-  rejectReason String?
+  rejectReason       String?
 
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   @@index([projectId, status])
   @@index([projectId, kind, sourcePath, status])
+}
+
+/**
+ * One answer from a model, and what it cost.
+ * This is the whole persistence story for the AI subsystem: there is no second
+ * table and no per-feature column, because `subjectKey` is a namespaced string
+ * rather than a foreign key. A new AI task therefore needs no migration, the
+ * same way a new quality heuristic needs none.
+ * The unique constraint is doing two jobs at once. It is the content-hash
+ * dedupe, so identical input is never paid for twice. It is also the
+ * concurrency claim: a run inserts its RUNNING row first, and a second
+ * concurrent request loses the insert and reads the winner's row instead of
+ * issuing a second call. That is the same guarantee the `warnCommentedAt` claim
+ * gives PrQuality, delegated to the database rather than to an updateMany count.
+ */
+model AiResult {
+  id         String @id @default(cuid())
+  projectId  String
+  /// Catalog id from ALL_AI_TASKS, e.g. "application.triage".
+  taskId     String
+  /// Namespaced subject: "application:<id>", "batchitem:<id>", "prcheck:<id>",
+  /// "batch:<id>". Not a foreign key on purpose, so one table serves every task.
+  subjectKey String
+  /// sha256 over task id, prompt version, model and the normalized payload.
+  /// A prompt edit or a model switch changes the hash, so stale answers are
+  /// never served: they are simply never found.
+  inputHash  String
+
+  /// "RUNNING" | "OK" | "FAILED".
+  status    String  @default("RUNNING")
+  /// The validated answer, JSON-encoded. Null until the run succeeds.
+  output    String?
+  /// Raw model text, kept only on a validation failure. It is the sole way to
+  /// debug a prompt that has begun to drift, and it is not worth storing when
+  /// the answer parsed cleanly.
+  rawOutput String?
+  error     String?
+
+  /// The model the provider actually served, which can differ from the one
+  /// requested when OpenRouter falls back between providers.
+  modelId          String?
+  promptTokens     Int     @default(0)
+  completionTokens Int     @default(0)
+  /// Prompt tokens served from the provider's cache. Bills at roughly a tenth
+  /// of fresh input, so this is the number that says whether the stable-prefix
+  /// prompt layout is earning anything.
+  cachedTokens     Int     @default(0)
+  /// Millionths of a dollar, computed locally from the published rate card.
+  /// Indicative only: a BYOK key bills the upstream provider directly and
+  /// OpenRouter reports a zero cost for those calls.
+  costMicros       Int     @default(0)
+  latencyMs        Int     @default(0)
+
+  /// Who pressed the button. Null means an automatic run.
+  triggeredById String?
+
+  createdAt   DateTime  @default(now())
+  completedAt DateTime?
+
+  project     Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  triggeredBy User?   @relation(fields: [triggeredById], references: [id], onDelete: SetNull)
+
+  @@unique([taskId, subjectKey, inputHash])
+  @@index([projectId, taskId, createdAt])
+  @@index([subjectKey, status])
 }
