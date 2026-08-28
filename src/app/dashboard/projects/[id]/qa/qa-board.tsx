@@ -602,7 +602,7 @@ function ConfirmDialog({
 /** How long after the last tick before the batch is written to GitHub. Long
  * enough to absorb somebody working down a checklist, short enough that a
  * closed laptop rarely beats it. */
-const FLUSH_DELAY_MS = 2500;
+const FLUSH_DELAY_MS = 7500;
 
 /**
  * The author's QA steps, interactive when they wrote them as a task list.
