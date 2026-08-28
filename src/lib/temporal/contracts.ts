@@ -389,14 +389,12 @@ export const QA_BOARD_SYNC_DEBOUNCE = "5 seconds";
  */
 export const QA_BOARD_POLL_INTERVAL_MS = 5 * 60_000;
 
-/** Tick or untick one checkbox in a PR's QA section. */
+/** A batch of checkbox changes to write into a PR's QA section. Batched because
+ * the board holds ticks locally and flushes them together, so a reviewer working
+ * through a checklist costs the PR one timeline edit rather than one per box. */
 export type QaTaskToggleInput = {
   itemId: string;
-  index: number;
-  /** The step text as the board rendered it, so a description edited in the
-   * meantime is detected instead of ticking whatever moved into that slot. */
-  expectedText: string;
-  checked: boolean;
+  changes: Array<{ index: number; expectedText: string; checked: boolean }>;
 };
 
 export type QaTaskToggleResult =

@@ -235,7 +235,21 @@ QA on the staging batch (`src/lib/qa/`, App mode only):
   next reconcile, and there is no second copy to drift. The rewrite is surgical
   and bounded to the QA section, so it can never reach the contributor checklist
   below it, and `expectedText` refuses the write when the description moved
-  under the reviewer rather than ticking whatever slid into that index.
+  under the reviewer rather than ticking whatever slid into that index. A batch
+  is refused whole rather than half-applied: a partially written checklist is
+  worse than an unwritten one, because the reviewer cannot tell which half
+  landed.
+- **Two task parsers, and the difference matters.** `parseTaskLines` reads a
+  block that is already just the section, which is what `qaSteps` stores with
+  the heading stripped; `parseTasksInBody` scopes to the QA span of a full body.
+  Handing stored steps to the body-scoped one finds no heading, returns nothing,
+  and silently degrades the checklist to read-only text. That shipped once.
+  There is a test asserting the two agree across extraction.
+- **Ticks are held in the browser and flushed as one batch**, on a timer or on
+  unmount, which is every way the dialog closes. One edit on the PR per
+  checklist rather than one per box, and no notification storm for a reviewer
+  doing one thing. The PR body is still the only stored state: pending ticks are
+  short-lived, and a failed flush is corrected by the next reconcile.
 - **A PR body edit re-derives the record, and a merged PR is not exempt.** `handlePullRequestEvent` lets
   `edited` through when `changes.body` is present, because the `## QA` section
   is routinely written *after* the PR merged and that event is the only signal

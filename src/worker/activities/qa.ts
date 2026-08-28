@@ -7,7 +7,7 @@ import {
   repoRef,
   updatePullRequestBody,
 } from "@/lib/github/pr-actions";
-import { toggleTaskInBody } from "@/lib/qa/tasks";
+import { applyTaskChanges } from "@/lib/qa/tasks";
 import { extractQaSteps } from "@/lib/qa/extract";
 import type { QaTaskToggleResult } from "@/lib/temporal/contracts";
 
@@ -80,9 +80,7 @@ export async function signalStagingReconcile(args: {
  */
 export async function toggleQaTask(args: {
   itemId: string;
-  index: number;
-  expectedText: string;
-  checked: boolean;
+  changes: Array<{ index: number; expectedText: string; checked: boolean }>;
 }): Promise<QaTaskToggleResult> {
   const item = await prisma.stagingBatchItem.findUnique({
     where: { id: args.itemId },
@@ -105,22 +103,21 @@ export async function toggleQaTask(args: {
   const pr = await getPullRequest(ref, item.prNumber);
   if (!pr) return { ok: false, reason: "not_found" };
 
-  const result = toggleTaskInBody({
+  const result = applyTaskChanges({
     body: pr.body ?? "",
-    index: args.index,
-    expectedText: args.expectedText,
-    checked: args.checked,
+    changes: args.changes,
   });
   if (!result.ok) {
-    // `unchanged` is not a failure: two reviewers clicking the same box land
-    // here, and the state they wanted is the state that exists.
-    if (result.reason === "unchanged") return { ok: true, steps: null };
     logger.info(
       { itemId: args.itemId, prNumber: item.prNumber, reason: result.reason },
-      "qa task toggle refused",
+      "qa task write refused",
     );
     return { ok: false, reason: result.reason };
   }
+
+  // Nothing actually moved: two reviewers ticking the same box, or a flush of
+  // changes GitHub already has. Not worth an edit in the PR's timeline.
+  if (result.applied === 0) return { ok: true, steps: extractQaSteps(pr.body ?? "") };
 
   await updatePullRequestBody(ref, item.prNumber, result.body);
 
@@ -128,7 +125,7 @@ export async function toggleQaTask(args: {
   await prisma.stagingBatchItem.update({
     where: { id: item.id },
     // The external card carries the steps, so clearing the hash makes the next
-    // board sync push the tick out to Notion and Trello.
+    // board sync push the ticks out to Notion and Trello.
     data: { qaSteps: steps, externalHash: null },
   });
 

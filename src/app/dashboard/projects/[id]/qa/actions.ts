@@ -369,12 +369,16 @@ export async function unlinkQaBoard(args: {
 
 // ===== QA step checkboxes =====
 
-const toggleStepSchema = z.object({
-  projectId: z.string().min(1),
-  itemId: z.string().min(1),
+const taskChangeSchema = z.object({
   index: z.number().int().min(0).max(200),
   expectedText: z.string().min(1).max(500),
   checked: z.boolean(),
+});
+
+const toggleStepSchema = z.object({
+  projectId: z.string().min(1),
+  itemId: z.string().min(1),
+  changes: z.array(taskChangeSchema).min(1).max(200),
 });
 
 export type ToggleQaStepResult =
@@ -382,19 +386,19 @@ export type ToggleQaStepResult =
   | { ok: false; error: string };
 
 /**
- * Tick one of the author's `## QA` steps, and write it back to the PR.
+ * Write a batch of the author's `## QA` step ticks back to the PR.
  *
  * The PR body is the source of truth for these, not a local column: that is
  * what makes a box ticked on GitHub show up here, and it means there is no
- * second copy to drift. The write goes through Temporal like every other GitHub
+ * second copy to drift. The board holds ticks locally and flushes them here, so
+ * a reviewer working through a checklist produces one edit on the PR rather
+ * than one per box. The write goes through Temporal like every other GitHub
  * side effect outside the webhook path.
  */
 export async function toggleQaStep(args: {
   projectId: string;
   itemId: string;
-  index: number;
-  expectedText: string;
-  checked: boolean;
+  changes: Array<{ index: number; expectedText: string; checked: boolean }>;
 }): Promise<ToggleQaStepResult> {
   const parsed = toggleStepSchema.parse(args);
   await requireProjectRole(parsed.projectId, "REVIEWER");
@@ -412,9 +416,7 @@ export async function toggleQaStep(args: {
 
   const result = await runQaTaskToggle({
     itemId: item.id,
-    index: parsed.index,
-    expectedText: parsed.expectedText,
-    checked: parsed.checked,
+    changes: parsed.changes,
   });
 
   if (!result.ok) {
@@ -425,11 +427,11 @@ export async function toggleQaStep(args: {
           ? "The PR description changed since this page loaded. Reload to see the current steps."
           : result.reason === "no_section"
             ? "That PR no longer has a QA section."
-            : "Could not find that step on the PR any more.",
+            : "Could not find those steps on the PR any more.",
     };
   }
 
-  // Push the tick out to Notion and Trello, which carry the steps on the card.
+  // Push the ticks out to Notion and Trello, which carry the steps on the card.
   await signalQaBoardSync({
     repoId: item.batch.repoId,
     reason: "qa_step_toggled",

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -20,7 +20,7 @@ import { useActionFeedback } from "@/components/ui/use-action-feedback";
 import { cn } from "@/lib/cn";
 import type { QaStatus } from "@/lib/qa/types";
 import { setQaStatus, toggleQaStep } from "./actions";
-import { parseTasks, taskProgress } from "@/lib/qa/tasks";
+import { parseTaskLines, taskProgress } from "@/lib/qa/tasks";
 
 export type QaBoardItem = {
   id: string;
@@ -599,17 +599,23 @@ function ConfirmDialog({
   );
 }
 
+/** How long after the last tick before the batch is written to GitHub. Long
+ * enough to absorb somebody working down a checklist, short enough that a
+ * closed laptop rarely beats it. */
+const FLUSH_DELAY_MS = 2500;
+
 /**
  * The author's QA steps, interactive when they wrote them as a task list.
  *
- * Ticking a box writes straight back to the PR description, because that is
- * where these live. There is no local copy of the state to drift: the checkbox
- * characters are in the body, so a box ticked on GitHub shows up here and one
- * ticked here shows up there, without either side owning a second answer.
+ * Ticks are held in the browser and flushed as one batch, on a timer or when
+ * the dialog closes. The alternative, a round trip per click, makes the
+ * checkbox lag behind the pointer and writes one edit to the PR's timeline per
+ * box, which on a five-step checklist is five notifications for one reviewer
+ * doing one thing.
  *
- * The rendered text is kept in local state only so the click feels immediate;
- * the server returns the freshly-derived steps and the next reconcile would
- * re-derive the same thing anyway.
+ * The PR body remains the only stored state. There is no local copy to
+ * reconcile: what is held here is a short-lived set of pending changes, and if
+ * a flush fails the next reconcile re-derives the truth from GitHub.
  */
 function QaSteps({
   projectId,
@@ -621,33 +627,80 @@ function QaSteps({
   canVerify: boolean;
 }) {
   const [steps, setSteps] = useState(item.qaSteps ?? "");
-  const [busy, setBusy] = useState<number | null>(null);
+  const [pending, setPending] = useState<Map<number, boolean>>(new Map());
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const tasks = useMemo(() => parseTasks(steps), [steps]);
-  const progress = useMemo(() => taskProgress(tasks), [tasks]);
+  const tasks = useMemo(() => parseTaskLines(steps), [steps]);
 
-  async function toggle(index: number, text: string, checked: boolean) {
-    setError(null);
-    setBusy(index);
+  // The list as the reviewer sees it: stored state with their unsaved ticks
+  // laid over the top.
+  const shown = useMemo(
+    () => tasks.map((t) => ({ ...t, checked: pending.get(t.index) ?? t.checked })),
+    [tasks, pending],
+  );
+  const progress = useMemo(() => taskProgress(shown), [shown]);
+
+  // Held in a ref as well as state so the flush can run from a timer or from
+  // unmount, neither of which sees the latest render's closure.
+  const pendingRef = useRef(pending);
+  pendingRef.current = pending;
+  const tasksRef = useRef(tasks);
+  tasksRef.current = tasks;
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const flush = useCallback(async () => {
+    if (timer.current) {
+      clearTimeout(timer.current);
+      timer.current = null;
+    }
+    const changes = [...pendingRef.current.entries()]
+      .map(([index, checked]) => {
+        const task = tasksRef.current.find((t) => t.index === index);
+        return task ? { index, expectedText: task.text, checked } : null;
+      })
+      .filter((c): c is { index: number; expectedText: string; checked: boolean } => c != null);
+    if (changes.length === 0) return;
+
+    setSaving(true);
     try {
-      const result = await toggleQaStep({
-        projectId,
-        itemId: item.id,
-        index,
-        expectedText: text,
-        checked,
-      });
+      const result = await toggleQaStep({ projectId, itemId: item.id, changes });
       if (result.ok) {
+        setPending(new Map());
         if (result.steps != null) setSteps(result.steps);
       } else {
         setError(result.error);
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not update that step.");
+      setError(e instanceof Error ? e.message : "Could not save those steps.");
     } finally {
-      setBusy(null);
+      setSaving(false);
     }
+  }, [projectId, item.id]);
+
+  // Closing the dialog unmounts this, which is every way out of it: the close
+  // button, Escape and clicking away. Flushing here is what makes "save on
+  // close" cover all three rather than just the one with a handler on it.
+  const flushRef = useRef(flush);
+  flushRef.current = flush;
+  useEffect(() => {
+    return () => {
+      void flushRef.current();
+    };
+  }, []);
+
+  function toggle(index: number, checked: boolean) {
+    setError(null);
+    setPending((prev) => {
+      const next = new Map(prev);
+      const original = tasksRef.current.find((t) => t.index === index);
+      // Ticking back to where it started is not a change to write.
+      if (original && original.checked === checked) next.delete(index);
+      else next.set(index, checked);
+      return next;
+    });
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => void flushRef.current(), FLUSH_DELAY_MS);
   }
 
   // No task list: the author wrote prose or a numbered list, so render it as
@@ -656,14 +709,26 @@ function QaSteps({
     return <Markdown source={steps} className="rounded-md bg-muted/40 p-3" />;
   }
 
+  const unsaved = pending.size > 0;
+
   return (
     <div className="space-y-2">
-      <p className="text-xs text-muted-foreground">
-        {progress.done} of {progress.total} steps done. Ticking a box updates
-        the PR description.
+      <p className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+        <span>
+          {progress.done} of {progress.total} steps done.
+        </span>
+        {saving ? (
+          <span>Saving to the PR...</span>
+        ) : unsaved ? (
+          <span className="text-warning-strong">
+            Unsaved. Written to the PR when you close this.
+          </span>
+        ) : (
+          <span>Ticking a box updates the PR description.</span>
+        )}
       </p>
       <ul className="space-y-1.5 rounded-md bg-muted/40 p-3">
-        {tasks.map((task) => (
+        {shown.map((task) => (
           <li key={`${task.index}:${task.text}`}>
             <label
               className={cn(
@@ -674,16 +739,14 @@ function QaSteps({
               <input
                 type="checkbox"
                 checked={task.checked}
-                disabled={!canVerify || busy !== null}
-                onChange={(e) =>
-                  toggle(task.index, task.text, e.target.checked)
-                }
+                disabled={!canVerify}
+                onChange={(e) => toggle(task.index, e.target.checked)}
                 className="mt-0.5 h-4 w-4 rounded border-border accent-primary"
               />
               <span
                 className={cn(
                   task.checked && "text-muted-foreground line-through",
-                  busy === task.index && "opacity-50",
+                  pending.has(task.index) && "italic",
                 )}
               >
                 {task.text}
@@ -702,7 +765,7 @@ function QaSteps({
 /** Step progress at a glance, so the list answers "how far in is this?"
  * without opening every item. */
 function StepBadge({ steps }: { steps: string | null }) {
-  const progress = useMemo(() => taskProgress(parseTasks(steps)), [steps]);
+  const progress = useMemo(() => taskProgress(parseTaskLines(steps)), [steps]);
   if (progress.total === 0) {
     return steps ? (
       <Badge variant="secondary" className="text-[10px]">

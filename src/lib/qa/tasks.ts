@@ -85,17 +85,21 @@ export function findQaSpan(
   return start === null ? null : { start, end: masked.length };
 }
 
-/** The tasks in a body's QA section, in the order they appear. */
-export function parseTasks(body: string | null | undefined): QaTask[] {
-  if (!body) return [];
-  const lines = body.split(/\r?\n/);
-  const span = findQaSpan(lines);
-  if (!span) return [];
-  const masked = maskFences(lines);
-
+/**
+ * The tasks in a block of text that is *already* just the QA section.
+ *
+ * This is what the board uses, because `StagingBatchItem.qaSteps` stores the
+ * section's content with the heading stripped off. Handing that to the
+ * body-scoped parser below finds no heading, returns nothing, and silently
+ * degrades the checklist to read-only text, which is exactly the bug this
+ * split exists to prevent.
+ */
+export function parseTaskLines(block: string | null | undefined): QaTask[] {
+  if (!block) return [];
+  const masked = maskFences(block.split(/\r?\n/));
   const out: QaTask[] = [];
-  for (let i = span.start; i < span.end; i += 1) {
-    const m = TASK_RE.exec(masked[i]);
+  for (const line of masked) {
+    const m = TASK_RE.exec(line);
     if (!m) continue;
     out.push({
       index: out.length,
@@ -106,30 +110,54 @@ export function parseTasks(body: string | null | undefined): QaTask[] {
   return out;
 }
 
+/**
+ * The tasks in a full PR body's QA section, scoped to that section so the
+ * contributor checklist underneath is never included.
+ */
+export function parseTasksInBody(body: string | null | undefined): QaTask[] {
+  if (!body) return [];
+  const lines = body.split(/\r?\n/);
+  const span = findQaSpan(lines);
+  if (!span) return [];
+  return parseTaskLines(
+    maskFences(lines).slice(span.start, span.end).join("\n"),
+  );
+}
+
 export function taskProgress(tasks: QaTask[]): { done: number; total: number } {
   return { done: tasks.filter((t) => t.checked).length, total: tasks.length };
 }
 
-export type ToggleResult =
-  | { ok: true; body: string }
-  | { ok: false; reason: "no_section" | "not_found" | "text_moved" | "unchanged" };
-
-/**
- * Flip one checkbox in a PR body.
- *
- * `expectedText` is the guard that makes this safe to run against a body that
- * may have changed since the board rendered it. Somebody editing the PR can
- * insert, delete or reorder steps, and an index alone would then tick the wrong
- * one. When the text at that index does not match, the whole toggle is refused
- * rather than applied to whatever happens to be there now, and the caller tells
- * the reviewer to reload.
- */
-export function toggleTaskInBody(args: {
-  body: string;
+/** One box the reviewer moved. */
+export type TaskChange = {
   index: number;
+  /** The step text as the board rendered it, so a description edited in the
+   * meantime is detected rather than ticking whatever slid into that slot. */
   expectedText: string;
   checked: boolean;
-}): ToggleResult {
+};
+
+export type ApplyResult =
+  | { ok: true; body: string; applied: number }
+  | { ok: false; reason: "no_section" | "not_found" | "text_moved" };
+
+/**
+ * Apply a batch of checkbox changes to a PR body in one pass.
+ *
+ * Batched rather than one call per click because the board holds the ticks
+ * locally and flushes them together: a reviewer working through five steps
+ * should cost the PR one edit in its timeline, not five.
+ *
+ * All-or-nothing on the guard. If any step's text has moved, the whole batch is
+ * refused rather than half-applied, because a partially-written checklist is
+ * worse than an unwritten one: the reviewer cannot tell which half landed.
+ * Changes that are already in the desired state are skipped, not refused, so
+ * two people ticking the same box is not an error.
+ */
+export function applyTaskChanges(args: {
+  body: string;
+  changes: TaskChange[];
+}): ApplyResult {
   // Preserve the body's own line endings: rejoining CRLF content with LF would
   // rewrite every line of the description as a diff.
   const crlf = args.body.includes("\r\n");
@@ -138,23 +166,28 @@ export function toggleTaskInBody(args: {
   if (!span) return { ok: false, reason: "no_section" };
   const masked = maskFences(lines);
 
-  let seen = -1;
+  // Task index -> line number, computed once so the batch cannot renumber
+  // itself as it edits.
+  const lineFor: number[] = [];
   for (let i = span.start; i < span.end; i += 1) {
-    const m = TASK_RE.exec(masked[i]);
-    if (!m) continue;
-    seen += 1;
-    if (seen !== args.index) continue;
+    if (TASK_RE.test(masked[i])) lineFor.push(i);
+  }
 
-    if (m[4].trim() !== args.expectedText.trim()) {
+  let applied = 0;
+  for (const change of args.changes) {
+    const line = lineFor[change.index];
+    if (line === undefined) return { ok: false, reason: "not_found" };
+    const m = TASK_RE.exec(lines[line]);
+    if (!m) return { ok: false, reason: "not_found" };
+    if (m[4].trim() !== change.expectedText.trim()) {
       return { ok: false, reason: "text_moved" };
     }
-    if ((m[2].toLowerCase() === "x") === args.checked) {
-      return { ok: false, reason: "unchanged" };
-    }
+    if ((m[2].toLowerCase() === "x") === change.checked) continue;
     // Rebuilt from the captured pieces, so indentation, bullet character and
     // the text after the box all survive exactly as the author wrote them.
-    lines[i] = `${m[1]}${args.checked ? "x" : " "}${m[3]}${m[4]}`;
-    return { ok: true, body: lines.join(crlf ? "\r\n" : "\n") };
+    lines[line] = `${m[1]}${change.checked ? "x" : " "}${m[3]}${m[4]}`;
+    applied += 1;
   }
-  return { ok: false, reason: "not_found" };
+
+  return { ok: true, body: lines.join(crlf ? "\r\n" : "\n"), applied };
 }
