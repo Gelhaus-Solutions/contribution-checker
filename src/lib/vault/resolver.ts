@@ -45,6 +45,8 @@ export const KNOWN_SECRET_NAMES = [
   "SMTP_USER",
   "SMTP_PASS",
   "SMTP_FROM",
+  // OpenRouter API key for the AI features. Read only inside the AI activity.
+  "OPENROUTER_API_KEY",
   // Hexclave (Stack Auth). The publishable client key and project id are public
   // and read directly from process.env; the secret/admin keys and the webhook
   // signing secret may live in Vault, so they're listed here to pre-warm and to

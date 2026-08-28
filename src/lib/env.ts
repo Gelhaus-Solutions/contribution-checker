@@ -103,6 +103,32 @@ const schema = z.object({
   VAULT_BREAKER_THRESHOLD: z.coerce.number().int().positive().optional(),
   VAULT_BREAKER_COOLDOWN_MS: z.coerce.number().int().positive().optional(),
 
+  // OpenRouter: the AI features (application triage, PR/QA summaries, release
+  // narrative, the AI quality signal). The API key is deliberately NOT in this
+  // typed object: it is resolved with getSecret("OPENROUTER_API_KEY") inside the
+  // Temporal activity that calls the model, so it can live in Vault and never
+  // reaches workflow history. Only the non-secret routing config is typed here.
+  //
+  // Two tiers, because only one of the four tasks does real synthesis. The cheap
+  // tier handles triage, QA steps and the quality signal (short context,
+  // constrained JSON, the regime where a small model is close to a large one).
+  // The judgment tier is used by the release narrative alone. In development
+  // both are normally pinned to the cheap model to protect the spend cap.
+  //
+  // The defaults are 3.x deliberately. Google retired the whole Gemini 2.5 line
+  // for new users, so on a BYOK key it answers 404 with "no longer available to
+  // new users, use models/gemini-3.5-flash-lite". 2.5-flash-lite is a third the
+  // price and is the obvious pick on a pricing table alone, which is exactly why
+  // this note is here: it cannot be called, and the cheaper number is a trap.
+  OPENROUTER_BASE_URL: z.string().url().default("https://openrouter.ai/api/v1"),
+  AI_MODEL_CHEAP: z.string().default("google/gemini-3.5-flash-lite"),
+  AI_MODEL_JUDGMENT: z.string().default("google/gemini-3.7-flash"),
+  // Caps the completion, which is what actually costs money: output tokens are
+  // billed several times the input rate, and on the 3.x models reasoning tokens
+  // are billed as output too. Every task's JSON schema is far smaller than this.
+  AI_MAX_OUTPUT_TOKENS: z.coerce.number().int().positive().default(1024),
+  AI_REQUEST_TIMEOUT_MS: z.coerce.number().int().positive().default(45_000),
+
   // Temporal: durable execution backend. The worker and the Next.js client both
   // connect to TEMPORAL_HOST:TEMPORAL_PORT. In production the connection is
   // mTLS-secured; the client cert/key/CA are resolved from Vault at startup
@@ -229,6 +255,11 @@ export const env = {
     presentInEnvOrVault("GITHUB_APP_WEBHOOK_SECRET"),
   smtpConfigured:
     presentInEnvOrVault("SMTP_HOST") && presentInEnvOrVault("SMTP_FROM"),
+  // The AI features need nothing but the key: model ids have defaults, and the
+  // key may live in Vault, so this is a presence check rather than a read.
+  // Every AI surface short-circuits on this the way the webhook path does for
+  // GitHub, which is what makes the whole subsystem safe to leave unconfigured.
+  aiConfigured: presentInEnvOrVault("OPENROUTER_API_KEY"),
   vaultEnabled: !!raw.VAULT_ADDR,
   // Temporal is "configured" when a host is set. mTLS material is checked
   // separately at connect time (see src/lib/temporal/connection.ts): when
