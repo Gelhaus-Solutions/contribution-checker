@@ -16,7 +16,11 @@ import { EmptyState } from "@/components/empty-state";
 import { formatDate, formatRelative } from "@/lib/ui/format";
 import { countQa, isGreen, parseQaStatus } from "@/lib/qa/types";
 import { resolveStagingConfig, stagingProjectSelect, stagingRepoSelect } from "@/lib/github/staging";
-import { QaBoard, type QaBoardItem } from "./qa-board";
+import { QaBoard, type QaBoardItem, type AiStepsView } from "./qa-board";
+import { isAiTaskEnabled } from "@/lib/ai/registry";
+import { parseAiConfig } from "@/lib/ai/config";
+import { subjectKeys } from "@/lib/ai/prompt";
+import { qaStepsTask } from "@/lib/ai/tasks/qa-steps";
 import { BoardLinks, type BoardLinkRow } from "./board-links";
 
 export const dynamic = "force-dynamic";
@@ -50,7 +54,7 @@ export default async function ProjectQa({
 
   const project = await prisma.project.findUnique({
     where: { id },
-    select: { ...stagingProjectSelect, name: true },
+    select: { ...stagingProjectSelect, name: true, aiEnabled: true, aiConfig: true },
   });
   if (!project) return null;
 
@@ -154,6 +158,35 @@ export default async function ProjectQa({
     },
   });
 
+  // Generated steps for every item on the board, in one query. Loaded here and
+  // joined below rather than stored on StagingBatchItem, so a reconcile (which
+  // re-derives every non-qa column) can never wipe them and they can never be
+  // mistaken for something the author wrote.
+  const aiStepsEnabled = isAiTaskEnabled(qaStepsTask, project, parseAiConfig(project.aiConfig));
+  const aiStepsByItem = new Map<string, AiStepsView>();
+  if (aiStepsEnabled && (batch?.items?.length ?? 0) > 0) {
+    const keys = (batch?.items ?? []).map((i) => subjectKeys.batchItem(i.id));
+    const rows = await prisma.aiResult.findMany({
+      where: { taskId: qaStepsTask.id, subjectKey: { in: keys }, status: "OK" },
+      orderBy: { createdAt: "desc" },
+      select: { subjectKey: true, output: true, modelId: true, completedAt: true, createdAt: true },
+    });
+    for (const row of rows) {
+      // Newest first, so the first row per subject wins and later ones are
+      // superseded runs.
+      if (aiStepsByItem.has(row.subjectKey) || !row.output) continue;
+      const parsed = qaStepsTask.parse(safeJson(row.output));
+      if (!parsed) continue;
+      aiStepsByItem.set(row.subjectKey, {
+        summary: parsed.summary,
+        steps: parsed.steps,
+        unknowns: parsed.unknowns,
+        modelId: row.modelId,
+        generatedAt: formatRelative(row.completedAt ?? row.createdAt),
+      });
+    }
+  }
+
   const items: QaBoardItem[] = (batch?.items ?? []).map((i) => ({
     id: i.id,
     key: i.key,
@@ -172,6 +205,7 @@ export default async function ProjectQa({
     mergedAt: i.mergedAt ? formatRelative(i.mergedAt) : null,
     droppedAt: i.droppedAt ? formatDate(i.droppedAt) : null,
     externalUrl: i.externalUrl,
+    aiSteps: aiStepsByItem.get(subjectKeys.batchItem(i.id)) ?? null,
   }));
 
   const counts = countQa(
@@ -290,6 +324,7 @@ export default async function ProjectQa({
                 items={items}
                 repoFullName={repo.fullName}
                 canVerify={canVerify && !shipped}
+                aiStepsEnabled={aiStepsEnabled}
               />
             </CardContent>
           </Card>
@@ -391,5 +426,14 @@ function safeNumbers(raw: string): number[] {
       : [];
   } catch {
     return [];
+  }
+}
+
+/** Tolerant parse for a stored AiResult payload, like every JSON column here. */
+function safeJson(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
   }
 }

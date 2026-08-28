@@ -16,10 +16,11 @@ import {
 import { StatusBadge } from "@/components/status-badge";
 import { Markdown } from "@/components/markdown";
 import { EmptyState } from "@/components/empty-state";
+import { SubmitButton } from "@/components/ui/submit-button";
 import { useActionFeedback } from "@/components/ui/use-action-feedback";
 import { cn } from "@/lib/cn";
 import type { QaStatus } from "@/lib/qa/types";
-import { setQaStatus, toggleQaStep } from "./actions";
+import { setQaStatus, toggleQaStep, generateAiQaSteps } from "./actions";
 import { parseTaskLines, taskProgress } from "@/lib/qa/tasks";
 
 export type QaBoardItem = {
@@ -40,6 +41,21 @@ export type QaBoardItem = {
   mergedAt: string | null;
   droppedAt: string | null;
   externalUrl: string | null;
+  /**
+   * Model-suggested steps, shown only when the author wrote none. Kept separate
+   * from `qaSteps` on purpose: these do not exist in the PR description, so they
+   * must never reach the checkbox editor, which matches on text that is really
+   * there.
+   */
+  aiSteps: AiStepsView | null;
+};
+
+export type AiStepsView = {
+  summary: string;
+  steps: string[];
+  unknowns: string[];
+  modelId: string | null;
+  generatedAt: string;
 };
 
 type Filter = "open" | "all" | "failed";
@@ -71,11 +87,13 @@ export function QaBoard({
   items,
   repoFullName,
   canVerify,
+  aiStepsEnabled,
 }: {
   projectId: string;
   items: QaBoardItem[];
   repoFullName: string;
   canVerify: boolean;
+  aiStepsEnabled: boolean;
 }) {
   const [filter, setFilter] = useState<Filter>("open");
   const [detail, setDetail] = useState<QaBoardItem | null>(null);
@@ -255,6 +273,7 @@ export function QaBoard({
           item={detail}
           repoFullName={repoFullName}
           canVerify={canVerify && !detail.droppedAt}
+          aiStepsEnabled={aiStepsEnabled}
           busy={fb.isLoading(detail.id)}
           error={error}
           onPick={ask}
@@ -349,6 +368,7 @@ function DetailDialog({
   item,
   repoFullName,
   canVerify,
+  aiStepsEnabled,
   busy,
   error,
   onPick,
@@ -358,6 +378,7 @@ function DetailDialog({
   item: QaBoardItem;
   repoFullName: string;
   canVerify: boolean;
+  aiStepsEnabled: boolean;
   busy: boolean;
   error: string | null;
   onPick: (item: QaBoardItem, status: QaStatus) => void;
@@ -469,10 +490,11 @@ function DetailDialog({
                 canVerify={canVerify}
               />
             ) : (
-              <p className="text-sm text-muted-foreground">
-                The author left no testing notes. Add a <code>## QA</code>{" "}
-                section to the PR description and they appear here.
-              </p>
+              <AiStepsPanel
+                projectId={projectId}
+                item={item}
+                canGenerate={canVerify && aiStepsEnabled}
+              />
             )}
           </section>
 
@@ -781,5 +803,90 @@ function StepBadge({ steps }: { steps: string | null }) {
     >
       {progress.done}/{progress.total} steps
     </Badge>
+  );
+}
+
+/**
+ * Suggested steps, or the offer to generate them.
+ *
+ * Rendered only where the author wrote nothing, and always labelled as
+ * generated. The visual separation from real QA steps is the point: a reviewer
+ * ticking boxes against a human-written test plan and a reviewer reading a
+ * model's guess are doing different things, and the interface should not let
+ * those feel the same.
+ *
+ * Note there is no checkbox here, deliberately. Real steps render through
+ * <QaSteps>, whose ticks rewrite the PR description on GitHub. These do not
+ * exist in that description, so there is nothing to tick and nowhere to write.
+ */
+function AiStepsPanel({
+  projectId,
+  item,
+  canGenerate,
+}: {
+  projectId: string;
+  item: QaBoardItem;
+  canGenerate: boolean;
+}) {
+  const ai = item.aiSteps;
+
+  if (!ai) {
+    return (
+      <div className="space-y-2">
+        <p className="text-sm text-muted-foreground">
+          The author left no testing notes. Add a <code>## QA</code> section to
+          the PR description and they appear here.
+        </p>
+        {canGenerate ? (
+          <form action={generateAiQaSteps}>
+            <input type="hidden" name="projectId" value={projectId} />
+            <input type="hidden" name="itemId" value={item.id} />
+            <SubmitButton variant="outline" size="sm">
+              Suggest steps with AI
+            </SubmitButton>
+          </form>
+        ) : null}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-2 rounded-md border border-dashed border-border p-3">
+      <div className="flex items-center justify-between gap-2">
+        <Badge variant="outline">AI suggested</Badge>
+        {canGenerate ? (
+          <form action={generateAiQaSteps}>
+            <input type="hidden" name="projectId" value={projectId} />
+            <input type="hidden" name="itemId" value={item.id} />
+            <input type="hidden" name="force" value="1" />
+            <SubmitButton variant="ghost" size="sm">
+              Regenerate
+            </SubmitButton>
+          </form>
+        ) : null}
+      </div>
+      <p className="text-sm">{ai.summary}</p>
+      <ol className="list-decimal space-y-1 pl-5 text-sm">
+        {ai.steps.map((step, i) => (
+          <li key={i}>{step}</li>
+        ))}
+      </ol>
+      {ai.unknowns.length > 0 ? (
+        <div>
+          <p className="text-xs font-medium text-muted-foreground">
+            Could not determine
+          </p>
+          <ul className="mt-1 list-disc space-y-1 pl-5 text-sm text-muted-foreground">
+            {ai.unknowns.map((u, i) => (
+              <li key={i}>{u}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+      <p className="text-xs text-muted-foreground">
+        Generated by a model from the PR description and its changed files, not
+        written by the author. Check it before you rely on it.
+      </p>
+    </div>
   );
 }

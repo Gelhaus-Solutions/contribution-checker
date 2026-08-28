@@ -203,6 +203,58 @@ export async function getPullRequest(
   }
 }
 
+/**
+ * The changed-file list for a PR, names and line counts only.
+ *
+ * Deliberately not `fetchPrContext`: that also pulls commits and an account
+ * snapshot, which the AI QA-steps task has no use for, and it exists to build a
+ * quality `PrContext` rather than to answer "what did this touch".
+ *
+ * Patches are dropped on purpose. The consumer summarises a change for a human
+ * reviewer, and filenames plus line counts carry most of that signal at a
+ * fraction of the tokens. One page: past a hundred files nobody is reading a
+ * generated test plan anyway, and `truncated` says so.
+ */
+export type PrFileSummary = {
+  filename: string;
+  status: string;
+  additions: number;
+  deletions: number;
+};
+
+export async function listPullRequestFiles(
+  ref: RepoRef,
+  prNumber: number,
+): Promise<{ files: PrFileSummary[]; truncated: boolean } | null> {
+  const octokit = await getInstallationOctokit(ref.installationId);
+  try {
+    const res = await octokit.request(
+      "GET /repos/{owner}/{repo}/pulls/{pull_number}/files",
+      { owner: ref.owner, repo: ref.repo, pull_number: prNumber, per_page: 100 },
+    );
+    recordGithubMetric("pr.files", "ok", ref);
+    const raw = res.data as Array<{
+      filename: string;
+      status: string;
+      additions: number;
+      deletions: number;
+    }>;
+    return {
+      files: raw.map((f) => ({
+        filename: f.filename,
+        status: f.status,
+        additions: f.additions,
+        deletions: f.deletions,
+      })),
+      truncated: raw.length === 100,
+    };
+  } catch (e) {
+    recordGithubMetric("pr.files", "error", ref, statusOf(e));
+    if (statusOf(e) === 404) return null;
+    throw e;
+  }
+}
+
 /** Page size and page cap for PR listing, mirroring checkDco and quality/fetch. */
 const PR_PAGE_SIZE = 100;
 const PR_PAGE_LIMIT = 3;

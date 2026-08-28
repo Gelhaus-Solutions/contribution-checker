@@ -7,6 +7,8 @@ import { AI_TASK_BY_ID, isAiTaskEnabled } from "@/lib/ai/registry";
 import { runAiTask } from "@/lib/ai/run";
 import { subjectKeys } from "@/lib/ai/prompt";
 import { triageTask } from "@/lib/ai/tasks/triage";
+import { qaStepsTask } from "@/lib/ai/tasks/qa-steps";
+import { getPullRequest, listPullRequestFiles, repoRef } from "@/lib/github/pr-actions";
 import { parseFormSchema } from "@/lib/applications/schema";
 import type { AiRunInput, AiRunResultPayload } from "@/lib/temporal/contracts";
 
@@ -127,6 +129,54 @@ async function loadPayload(input: AiRunInput): Promise<Loaded | null> {
         },
       };
     }
+    case qaStepsTask.id: {
+      const item = await prisma.stagingBatchItem.findFirst({
+        where: { id: input.subjectId, kind: "PR", batch: { repo: { projectId: input.projectId } } },
+        select: {
+          id: true,
+          prNumber: true,
+          title: true,
+          qaSteps: true,
+          labels: true,
+          batch: {
+            select: {
+              repo: { select: { fullName: true, installationId: true } },
+            },
+          },
+        },
+      });
+      if (!item?.prNumber) return null;
+
+      // The author's own steps win, and cost nothing to check. Short-circuited
+      // here as well as in the task's prefilter so we never spend a GitHub call
+      // discovering what the database already knew.
+      if (item.qaSteps && item.qaSteps.trim().length > 0) return null;
+
+      const { fullName, installationId } = item.batch.repo;
+      if (!installationId) return null;
+      const ref = repoRef(fullName, installationId);
+
+      // Two GitHub calls, on an explicit button press, for one PR. Deliberately
+      // not folded into the reconcile: that runs on every push across the whole
+      // batch, and paying two calls per PR there is the rate-limit incident the
+      // QA record was designed to avoid in the first place.
+      const [pr, files] = await Promise.all([
+        getPullRequest(ref, item.prNumber),
+        listPullRequestFiles(ref, item.prNumber),
+      ]);
+      if (!pr || !files) return null;
+
+      return {
+        subjectKey: subjectKeys.batchItem(item.id),
+        payload: {
+          title: item.title || pr.title,
+          body: pr.body,
+          authorQaSteps: item.qaSteps,
+          files: files.files,
+          labels: safeLabels(item.labels),
+        },
+      };
+    }
     default:
       return null;
   }
@@ -147,4 +197,15 @@ function safeAnswers(raw: string): Record<string, unknown> {
     // fall through
   }
   return {};
+}
+
+/** `StagingBatchItem.labels` is a JSON string array, parsed like every other. */
+function safeLabels(raw: string): string[] {
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (Array.isArray(parsed)) return parsed.filter((v): v is string => typeof v === "string");
+  } catch {
+    // fall through
+  }
+  return [];
 }

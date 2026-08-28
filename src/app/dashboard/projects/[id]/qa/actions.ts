@@ -6,6 +6,9 @@ import { prisma } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { recordAudit } from "@/lib/audit";
 import { requireProjectRole } from "@/lib/authz";
+import { rateLimit } from "@/lib/ratelimit";
+import { runAiTaskWorkflow } from "@/lib/temporal/start";
+import { qaStepsTask } from "@/lib/ai/tasks/qa-steps";
 import {
   runQaTaskToggle,
   signalQaBoardSync,
@@ -439,4 +442,55 @@ export async function toggleQaStep(args: {
 
   revalidatePath(`/dashboard/projects/${parsed.projectId}/qa`);
   return { ok: true, steps: result.steps };
+}
+
+const aiStepsSchema = z.object({
+  projectId: z.string().min(1),
+  itemId: z.string().min(1),
+  force: z.string().optional(),
+});
+
+/**
+ * Generate suggested QA steps for one batch item.
+ *
+ * Only reachable for an item whose author wrote no `## QA` section: the task's
+ * prefilter and the loader both refuse otherwise, so a press on a PR that has
+ * real steps costs nothing and changes nothing.
+ *
+ * The result is stored in `AiResult` and joined at render. It is never written
+ * to the pull request, and never reaches `applyTaskChanges`: that rewrites real
+ * checkboxes in the real description by matching `expectedText`, and generated
+ * text does not exist there to match.
+ */
+export async function generateAiQaSteps(formData: FormData) {
+  const parsed = aiStepsSchema.parse({
+    projectId: formData.get("projectId"),
+    itemId: formData.get("itemId"),
+    force: formData.get("force") ?? undefined,
+  });
+  const { session } = await requireProjectRole(parsed.projectId, "REVIEWER");
+
+  const gate = await rateLimit({
+    key: `ai:${parsed.projectId}`,
+    limit: 60,
+    windowMs: 60 * 60 * 1000,
+  });
+  if (gate.ok) {
+    try {
+      await runAiTaskWorkflow({
+        taskId: qaStepsTask.id,
+        projectId: parsed.projectId,
+        subjectId: parsed.itemId,
+        triggeredById: session.user.id,
+        force: !!parsed.force,
+      });
+    } catch (e) {
+      // The run records its own failure. Rethrowing would replace the board
+      // with an error boundary while somebody is midway through verifying a
+      // release, which is far worse than a card that still says "not generated".
+      logger.warn({ err: e, itemId: parsed.itemId }, "ai qa steps failed");
+    }
+  }
+
+  revalidatePath(`/dashboard/projects/${parsed.projectId}/qa`);
 }
