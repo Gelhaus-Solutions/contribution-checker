@@ -21,6 +21,13 @@
  */
 export type AiTier = "cheap" | "judgment";
 
+/**
+ * Per-task project override. Only `enabled`: unlike a quality heuristic there is
+ * no threshold to tune, because the model's answer is prose and a number would
+ * imply a precision it does not have.
+ */
+export type AiTaskSetting = { enabled: boolean };
+
 /** Terminal state of a single run. Mirrors `AiResult.status`. */
 export type AiRunStatus = "RUNNING" | "OK" | "FAILED";
 
