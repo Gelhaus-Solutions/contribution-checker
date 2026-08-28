@@ -17,8 +17,8 @@ import { countQa, isGreen, parseQaStatus, type QaStatus } from "@/lib/qa/types";
  * edit on the release PR and a notification for everyone watching it.
  */
 
-/** Cap the printed list. Past this the board is the right place to look. */
-const MAX_LISTED = 60;
+/** Cap the standing-check list. Past this the board is the place to look. */
+const MAX_LISTED = 40;
 
 /** One item, reduced to what the renderers read. */
 export type QaRenderItem = {
@@ -36,19 +36,24 @@ export type QaRenderItem = {
   qaByExternal?: string | null;
 };
 
-/** Who verified it, rendered for GitHub. */
-function actor(item: QaRenderItem): string {
-  if (item.qaByLogin) return `@${item.qaByLogin}`;
-  if (item.qaByExternal) return item.qaByExternal;
-  return "someone";
-}
+/**
+ * The badge appended to a line. Short and shouty on purpose: this sits at the
+ * end of a manifest line somebody is scanning, not reading.
+ */
+const BADGE: Record<QaStatus, string> = {
+  QA_PENDING: "PENDING QA",
+  QA_IN_REVIEW: "IN QA",
+  QA_PASSED: "PASSED QA",
+  QA_FAILED: "FAILED QA",
+  QA_SKIPPED: "SKIPPED QA",
+};
 
 /**
- * Keep a note to one line. A failure note is free text a reviewer typed, so it
- * can contain newlines, markers and markdown that would break the block it sits
- * in.
+ * Keep a note to one line, and short. A failure note is free text a reviewer
+ * typed, so it can contain newlines, markers and markdown that would break the
+ * block it sits in.
  */
-function oneLine(note: string | null, max = 160): string {
+function oneLine(note: string | null, max = 120): string {
   const clean = (note ?? "")
     .replace(/<!--[\s\S]*?-->/g, "")
     .replace(/\s+/g, " ")
@@ -57,39 +62,53 @@ function oneLine(note: string | null, max = 160): string {
   return clean.length <= max ? clean : `${clean.slice(0, max).trimEnd()}...`;
 }
 
+/** How an item names itself where there is no manifest line to lean on. */
 function label(item: QaRenderItem): string {
-  if (item.prNumber != null) {
-    const by = item.authorLogin ? ` by @${item.authorLogin}` : "";
-    // GitHub expands `#123` into the PR title, so we do not repeat it.
-    return `#${item.prNumber}${by}`;
-  }
-  return item.title;
+  if (item.prNumber == null) return item.title;
+  const by = item.authorLogin ? ` by @${item.authorLogin}` : "";
+  // GitHub expands `#123` into the PR title, so we do not repeat it.
+  return `#${item.prNumber}${by}`;
 }
 
-function statusPhrase(item: QaRenderItem, status: QaStatus): string {
-  switch (status) {
-    case "QA_PASSED":
-      return `verified by ${actor(item)}`;
-    case "QA_FAILED": {
-      const note = oneLine(item.qaNotes);
-      const who = `**FAILED** by ${actor(item)}`;
-      return note ? `${who}: ${note}` : who;
-    }
-    case "QA_SKIPPED": {
-      const note = oneLine(item.qaNotes);
-      const who = `skipped by ${actor(item)}`;
-      return note ? `${who}: ${note}` : who;
-    }
-    case "QA_IN_REVIEW":
-      return `being verified by ${actor(item)}`;
-    default:
-      return "not yet verified";
-  }
+/** What gets appended to one manifest line. */
+export type QaAnnotation = {
+  /** Already wrapped in bold and parentheses. */
+  badge: string;
+  /** Only carried for a failure, where the reason is the actionable part. */
+  note: string | null;
+};
+
+export function qaSuffix(annotation: QaAnnotation): string {
+  return annotation.note
+    ? ` ${annotation.badge}: ${annotation.note}`
+    : ` ${annotation.badge}`;
 }
 
 /**
- * The headline. Deliberately blunt about failures: a batch that is 8 of 9 with
- * one failure is not "nearly done", it is blocked.
+ * QA state per PR, for the manifest to append.
+ *
+ * The status belongs on the line that already names the PR. Printing a second
+ * list of the same seventeen PRs to add one word to each is noise, and it is
+ * the version of this that shipped first.
+ */
+export function qaAnnotations(
+  items: QaRenderItem[],
+): Map<number, QaAnnotation> {
+  const out = new Map<number, QaAnnotation>();
+  for (const item of items) {
+    if (item.droppedAt || item.prNumber == null) continue;
+    const status = parseQaStatus(item.qaStatus);
+    out.set(item.prNumber, {
+      badge: `**(${BADGE[status]})**`,
+      note: status === "QA_FAILED" ? oneLine(item.qaNotes) || null : null,
+    });
+  }
+  return out;
+}
+
+/**
+ * The headline. Deliberately blunt about failures: a batch that is 16 of 17
+ * with one failure is not "nearly done", it is blocked.
  */
 export function qaHeadline(items: QaRenderItem[]): string {
   const counts = countQa(
@@ -100,40 +119,42 @@ export function qaHeadline(items: QaRenderItem[]): string {
   );
   if (counts.total === 0) return "Nothing to verify yet.";
   const parts = [`${counts.resolved} of ${counts.total} resolved`];
-  if (counts.failed > 0) {
-    parts.push(`**${counts.failed} failed**`);
-  }
+  if (counts.failed > 0) parts.push(`**${counts.failed} failed**`);
   if (counts.skipped > 0) parts.push(`${counts.skipped} skipped`);
   return `${parts.join(", ")}.`;
 }
 
 /**
- * Render the QA lines. Returns an empty array when there is nothing to say, so
- * the caller can omit the heading entirely rather than printing an empty
- * section on every quiet batch.
+ * The QA section: the headline, plus the standing checks.
+ *
+ * PRs are deliberately absent. They are badged in place in the manifest above,
+ * where they are already listed. Standing checks have no manifest line of their
+ * own, so this is the only place they can appear.
  */
 export function renderQaLines(items: QaRenderItem[]): string[] {
   const live = items.filter((i) => !i.droppedAt);
   if (live.length === 0) return [];
 
-  // Sorted by key, which is stable and matches the board: PR items ascend by
-  // number because the key embeds it zero-free, so sort numerically where we
-  // can and fall back to the key for standing checks.
-  const sorted = [...live].sort((a, b) => {
-    if (a.prNumber != null && b.prNumber != null) return a.prNumber - b.prNumber;
-    if (a.prNumber != null) return -1;
-    if (b.prNumber != null) return 1;
-    return a.key.localeCompare(b.key);
-  });
+  const lines = [qaHeadline(items)];
 
-  const lines = [qaHeadline(items), ""];
-  for (const item of sorted.slice(0, MAX_LISTED)) {
-    const status = parseQaStatus(item.qaStatus);
-    lines.push(`- ${label(item)} - ${statusPhrase(item, status)}`);
+  const checks = live
+    .filter((i) => i.prNumber == null)
+    .sort((a, b) => a.key.localeCompare(b.key));
+  if (checks.length > 0) {
+    lines.push("");
+    for (const check of checks.slice(0, MAX_LISTED)) {
+      const status = parseQaStatus(check.qaStatus);
+      const note =
+        status === "QA_FAILED" ? oneLine(check.qaNotes) : "";
+      lines.push(
+        `- ${check.title} **(${BADGE[status]})**${note ? `: ${note}` : ""}`,
+      );
+    }
+    if (checks.length > MAX_LISTED) {
+      lines.push(`- ...and ${checks.length - MAX_LISTED} more`);
+    }
   }
-  if (sorted.length > MAX_LISTED) {
-    lines.push(`- ...and ${sorted.length - MAX_LISTED} more`);
-  }
+
   return lines;
 }
 

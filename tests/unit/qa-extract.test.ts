@@ -34,6 +34,21 @@ describe("extractQaSteps", () => {
     );
   });
 
+  it.each(["# QA", "## QA", "### QA", "###### QA", "  # QA"])(
+    "accepts any heading level (%s)",
+    (heading) => {
+      expect(extractQaSteps(`${heading}\nclick the button`)).toBe(
+        "click the button",
+      );
+    },
+  );
+
+  it("does not treat a hash with no space as a heading", () => {
+    // `#QA` is not a heading in CommonMark, it is a line starting with a hash,
+    // and treating it as one would swallow issue references like #QA-1.
+    expect(extractQaSteps("#QA\nclick the button")).toBeNull();
+  });
+
   it("is case and decoration insensitive", () => {
     expect(extractQaSteps("## **QA:**\nrun it")).toBe("run it");
   });

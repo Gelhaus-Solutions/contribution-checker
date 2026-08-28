@@ -35,7 +35,13 @@ import {
   markBatchShipped,
   syncBatchRecord,
 } from "@/lib/qa/batch-record";
-import { renderQaLines, type QaRenderItem } from "@/lib/qa/render";
+import {
+  qaAnnotations,
+  qaSuffix,
+  renderQaLines,
+  type QaAnnotation,
+  type QaRenderItem,
+} from "@/lib/qa/render";
 import { parseStandingChecks } from "@/lib/qa/settings";
 import { syncQaLabels } from "@/lib/qa/labels";
 import { publishQaCheck } from "@/lib/github/check-run";
@@ -246,8 +252,16 @@ export function renderBatchBlock(
   entries: BatchEntry[],
   digest?: StagingDigest | null,
   sections?: ReadonlySet<DigestSectionId>,
-  /** QA lines, already rendered. Empty or absent prints no QA section. */
-  qaLines?: string[],
+  /**
+   * QA state, when the project records it. `badges` annotate the manifest lines
+   * in place; `lines` are the short section underneath. The status goes on the
+   * line that already names the PR rather than into a second list of the same
+   * PRs, which is all a reader would have to scroll past to learn one word each.
+   */
+  qa?: {
+    badges?: ReadonlyMap<number, QaAnnotation>;
+    lines?: string[];
+  },
 ): string {
   const lines =
     entries.length === 0
@@ -256,7 +270,9 @@ export function renderBatchBlock(
           // No title: GitHub expands the `#123` reference into the PR's title
           // when it renders, so carrying our own copy only duplicated it.
           const by = e.author ? ` by @${e.author}` : "";
-          return `- #${e.number}${by}`;
+          const annotation = qa?.badges?.get(e.number);
+          const verdict = annotation ? qaSuffix(annotation) : "";
+          return `- #${e.number}${by}${verdict}`;
         });
   const digestLines = digest ? renderDigestLines(digest, sections) : [];
   const heads =
@@ -266,15 +282,16 @@ export function renderBatchBlock(
   // Last, because it is the part that changes most often. Keeping it at the
   // bottom means a verdict does not reflow the manifest above it in the diff
   // GitHub shows for the edit.
-  const qa =
-    !qaLines || qaLines.length === 0 ? [] : ["", "### QA", "", ...qaLines];
+  const qaLines = qa?.lines ?? [];
+  const qaSection =
+    qaLines.length === 0 ? [] : ["", "### QA", "", ...qaLines];
   return [
     BLOCK_START,
     "### In this batch",
     "",
     ...lines,
     ...heads,
-    ...qa,
+    ...qaSection,
     BLOCK_END,
   ].join("\n");
 }
@@ -1193,6 +1210,7 @@ function safeDigest(cmp: CompareResult, repoId: string): StagingDigest | null {
 type QaPass = {
   batchId: string;
   items: QaRenderItem[];
+  badges: Map<number, QaAnnotation>;
   lines: string[];
 };
 
@@ -1214,7 +1232,12 @@ async function safeQa(args: {
         "staging batch regressed: new items landed in a verified batch",
       );
     }
-    return { batchId: result.batchId, items, lines: renderQaLines(items) };
+    return {
+      batchId: result.batchId,
+      items,
+      badges: qaAnnotations(items),
+      lines: renderQaLines(items),
+    };
   } catch (e) {
     logger.warn({ err: e, repoId: args.repoId }, "staging QA record failed");
     return null;
@@ -1461,7 +1484,7 @@ export async function reconcileStagingBatch(args: {
         entries,
         baseDigest && { ...baseDigest, overview: batchOverview(entries) },
         cfg.digestSections,
-        qa?.lines,
+        qa ? { badges: qa.badges, lines: qa.lines } : undefined,
       );
     };
 

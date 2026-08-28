@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildQaCheckPayload,
+  qaAnnotations,
   qaHeadline,
   renderQaLines,
   type QaRenderItem,
@@ -25,6 +26,62 @@ function item(overrides: Partial<QaRenderItem> = {}): QaRenderItem {
   };
 }
 
+describe("qaAnnotations", () => {
+  it("badges a pending PR", () => {
+    const badges = qaAnnotations([item()]);
+    expect(badges.get(101)).toEqual({ badge: "**(PENDING QA)**", note: null });
+  });
+
+  it.each([
+    ["QA_PASSED", "**(PASSED QA)**"],
+    ["QA_IN_REVIEW", "**(IN QA)**"],
+    ["QA_SKIPPED", "**(SKIPPED QA)**"],
+    ["QA_FAILED", "**(FAILED QA)**"],
+  ])("badges %s as %s", (status, badge) => {
+    expect(qaAnnotations([item({ qaStatus: status })]).get(101)?.badge).toBe(
+      badge,
+    );
+  });
+
+  it("carries the reason only for a failure, where it is the actionable part", () => {
+    const failed = qaAnnotations([
+      item({ qaStatus: "QA_FAILED", qaNotes: "checkout 500s on an empty cart" }),
+    ]);
+    expect(failed.get(101)?.note).toBe("checkout 500s on an empty cart");
+
+    const passed = qaAnnotations([
+      item({ qaStatus: "QA_PASSED", qaNotes: "looked fine" }),
+    ]);
+    expect(passed.get(101)?.note).toBeNull();
+  });
+
+  it("flattens a multi-line note so it cannot break the manifest line", () => {
+    const badges = qaAnnotations([
+      item({ qaStatus: "QA_FAILED", qaNotes: "line one\nline two" }),
+    ]);
+    expect(badges.get(101)?.note).toBe("line one line two");
+  });
+
+  it("strips comment markers out of a note", () => {
+    // A note containing the block's own end marker would truncate the body.
+    const badges = qaAnnotations([
+      item({
+        qaStatus: "QA_FAILED",
+        qaNotes: "broke <!-- staging-batch:end --> here",
+      }),
+    ]);
+    expect(badges.get(101)?.note).not.toContain("staging-batch:end");
+  });
+
+  it("skips dropped items and standing checks, which have no manifest line", () => {
+    const badges = qaAnnotations([
+      item({ droppedAt: new Date() }),
+      item({ key: "standing:0:x", prNumber: null, title: "Sign-in works" }),
+    ]);
+    expect(badges.size).toBe(0);
+  });
+});
+
 describe("renderQaLines", () => {
   it("renders nothing when there is nothing to verify", () => {
     expect(renderQaLines([])).toEqual([]);
@@ -34,35 +91,19 @@ describe("renderQaLines", () => {
     expect(renderQaLines([item({ droppedAt: new Date() })])).toEqual([]);
   });
 
-  it("names the verifier for a passed item", () => {
+  it("is just the headline when the batch is only PRs", () => {
+    // The PRs are badged in the manifest above, so repeating them here would be
+    // seventeen lines to add one word each.
     const lines = renderQaLines([
-      item({ qaStatus: "QA_PASSED", qaByLogin: "bob" }),
+      item(),
+      item({ key: "pr:102", prNumber: 102 }),
     ]);
-    expect(lines).toContain("- #101 by @alice - verified by @bob");
+    expect(lines).toEqual(["0 of 2 resolved."]);
   });
 
-  it("carries the failure reason, which is the whole point of showing it here", () => {
+  it("lists standing checks, which have no manifest line of their own", () => {
     const lines = renderQaLines([
-      item({
-        qaStatus: "QA_FAILED",
-        qaByLogin: "bob",
-        qaNotes: "checkout 500s on an empty cart",
-      }),
-    ]);
-    expect(lines).toContain(
-      "- #101 by @alice - **FAILED** by @bob: checkout 500s on an empty cart",
-    );
-  });
-
-  it("attributes a verdict that came from an external board", () => {
-    const lines = renderQaLines([
-      item({ qaStatus: "QA_PASSED", qaByExternal: "Dana (Notion)" }),
-    ]);
-    expect(lines).toContain("- #101 by @alice - verified by Dana (Notion)");
-  });
-
-  it("renders a standing check by its title, having no PR to link", () => {
-    const lines = renderQaLines([
+      item(),
       item({
         key: "standing:0:sign-in-works",
         kind: "CHECK",
@@ -70,60 +111,39 @@ describe("renderQaLines", () => {
         title: "Sign-in works",
         authorLogin: null,
         qaStatus: "QA_PASSED",
-        qaByLogin: "bob",
       }),
     ]);
-    expect(lines).toContain("- Sign-in works - verified by @bob");
+    expect(lines).toContain("- Sign-in works **(PASSED QA)**");
+    expect(lines.some((l) => l.includes("#101"))).toBe(false);
   });
 
-  it("flattens a multi-line note so it cannot break the block", () => {
-    const lines = renderQaLines([
-      item({ qaStatus: "QA_FAILED", qaNotes: "line one\nline two" }),
-    ]);
-    expect(lines.join("\n")).toContain("line one line two");
-  });
-
-  it("strips comment markers out of a note", () => {
-    // A note containing the block's own end marker would truncate the body.
+  it("gives a failed standing check its reason", () => {
     const lines = renderQaLines([
       item({
+        key: "standing:0:checkout",
+        kind: "CHECK",
+        prNumber: null,
+        title: "Checkout completes",
+        authorLogin: null,
         qaStatus: "QA_FAILED",
-        qaNotes: "broke <!-- staging-batch:end --> here",
+        qaNotes: "card declined",
       }),
     ]);
-    expect(lines.join("\n")).not.toContain("staging-batch:end");
-  });
-
-  it("sorts by PR number, so the body is stable across reconciles", () => {
-    const lines = renderQaLines([
-      item({ key: "pr:120", prNumber: 120 }),
-      item({ key: "pr:101", prNumber: 101 }),
-      item({ key: "pr:110", prNumber: 110 }),
-    ]);
-    const numbers = lines
-      .filter((l) => l.startsWith("- #"))
-      .map((l) => Number(l.slice(3, 6)));
-    expect(numbers).toEqual([101, 110, 120]);
+    expect(lines).toContain(
+      "- Checkout completes **(FAILED QA)**: card declined",
+    );
   });
 
   it("renders byte-identically for the same state", () => {
     // The property that keeps a reconcile from editing the release PR for
     // nothing, and notifying everyone watching it.
     const items = [
-      item({ qaStatus: "QA_PASSED", qaByLogin: "bob" }),
+      item({ qaStatus: "QA_PASSED" }),
       item({ key: "pr:102", prNumber: 102 }),
     ];
     expect(renderQaLines(items).join("\n")).toBe(
       renderQaLines([...items].reverse()).join("\n"),
     );
-  });
-
-  it("caps a very long batch rather than printing hundreds of lines", () => {
-    const many = Array.from({ length: 75 }, (_, i) =>
-      item({ key: `pr:${i + 1}`, prNumber: i + 1 }),
-    );
-    const lines = renderQaLines(many);
-    expect(lines).toContain("- ...and 15 more");
   });
 });
 
@@ -218,24 +238,62 @@ describe("buildQaCheckPayload", () => {
 });
 
 describe("renderBatchBlock with QA", () => {
-  const entries = [{ number: 101, author: "alice", mergedAt: null }];
+  const entries = [
+    { number: 101, author: "alice", mergedAt: null },
+    { number: 102, author: "carol", mergedAt: null },
+  ];
 
-  it("omits the QA heading entirely when there are no lines", () => {
-    expect(renderBatchBlock(entries, null, undefined, [])).not.toContain("### QA");
+  it("is unchanged when the project does not record QA", () => {
+    expect(renderBatchBlock(entries)).toContain("- #101 by @alice\n");
+    expect(renderBatchBlock(entries)).not.toContain("QA");
   });
 
-  it("appends the QA section after the manifest", () => {
-    const block = renderBatchBlock(entries, null, undefined, [
-      "1 of 1 resolved.",
-      "",
-      "- #101 by @alice - verified by @bob",
-    ]);
-    expect(block).toContain("### In this batch");
-    expect(block).toContain("### QA");
+  it("badges each manifest line in place", () => {
+    const block = renderBatchBlock(entries, null, undefined, {
+      badges: qaAnnotations([
+        item({ qaStatus: "QA_PASSED" }),
+        item({ key: "pr:102", prNumber: 102 }),
+      ]),
+      lines: ["1 of 2 resolved."],
+    });
+    expect(block).toContain("- #101 by @alice **(PASSED QA)**");
+    expect(block).toContain("- #102 by @carol **(PENDING QA)**");
+  });
+
+  it("puts a failure reason on the line it belongs to", () => {
+    const block = renderBatchBlock(entries, null, undefined, {
+      badges: qaAnnotations([
+        item({ qaStatus: "QA_FAILED", qaNotes: "checkout 500s" }),
+      ]),
+      lines: ["1 of 2 resolved, **1 failed**."],
+    });
+    expect(block).toContain("- #101 by @alice **(FAILED QA)**: checkout 500s");
+  });
+
+  it("does not repeat the PRs in the QA section", () => {
+    const block = renderBatchBlock(entries, null, undefined, {
+      badges: qaAnnotations([item(), item({ key: "pr:102", prNumber: 102 })]),
+      lines: renderQaLines([item(), item({ key: "pr:102", prNumber: 102 })]),
+    });
+    // Each PR is named exactly once in the whole block.
+    expect(block.split("#101")).toHaveLength(2);
+    expect(block.split("#102")).toHaveLength(2);
+  });
+
+  it("omits the QA heading entirely when there are no lines", () => {
+    expect(
+      renderBatchBlock(entries, null, undefined, { lines: [] }),
+    ).not.toContain("### QA");
+  });
+
+  it("keeps the QA section inside the markers the bot owns", () => {
+    const block = renderBatchBlock(entries, null, undefined, {
+      lines: ["1 of 2 resolved."],
+    });
     expect(block.indexOf("### In this batch")).toBeLessThan(
       block.indexOf("### QA"),
     );
-    // Still inside the markers the bot owns, so a human's preamble survives.
+    // A human's preamble outside the markers survives.
     expect(block.indexOf("### QA")).toBeLessThan(
       block.indexOf("<!-- staging-batch:end -->"),
     );
