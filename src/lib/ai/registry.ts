@@ -1,4 +1,5 @@
 import { prQualityTask } from "@/lib/ai/tasks/pr-quality";
+import { releaseNarrativeTask } from "@/lib/ai/tasks/release-narrative";
 import { qaStepsTask } from "@/lib/ai/tasks/qa-steps";
 import { triageTask } from "@/lib/ai/tasks/triage";
 import type { AiTask, AiTaskSetting } from "@/lib/ai/types";
@@ -21,6 +22,7 @@ export const ALL_AI_TASKS: AiTask<never, unknown>[] = [
   triageTask as unknown as AiTask<never, unknown>,
   qaStepsTask as unknown as AiTask<never, unknown>,
   prQualityTask as unknown as AiTask<never, unknown>,
+  releaseNarrativeTask as unknown as AiTask<never, unknown>,
 ];
 
 export const AI_TASK_BY_ID = new Map<string, AiTask<never, unknown>>(

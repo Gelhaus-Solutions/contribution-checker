@@ -9,6 +9,7 @@ import { requireProjectRole } from "@/lib/authz";
 import { rateLimit } from "@/lib/ratelimit";
 import { runAiTaskWorkflow } from "@/lib/temporal/start";
 import { qaStepsTask } from "@/lib/ai/tasks/qa-steps";
+import { releaseNarrativeTask } from "@/lib/ai/tasks/release-narrative";
 import {
   runQaTaskToggle,
   signalQaBoardSync,
@@ -489,6 +490,50 @@ export async function generateAiQaSteps(formData: FormData) {
       // with an error boundary while somebody is midway through verifying a
       // release, which is far worse than a card that still says "not generated".
       logger.warn({ err: e, itemId: parsed.itemId }, "ai qa steps failed");
+    }
+  }
+
+  revalidatePath(`/dashboard/projects/${parsed.projectId}/qa`);
+}
+
+const narrativeSchema = z.object({
+  projectId: z.string().min(1),
+  batchId: z.string().min(1),
+  force: z.string().optional(),
+});
+
+/**
+ * Generate the release narrative for a staging batch.
+ *
+ * Dashboard only. The result is never written into the aggregate PR body: that
+ * body is diffed before every PATCH, and model output is not stable across runs,
+ * so putting it inside the staging-batch markers would make every reconcile a
+ * visible edit on the release PR.
+ */
+export async function generateReleaseNarrative(formData: FormData) {
+  const parsed = narrativeSchema.parse({
+    projectId: formData.get("projectId"),
+    batchId: formData.get("batchId"),
+    force: formData.get("force") ?? undefined,
+  });
+  const { session } = await requireProjectRole(parsed.projectId, "REVIEWER");
+
+  const gate = await rateLimit({
+    key: `ai:${parsed.projectId}`,
+    limit: 60,
+    windowMs: 60 * 60 * 1000,
+  });
+  if (gate.ok) {
+    try {
+      await runAiTaskWorkflow({
+        taskId: releaseNarrativeTask.id,
+        projectId: parsed.projectId,
+        subjectId: parsed.batchId,
+        triggeredById: session.user.id,
+        force: !!parsed.force,
+      });
+    } catch (e) {
+      logger.warn({ err: e, batchId: parsed.batchId }, "release narrative failed");
     }
   }
 

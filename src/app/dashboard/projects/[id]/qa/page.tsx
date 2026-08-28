@@ -20,13 +20,26 @@ import { QaBoard, type QaBoardItem, type AiStepsView } from "./qa-board";
 import { isAiTaskEnabled } from "@/lib/ai/registry";
 import { parseAiConfig } from "@/lib/ai/config";
 import { subjectKeys } from "@/lib/ai/prompt";
+import { latestAiResult } from "@/lib/ai/run";
 import { qaStepsTask } from "@/lib/ai/tasks/qa-steps";
+import { releaseNarrativeTask } from "@/lib/ai/tasks/release-narrative";
+import { generateReleaseNarrative } from "./actions";
+import { SubmitButton } from "@/components/ui/submit-button";
 import { BoardLinks, type BoardLinkRow } from "./board-links";
 
 export const dynamic = "force-dynamic";
 
 /** How many shipped batches the history list offers. */
 const HISTORY_LIMIT = 12;
+
+/** Advisory deploy-risk wording. Kept out of src/lib/ui/status.ts on purpose:
+ * that module maps record statuses, and a model's guess is not one. */
+const RISK_LABEL: Record<string, string> = {
+  ROUTINE: "Routine release",
+  ELEVATED: "Elevated risk",
+  HIGH: "High risk",
+};
+
 
 type SearchParams = Record<string, string | string[] | undefined>;
 
@@ -187,6 +200,16 @@ export default async function ProjectQa({
     }
   }
 
+  const narrativeEnabled =
+    batch != null &&
+    isAiTaskEnabled(releaseNarrativeTask, project, parseAiConfig(project.aiConfig));
+  const narrative = narrativeEnabled
+    ? await latestAiResult({
+        task: releaseNarrativeTask,
+        subjectKey: subjectKeys.batch(batch.id),
+      })
+    : null;
+
   const items: QaBoardItem[] = (batch?.items ?? []).map((i) => ({
     id: i.id,
     key: i.key,
@@ -294,6 +317,60 @@ export default async function ProjectQa({
             <Alert variant="success">
               Everything in this batch has been verified. It is ready to ship.
             </Alert>
+          ) : null}
+
+          {narrativeEnabled && batch ? (
+            <Card>
+              <CardHeader className="flex-row items-start justify-between gap-3">
+                <div>
+                  <CardTitle className="text-base">Release narrative</CardTitle>
+                  <CardDescription>
+                    Model-written context for this batch. Advisory, and not part
+                    of the release pull request.
+                  </CardDescription>
+                </div>
+                <form action={generateReleaseNarrative}>
+                  <input type="hidden" name="projectId" value={id} />
+                  <input type="hidden" name="batchId" value={batch.id} />
+                  {narrative ? (
+                    <input type="hidden" name="force" value="1" />
+                  ) : null}
+                  <SubmitButton variant="outline" size="sm">
+                    {narrative ? "Regenerate" : "Generate"}
+                  </SubmitButton>
+                </form>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {!narrative ? (
+                  <p className="text-sm text-muted-foreground">
+                    Nothing generated for this batch yet.
+                  </p>
+                ) : (
+                  <>
+                    <Badge variant="outline">
+                      {RISK_LABEL[narrative.output.risk] ?? narrative.output.risk}
+                    </Badge>
+                    <p className="text-sm">{narrative.output.narrative}</p>
+                    {narrative.output.watchFor.length > 0 ? (
+                      <div>
+                        <p className="text-xs font-medium text-muted-foreground">
+                          Watch for
+                        </p>
+                        <ul className="mt-1 list-disc space-y-1 pl-5 text-sm">
+                          {narrative.output.watchFor.map((w, i) => (
+                            <li key={i}>{w}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
+                    <p className="text-xs text-muted-foreground">
+                      Generated {formatRelative(narrative.computedAt)}
+                      {narrative.modelId ? ` by ${narrative.modelId}` : ""}.
+                    </p>
+                  </>
+                )}
+              </CardContent>
+            </Card>
           ) : null}
 
           <Card>

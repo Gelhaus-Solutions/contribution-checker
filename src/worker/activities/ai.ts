@@ -9,6 +9,14 @@ import { subjectKeys } from "@/lib/ai/prompt";
 import { triageTask } from "@/lib/ai/tasks/triage";
 import { qaStepsTask } from "@/lib/ai/tasks/qa-steps";
 import { prQualityTask } from "@/lib/ai/tasks/pr-quality";
+import { releaseNarrativeTask } from "@/lib/ai/tasks/release-narrative";
+import { compareBranches } from "@/lib/github/pr-actions";
+import {
+  resolveStagingConfig,
+  stagingProjectSelect,
+  stagingRepoSelect,
+} from "@/lib/github/staging";
+import { buildStagingDigest, renderDigestLines } from "@/lib/github/staging-digest";
 import { getPullRequest, listPullRequestFiles, repoRef } from "@/lib/github/pr-actions";
 import { parseFormSchema } from "@/lib/applications/schema";
 import type { AiRunInput, AiRunResultPayload } from "@/lib/temporal/contracts";
@@ -205,6 +213,77 @@ async function loadPayload(input: AiRunInput): Promise<Loaded | null> {
           // Commit subjects would be a third GitHub call for a marginal signal,
           // and the title and body are what this task is actually judging.
           commitMessages: [],
+        },
+      };
+    }
+    case releaseNarrativeTask.id: {
+      const batch = await prisma.stagingBatch.findFirst({
+        where: {
+          id: input.subjectId,
+          repo: { projectId: input.projectId },
+        },
+        select: {
+          id: true,
+          items: {
+            where: { kind: "PR", droppedAt: null },
+            select: { prNumber: true, title: true, authorLogin: true },
+            orderBy: { prNumber: "asc" },
+          },
+          repo: {
+            select: {
+              fullName: true,
+              installationId: true,
+              defaultBranch: true,
+              ...stagingRepoSelect,
+              project: { select: stagingProjectSelect },
+            },
+          },
+        },
+      });
+      if (!batch?.repo.installationId) return null;
+
+      const cfg = resolveStagingConfig(batch.repo.project, batch.repo);
+      const base = batch.repo.defaultBranch;
+      if (!base) return null;
+
+      // One compare call, the same one the reconcile makes. Done here rather
+      // than reusing the reconcile's copy because that runs on a push and this
+      // runs on a button, and threading a large in-memory diff between them
+      // would mean putting it in workflow history.
+      const ref = repoRef(batch.repo.fullName, batch.repo.installationId);
+      const cmp = await compareBranches(ref, base, cfg.stagingBranch);
+      if (!cmp) return null;
+
+      const digest = buildStagingDigest({
+        files: cmp.files ?? [],
+        commits: (cmp.commitShas ?? []).map((sha) => ({
+          sha,
+          message: cmp.commitMessages?.[sha] ?? "",
+        })),
+        filesTruncated: cmp.filesTruncated ?? false,
+      });
+
+      return {
+        subjectKey: subjectKeys.batch(batch.id),
+        payload: {
+          prs: batch.items
+            .filter((i) => i.prNumber !== null)
+            .map((i) => ({
+              number: i.prNumber as number,
+              title: i.title,
+              author: i.authorLogin,
+            })),
+          // Rendered with every section, not the project's chosen subset: the
+          // subset controls what reviewers read on the release PR, whereas this
+          // is context for the model and a hidden section is still a fact worth
+          // reasoning about.
+          digestLines: renderDigestLines(digest),
+          stats: {
+            files: digest.stats.files,
+            additions: digest.stats.additions,
+            deletions: digest.stats.deletions,
+            commits: digest.stats.commits,
+          },
         },
       };
     }
