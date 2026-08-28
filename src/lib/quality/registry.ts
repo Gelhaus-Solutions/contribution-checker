@@ -5,6 +5,7 @@ import { commitHeuristics } from "@/lib/quality/heuristics/commits";
 import { codeHeuristics } from "@/lib/quality/heuristics/code";
 import { accountHeuristics } from "@/lib/quality/heuristics/account";
 import { diffCohesionHeuristics } from "@/lib/quality/heuristics/diffCohesion";
+import { aiHeuristics } from "@/lib/quality/heuristics/ai";
 
 export const ALL_HEURISTICS: Heuristic[] = [
   ...sizeHeuristics,
@@ -13,6 +14,7 @@ export const ALL_HEURISTICS: Heuristic[] = [
   ...codeHeuristics,
   ...accountHeuristics,
   ...diffCohesionHeuristics,
+  ...aiHeuristics,
 ];
 
 export const HEURISTIC_BY_ID = new Map<string, Heuristic>(

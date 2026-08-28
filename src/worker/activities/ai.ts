@@ -8,6 +8,7 @@ import { runAiTask } from "@/lib/ai/run";
 import { subjectKeys } from "@/lib/ai/prompt";
 import { triageTask } from "@/lib/ai/tasks/triage";
 import { qaStepsTask } from "@/lib/ai/tasks/qa-steps";
+import { prQualityTask } from "@/lib/ai/tasks/pr-quality";
 import { getPullRequest, listPullRequestFiles, repoRef } from "@/lib/github/pr-actions";
 import { parseFormSchema } from "@/lib/applications/schema";
 import type { AiRunInput, AiRunResultPayload } from "@/lib/temporal/contracts";
@@ -174,6 +175,36 @@ async function loadPayload(input: AiRunInput): Promise<Loaded | null> {
           authorQaSteps: item.qaSteps,
           files: files.files,
           labels: safeLabels(item.labels),
+        },
+      };
+    }
+    case prQualityTask.id: {
+      const check = await prisma.prCheck.findFirst({
+        where: { id: input.subjectId, repo: { projectId: input.projectId } },
+        select: {
+          id: true,
+          prNumber: true,
+          repo: { select: { fullName: true, installationId: true } },
+        },
+      });
+      if (!check?.repo.installationId) return null;
+      const ref = repoRef(check.repo.fullName, check.repo.installationId);
+
+      const [pr, files] = await Promise.all([
+        getPullRequest(ref, check.prNumber),
+        listPullRequestFiles(ref, check.prNumber),
+      ]);
+      if (!pr || !files) return null;
+
+      return {
+        subjectKey: subjectKeys.prCheck(check.id),
+        payload: {
+          title: pr.title,
+          body: pr.body,
+          files: files.files,
+          // Commit subjects would be a third GitHub call for a marginal signal,
+          // and the title and body are what this task is actually judging.
+          commitMessages: [],
         },
       };
     }

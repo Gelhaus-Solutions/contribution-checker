@@ -4,6 +4,7 @@ import { logger } from "@/lib/logger";
 import { fetchPrContext, type FetchedPrContext } from "@/lib/quality/fetch";
 import {
   ALL_HEURISTICS,
+  HEURISTIC_BY_ID,
   isHeuristicEnabled,
   parseHoneypots,
   parseQualityConfig,
@@ -17,6 +18,53 @@ import type {
   SignalsRaw,
 } from "@/lib/quality/types";
 import { commentOnPr, repoRef } from "@/lib/github/pr-actions";
+import { latestAiResult } from "@/lib/ai/run";
+import { subjectKeys } from "@/lib/ai/prompt";
+import { prQualityTask } from "@/lib/ai/tasks/pr-quality";
+import type { AiVerdict } from "@/lib/quality/types";
+
+
+/**
+ * The stored model verdict for a PR, or null when none has been run.
+ *
+ * A plain database read, done before the heuristic loop so `ctx.ai` is just
+ * another already-fetched field like `account`. This is the whole mechanism by
+ * which an AI-informed heuristic exists without any heuristic doing I/O.
+ *
+ * Cheap enough to do unconditionally, but skipped when `pr.ai_assessment` is
+ * disabled: nothing would read the result, and the project that never turns AI
+ * on should not pay a query per scored PR for it.
+ */
+/** Whether `pr.ai_assessment` is on, resolved through the registry so the id
+ * is checked against a real heuristic rather than trusted as a string. */
+function aiHeuristicEnabled(config: Record<string, HeuristicSetting>): boolean {
+  const h = HEURISTIC_BY_ID.get("pr.ai_assessment");
+  return h ? isHeuristicEnabled(h, config) : false;
+}
+
+async function loadAiVerdict(
+  prCheckId: string,
+  enabled: boolean
+): Promise<AiVerdict | null> {
+  if (!enabled) return null;
+  try {
+    const found = await latestAiResult({
+      task: prQualityTask,
+      subjectKey: subjectKeys.prCheck(prCheckId),
+    });
+    if (!found) return null;
+    return {
+      assessment: found.output.assessment,
+      reason: found.output.reason,
+      modelId: found.modelId ?? "",
+      computedAt: found.computedAt.toISOString(),
+    };
+  } catch (e) {
+    // Quality scoring predates this and must keep working without it.
+    logger.warn({ err: e, prCheckId }, "ai verdict lookup failed");
+    return null;
+  }
+}
 
 export type QualityRunResult = {
   signalsRaw: SignalsRaw;
@@ -62,13 +110,19 @@ export async function runQualityFromContext(args: {
     filesTruncated: args.fetched.filesTruncated,
     commits: args.fetched.commits,
     account: args.fetched.account,
+    ai: await loadAiVerdict(args.prCheckId, aiHeuristicEnabled(config)),
   };
 
   const signals: SignalsRaw = {};
   for (const h of ALL_HEURISTICS) {
     if (!isHeuristicEnabled(h, config)) continue;
     try {
-      signals[h.id] = h.run(ctx, thresholdFor(h, config));
+      const sig = h.run(ctx, thresholdFor(h, config));
+      // A null means the heuristic had nothing to judge (e.g. no AI run has
+      // happened for this PR). Storing nothing keeps it out of `computeScore`'s
+      // weight total entirely, so an un-run signal never becomes a penalty and
+      // never becomes free credit.
+      if (sig) signals[h.id] = sig;
     } catch (e) {
       logger.warn({ err: e, heuristic: h.id }, "heuristic threw");
       signals[h.id] = { failed: false, reason: "heuristic-error" };
@@ -172,13 +226,19 @@ export async function runQualityForPrCheck(args: {
     filesTruncated: fetched.filesTruncated,
     commits: fetched.commits,
     account: fetched.account,
+    ai: await loadAiVerdict(args.prCheckId, enabledIds.has("pr.ai_assessment")),
   };
 
   const signals: SignalsRaw = {};
   for (const h of ALL_HEURISTICS) {
     if (!isHeuristicEnabled(h, config)) continue;
     try {
-      signals[h.id] = h.run(ctx, thresholdFor(h, config));
+      const sig = h.run(ctx, thresholdFor(h, config));
+      // A null means the heuristic had nothing to judge (e.g. no AI run has
+      // happened for this PR). Storing nothing keeps it out of `computeScore`'s
+      // weight total entirely, so an un-run signal never becomes a penalty and
+      // never becomes free credit.
+      if (sig) signals[h.id] = sig;
     } catch (e) {
       logger.warn({ err: e, heuristic: h.id }, "heuristic threw");
       signals[h.id] = { failed: false, reason: "heuristic-error" };

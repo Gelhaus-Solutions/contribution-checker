@@ -26,10 +26,26 @@ function ctx(partial: Partial<PrContext> = {}): PrContext {
   };
 }
 
+/**
+ * Fetch a heuristic with its `run` narrowed to a non-null result.
+ *
+ * `Heuristic.run` may return null for "no signal to report", which only the
+ * AI-backed heuristic uses (it has nothing to judge until a model has run).
+ * Every heuristic exercised in this file always produces a result, so throwing
+ * on a null here keeps these assertions readable and would loudly catch one of
+ * them starting to return null by accident.
+ */
 function get(id: string) {
   const h = HEURISTIC_BY_ID.get(id);
   if (!h) throw new Error(`unknown heuristic ${id}`);
-  return h;
+  return {
+    ...h,
+    run: (ctx: Parameters<typeof h.run>[0], threshold?: Parameters<typeof h.run>[1]) => {
+      const r = h.run(ctx, threshold);
+      if (!r) throw new Error(`${id} unexpectedly returned no signal`);
+      return r;
+    },
+  };
 }
 
 describe("size heuristics", () => {

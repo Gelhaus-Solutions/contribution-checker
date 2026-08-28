@@ -75,6 +75,30 @@ export type PrContext = {
   filesTruncated: boolean;
   commits: PrCommit[];
   account: AccountSnapshot;
+  /**
+   * A stored model assessment of this PR, or null when none has been run.
+   *
+   * Fetched from the database before the run loop and attached here, exactly as
+   * `account` and `prTemplate` are. That is what lets an AI-informed heuristic
+   * exist without a heuristic ever performing I/O: `run()` reads a value that is
+   * already in hand, so scoring stays pure and reproducible.
+   *
+   * Null is the normal case. AI runs are manual by default, so most PRs never
+   * have one, and a heuristic reading this must return null rather than fire.
+   */
+  ai?: AiVerdict | null;
+};
+
+/**
+ * A model's view of one PR. Deliberately narrow: a score and a sentence.
+ * Anything richer belongs on the dashboard, not in the scoring path.
+ */
+export type AiVerdict = {
+  /** 0-100. Higher is better, matching the direction of the overall score. */
+  assessment: number;
+  reason: string;
+  modelId: string;
+  computedAt: string;
 };
 
 export type HeuristicSetting = {
@@ -122,7 +146,24 @@ export type Heuristic = {
    *  - undefined: no threshold (toggle-only)
    */
   thresholdKind?: "number" | "stringList";
-  run(ctx: PrContext, threshold: HeuristicSetting["threshold"]): HeuristicResult;
+  /**
+   * Evaluate the PR.
+   *
+   * Returning `null` means "no signal", which is different from passing. It is
+   * for a heuristic whose input is genuinely absent: no AI run has happened, so
+   * there is nothing to judge. `computeScore` already excludes heuristics with
+   * no recorded signal, so a null is simply not stored and the PR scores exactly
+   * as it would if the heuristic did not exist. Returning `{failed: false}`
+   * instead would silently award weight the PR never earned.
+   *
+   * Must stay a pure function of `ctx`. No network, no database: the score is
+   * recomputed on every read, so a heuristic that reached outside its context
+   * would make the same PR score differently on two consecutive page loads.
+   */
+  run(
+    ctx: PrContext,
+    threshold: HeuristicSetting["threshold"]
+  ): HeuristicResult | null;
 };
 
 /** Stored per-PR signal map. */

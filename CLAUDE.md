@@ -367,9 +367,18 @@ Audit, notifications, jobs:
   log warnings on failure. Failures must not crash the webhook handler.
 - **Audit every admin-visible state change** via `recordAudit`. Add the
   matching string literal to `AuditKind` in `src/lib/audit.ts` first.
-- **No LLM dependency in quality scoring.** All heuristics are deterministic
-  and pure given a `PrContext`. Adding an LLM call here would re-architect
-  the module and is intentionally out of scope.
+- **No network calls inside a heuristic.** `Heuristic.run()` stays a pure
+  function of `PrContext`: the score is recomputed on every read, so a
+  heuristic that reached outside its context would make the same PR score
+  differently on two consecutive page loads. The `ai` field on `PrContext` is a
+  **stored** verdict fetched before the run loop, exactly as `account` and
+  `prTemplate` are, which is how `pr.ai_assessment` exists without breaking
+  this. A heuristic that called a model directly is still out of scope.
+- **`Heuristic.run()` may return `null`, meaning "no signal".** That is
+  different from passing. `pr.ai_assessment` returns null when no AI run has
+  happened, and `run.ts` stores nothing, so `computeScore` leaves the heuristic
+  out of the weight total entirely and the PR scores as if it did not exist.
+  Returning `{failed: false}` there would hand every un-analysed PR free credit.
 - **Disable switch contract:** when `Project.checkerEnabled === false`,
   `decideForRepo` returns `APPROVED { bypassReason: "checker_disabled" }`.
   The webhook handler must NOT close the PR or apply pending/denied labels.
@@ -525,7 +534,14 @@ and `contents:read` is required for PR Quality scoring (file diff fetching).
   webhook path uses inline awaits inside an activity; anything else starts a
   workflow via `src/lib/temporal/start.ts`.
 - Don't `JSON.parse` JSON columns without a Zod schema or a parsing helper.
-- Don't add an LLM dependency to quality scoring (see Conventions).
+- Don't call a model from inside a heuristic, or from anything `computeScore`
+  reaches. The AI verdict is loaded into `PrContext` first (see Conventions).
+- Don't write AI output to a contributor's PR body, or post it as a PR comment.
+  Every AI surface is dashboard-only by deliberate decision. In particular,
+  generated QA steps must never reach `applyTaskChanges` in `src/lib/qa/tasks.ts`,
+  which matches `expectedText` against text that really exists in the PR
+  description; generated text is not there, so every tick would fail. There is a
+  test asserting this.
 - Don't let webhook errors propagate up. GitHub will retry forever and the
   delivery will look "failed". Log and return 200 unless signature
   verification fails.
