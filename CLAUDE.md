@@ -236,12 +236,18 @@ QA on the staging batch (`src/lib/qa/`, App mode only):
   and bounded to the QA section, so it can never reach the contributor checklist
   below it, and `expectedText` refuses the write when the description moved
   under the reviewer rather than ticking whatever slid into that index.
-- **A PR body edit re-derives the record.** `handlePullRequestEvent` lets
+- **A PR body edit re-derives the record, and a merged PR is not exempt.** `handlePullRequestEvent` lets
   `edited` through when `changes.body` is present, because the `## QA` section
   is routinely written *after* the PR merged and that event is the only signal
   that it changed. It cannot echo the bot's own writes: the only body the bot
   edits is the aggregate PR's, whose base is the default branch, so
   `touchesStaging` is false for it and no reconcile is signalled.
+  `applyStagingRouting` also reports `repoId` and `touchesStaging` for a *closed*
+  PR before returning `pr_closed`, rather than short-circuiting on the payload:
+  routing genuinely has nothing to do there, but the PR is still in the batch
+  and its description is still where the QA steps live. Writing that section
+  after the PR merged is the normal case, and the early return meant the edit
+  reached nothing at all.
 - **No per-PR file lists.** Classifying each PR's files through the digest's
   `GROUPS` would cost one `GET /pulls/{n}/files` per PR per reconcile, which on
   a thirty-PR batch reconciled on every push is a rate-limit incident. The

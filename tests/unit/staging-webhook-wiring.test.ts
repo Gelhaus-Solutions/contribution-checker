@@ -266,6 +266,43 @@ describe("staging routing wiring in handlePullRequestEvent", () => {
     expect(setPullRequestBase).not.toHaveBeenCalled();
   });
 
+  it("refreshes the batch when a MERGED PR on staging has its body edited", async () => {
+    // The case this was actually reported for. Writing the `## QA` section
+    // after the PR merged is the normal way it happens, and routing used to
+    // drop every closed-PR event before it could say the PR was on staging, so
+    // the edit reached nothing and the board kept showing "no testing notes".
+    await handlePullRequestEvent(
+      payload({
+        action: "edited",
+        changes: { body: { from: "old body" } },
+        pull_request: {
+          ...payload().pull_request,
+          state: "closed",
+          merged: true,
+          base: { ref: "staging", repo: { default_branch: "main" } },
+        },
+      }) as never,
+    );
+    expect(signalStagingBatch).toHaveBeenCalled();
+    expect(setPullRequestBase).not.toHaveBeenCalled();
+  });
+
+  it("does not refresh the batch for a closed PR that never touched staging", async () => {
+    await handlePullRequestEvent(
+      payload({
+        action: "edited",
+        changes: { body: { from: "old body" } },
+        pull_request: {
+          ...payload().pull_request,
+          state: "closed",
+          merged: true,
+          base: { ref: "main", repo: { default_branch: "main" } },
+        },
+      }) as never,
+    );
+    expect(signalStagingBatch).not.toHaveBeenCalled();
+  });
+
   it("refreshes the batch when a PR on staging has its body edited", async () => {
     // The body carries the author's own `## QA` section and the issues the PR
     // closes, and it is routinely filled in AFTER the PR merged. Without this

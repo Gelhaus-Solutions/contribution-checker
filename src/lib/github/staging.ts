@@ -791,7 +791,6 @@ export async function applyStagingRouting(ctx: {
   prIsClosed: boolean;
 }): Promise<StagingRoutingResult> {
   try {
-    if (ctx.prIsClosed) return { ...NO_ROUTING, outcome: "pr_closed" };
     const repo = await prisma.repo.findUnique({
       where: { ghRepoId: ctx.ghRepoId },
       select: {
@@ -808,6 +807,24 @@ export async function applyStagingRouting(ctx: {
     if (!repo || !repo.active || repo.installationId == null) return NO_ROUTING;
     const project = repo.project;
     const cfg = resolveStagingConfig(project, repo);
+
+    // A closed PR can never be retargeted, so routing stops here. It is still
+    // *in* the batch though, and its description is still the source of the QA
+    // steps and the issues it closes, so the caller has to be told where it
+    // sits or the manifest and the QA record go stale.
+    //
+    // This is not hypothetical: writing the `## QA` section after the PR merged
+    // is the normal case, and returning early with `touchesStaging: false` here
+    // meant that edit reached nothing.
+    if (ctx.prIsClosed) {
+      return {
+        repoId: repo.id,
+        retargeted: false,
+        isAggregatePr: false,
+        touchesStaging: ctx.baseRef === cfg.stagingBranch,
+        outcome: "pr_closed",
+      };
+    }
 
     const ref = repoRef(repo.fullName, repo.installationId);
     const defaultBranch = await resolveDefaultBranch({
