@@ -115,6 +115,13 @@ const schema = z.object({
   // The judgment tier is used by the release narrative alone. In development
   // both are normally pinned to the cheap model to protect the spend cap.
   //
+  // Do not "optimise" these to a smaller model without re-running the
+  // injection case. gpt-oss-20b is half the price on the same provider, passed
+  // every ordinary case, and then obeyed an injected instruction 5 times out of
+  // 5 while simultaneously reporting that it had spotted the injection. Both
+  // tiers therefore point at the same model today; the split exists so a task
+  // can be moved, not because a cheaper tier has been found.
+  //
   // Both default to gpt-oss-120b, chosen by measurement rather than price list:
   // it passed all seven task cases including the prompt-injection case that this
   // subsystem's safety rests on, and under a Groq BYOK key OpenRouter reports a
