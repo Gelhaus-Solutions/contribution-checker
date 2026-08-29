@@ -140,6 +140,18 @@ const schema = z.object({
   // QA-steps answer, against ~110 from Gemini for the same input), and thinking
   // is billed as output. Too low a cap does not save money, it truncates the
   // JSON mid-object and turns a good answer into a recorded schema failure.
+  // Optional comma-separated provider pin, e.g. "Groq,AkashML".
+  //
+  // Unset means OpenRouter's default routing, which prefers a BYOK route and so
+  // costs nothing while a free tier lasts. Set it to bound traffic to providers
+  // whose weights have actually been validated: precision is a safety property
+  // here, not a quality preference. gpt-oss-120b refuses the prompt-injection
+  // case on Groq and on AkashML (bf16), while gpt-oss-20b obeyed it 5 times out
+  // of 5, and an fp4 build of the same slug is an untested third thing. Adding a
+  // cheap provider to the OpenRouter allowlist would otherwise start routing
+  // real traffic to it silently.
+  AI_PROVIDER_ORDER: z.string().optional(),
+
   AI_MAX_OUTPUT_TOKENS: z.coerce.number().int().positive().default(2048),
   AI_REQUEST_TIMEOUT_MS: z.coerce.number().int().positive().default(45_000),
 

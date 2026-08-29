@@ -18,6 +18,25 @@ import type { AiCallResult } from "@/lib/ai/types";
  * the retry decision. Only genuine programming errors throw.
  */
 
+/**
+ * Provider pin, when configured.
+ *
+ * `allow_fallbacks: false` is deliberate: the point is to bound traffic to
+ * providers whose weights were actually tested against the prompt-injection
+ * case, so silently falling through to an untested one would defeat it. A
+ * provider outage then surfaces as a transient failure the workflow retries,
+ * which is the correct trade.
+ */
+function providerRouting(): { provider?: { order: string[]; allow_fallbacks: boolean } } {
+  const raw = env.AI_PROVIDER_ORDER;
+  if (!raw) return {};
+  const order = raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return order.length > 0 ? { provider: { order, allow_fallbacks: false } } : {};
+}
+
 /** Status codes where retrying cannot help. */
 const TERMINAL_STATUSES = new Set([
   400, // malformed request: our bug, retrying repeats it
@@ -117,6 +136,7 @@ export async function callModel(args: AiCallArgs): Promise<AiCallResult> {
           },
         },
         usage: { include: true },
+        ...providerRouting(),
       }),
       signal: AbortSignal.timeout(args.timeoutMs ?? env.AI_REQUEST_TIMEOUT_MS),
       redirect: "manual",

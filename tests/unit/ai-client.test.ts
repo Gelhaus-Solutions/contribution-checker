@@ -126,6 +126,37 @@ describe("callModel", () => {
   });
 });
 
+describe("provider pin", () => {
+  it("sends no provider hint by default, so BYOK routing is preferred", async () => {
+    // Unset is the cheap default: OpenRouter prefers a BYOK route, which bills
+    // nothing while a free tier lasts.
+    const spy = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => okBody() });
+    vi.stubGlobal("fetch", spy);
+    await callModel(args);
+    const body = JSON.parse(spy.mock.calls[0][1].body);
+    expect(body.provider).toBeUndefined();
+  });
+
+  it("refuses to fall through to an unvalidated provider when pinned", async () => {
+    vi.resetModules();
+    vi.doMock("@/lib/env", async () => {
+      const actual = await vi.importActual<typeof import("@/lib/env")>("@/lib/env");
+      return { env: { ...actual.env, AI_PROVIDER_ORDER: "Groq, AkashML" } };
+    });
+    const spy = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => okBody() });
+    vi.stubGlobal("fetch", spy);
+    const { callModel: pinned } = await import("@/lib/ai/client");
+    await pinned(args);
+    const body = JSON.parse(spy.mock.calls[0][1].body);
+    expect(body.provider.order).toEqual(["Groq", "AkashML"]);
+    // The pin exists to bound traffic to weights validated against the
+    // injection case; falling through would defeat the entire point.
+    expect(body.provider.allow_fallbacks).toBe(false);
+    vi.doUnmock("@/lib/env");
+    vi.resetModules();
+  });
+});
+
 describe("costMicrosFor", () => {
   it("bills cached prompt tokens at the cache rate", () => {
     const allFresh = costMicrosFor({
