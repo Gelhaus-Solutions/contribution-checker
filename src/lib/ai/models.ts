@@ -59,7 +59,11 @@ const PRICES: Record<string, Price> = {
   // Flash tier, which is why they are candidates for the cheap tier. Note the
   // batch variant is *more* expensive here, the opposite of Gemini's: batch
   // pricing is per-provider and cannot be assumed to be a discount.
-  "openai/gpt-oss-120b": { in: 0.037, out: 0.17, cachedIn: 0.0037 },
+  // Groq's rate, because that is the route this deployment is configured for.
+  // Other providers serve the same slug from $0.030/$0.170, so this entry is
+  // deliberately NOT the cheapest: a fallback estimate that flatters the bill is
+  // worse than one that overstates it.
+  "openai/gpt-oss-120b": { in: 0.15, out: 0.6, cachedIn: 0.015 },
   "openai/gpt-oss-120b:batch": { in: 0.15, out: 0.6, cachedIn: 0.015 },
   "openai/gpt-oss-20b": { in: 0.03, out: 0.13, cachedIn: 0.003 },
   "openai/gpt-oss-safeguard-20b": { in: 0.075, out: 0.3, cachedIn: 0.0075 },

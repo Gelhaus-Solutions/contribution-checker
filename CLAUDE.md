@@ -444,6 +444,13 @@ below was observed; re-measure before trusting any of it after a model change.
   response and bills every token of it.
 - **Reasoning cannot be switched off** on every endpoint: Groq answers 400
   "Reasoning is mandatory for this endpoint".
+- **Reasoning overhead does not make the reasoning model the expensive one.**
+  Measured over the same seven cases: gpt-oss-120b at `effort: "low"` spends
+  1.71x the output tokens of gemini-3.5-flash-lite, but Groq bills output at 0.24x
+  Gemini's rate, so it lands 2.0x cheaper on Groq's paid tier and 8.4x cheaper on
+  the cheapest provider. Even with reasoning left unconstrained it is still
+  marginally (1.09x) cheaper. The one configuration that inverts this is
+  `effort: "high"`, which triples output and would cost roughly twice Gemini.
 - **`effort: "high"` is a correctness hazard, not just an expensive one.** It
   produced 2,491 output tokens on a QA-steps answer, overran `AI_MAX_OUTPUT_TOKENS`
   and returned truncated, unparseable JSON, which the orchestrator then records
