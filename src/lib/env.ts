@@ -142,9 +142,13 @@ const schema = z.object({
   // JSON mid-object and turns a good answer into a recorded schema failure.
   // Optional comma-separated provider pin, e.g. "Groq,AkashML".
   //
-  // Unset means OpenRouter's default routing, which prefers a BYOK route and so
-  // costs nothing while a free tier lasts. Set it to bound traffic to providers
-  // whose weights have actually been validated: precision is a safety property
+  // Unset means OpenRouter's default routing. Setting it does NOT override BYOK
+  // preference (a BYOK route wins whatever order is given, verified); it bounds
+  // which paid providers may serve once no BYOK route is available, which yields
+  // "own key while the free tier lasts, then the cheapest validated provider".
+  //
+  // The reason to set it at all is that the list is a validation boundary:
+  // precision is a safety property
   // here, not a quality preference. gpt-oss-120b refuses the prompt-injection
   // case on Groq and on AkashML (bf16), while gpt-oss-20b obeyed it 5 times out
   // of 5, and an fp4 build of the same slug is an untested third thing. Adding a

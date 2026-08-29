@@ -21,11 +21,20 @@ import type { AiCallResult } from "@/lib/ai/types";
 /**
  * Provider pin, when configured.
  *
- * `allow_fallbacks: false` is deliberate: the point is to bound traffic to
- * providers whose weights were actually tested against the prompt-injection
- * case, so silently falling through to an untested one would defeat it. A
+ * Note what this does and does not control, because it is not what the option
+ * name suggests. A BYOK route wins regardless of the order given: asking for
+ * `["AkashML", "Groq"]` still served Groq, because the Groq key is the caller's
+ * own and OpenRouter bills nothing for it. So the list does not choose between
+ * BYOK and paid; it bounds which *paid* providers may serve once no BYOK route
+ * is available. In practice that yields "own key while the free tier lasts, then
+ * the cheapest validated paid provider", which is the intent.
+ *
+ * `allow_fallbacks: false` is the load-bearing half: it stops OpenRouter
+ * wandering to a provider outside the list. That matters because the same model
+ * slug is served at different quantizations, a 4-bit build is a different model,
+ * and only these providers have been run against the prompt-injection case. A
  * provider outage then surfaces as a transient failure the workflow retries,
- * which is the correct trade.
+ * which is the right trade against silently answering from untested weights.
  */
 function providerRouting(): { provider?: { order: string[]; allow_fallbacks: boolean } } {
   const raw = env.AI_PROVIDER_ORDER;
