@@ -269,6 +269,13 @@ QA on the staging batch (`src/lib/qa/`, App mode only):
 - Statuses are `QA_`-prefixed in `src/lib/ui/status.ts` on purpose: bare
   `PENDING` already renders as "Not applied" and `APPROVED`/`DENIED` are
   application verdicts, so sharing them would corrupt the map for every page.
+- **The QA check is bound to the batch head SHA, not to the batch.** A check run
+  belongs to the commit it was created against and PATCH cannot move it, so
+  `StagingBatch.qaCheckSha` records that commit and the stored `qaCheckRunId` is
+  reused only while it matches. Reusing it across a push to staging updated a run
+  on a commit branch protection no longer reads and published nothing on the new
+  head, which GitHub reports as a missing required check forever. Same rule as
+  `PrCheck.headSha` on the decision and CLA checks.
 - `qaEnabled` resolves through `resolveStagingConfig` gated on `batchPrEnabled`,
   exactly like `digestEnabled`: the batch is the unit of QA. `qaCheckEnabled` is
   a **second, separate** switch, because turning QA on to see the state must not

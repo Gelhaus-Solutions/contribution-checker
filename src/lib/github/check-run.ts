@@ -202,7 +202,7 @@ export async function publishDecisionCheck(args: {
         summary: payload.summary,
         detailsUrl: payload.detailsUrl,
       },
-      existingId
+      existingId,
     );
     if (newId && args.prCheckId) {
       await prisma.prCheck.update({
@@ -211,7 +211,10 @@ export async function publishDecisionCheck(args: {
       });
     }
   } catch (e) {
-    logger.warn({ err: e, prCheckId: args.prCheckId }, "publishDecisionCheck failed");
+    logger.warn(
+      { err: e, prCheckId: args.prCheckId },
+      "publishDecisionCheck failed",
+    );
   }
 }
 
@@ -331,7 +334,7 @@ export async function publishClaCheck(args: {
         summary: payload.summary,
         detailsUrl: payload.detailsUrl,
       },
-      existingId
+      existingId,
     );
     if (newId && args.prCheckId) {
       await prisma.prCheck.update({
@@ -340,7 +343,10 @@ export async function publishClaCheck(args: {
       });
     }
   } catch (e) {
-    logger.warn({ err: e, prCheckId: args.prCheckId }, "publishClaCheck failed");
+    logger.warn(
+      { err: e, prCheckId: args.prCheckId },
+      "publishClaCheck failed",
+    );
   }
 }
 
@@ -386,11 +392,20 @@ export async function publishQaCheck(args: {
   });
 
   // Reused across verdicts so the release PR accumulates one check that
-  // changes, not one per time somebody ticked something off.
+  // changes, not one per time somebody ticked something off -- but only while
+  // the batch head is the commit that run was created against. A check run
+  // belongs to its head SHA and PATCH cannot move it, so reusing the id after a
+  // push to staging updates a run on a commit nobody is looking at and leaves
+  // the new head with no QA check at all, which branch protection reports as a
+  // missing required check. Same rule as PrCheck.headSha on the other two.
   const batch = await prisma.stagingBatch.findUnique({
     where: { id: args.batchId },
-    select: { qaCheckRunId: true },
+    select: { qaCheckRunId: true, qaCheckSha: true },
   });
+  const existingId =
+    batch?.qaCheckRunId && batch.qaCheckSha === args.headSha
+      ? batch.qaCheckRunId
+      : null;
 
   const ref = repoRef(args.repoFullName, args.installationId);
   try {
@@ -405,12 +420,15 @@ export async function publishQaCheck(args: {
         summary: payload.summary,
         detailsUrl: args.boardUrl,
       },
-      batch?.qaCheckRunId ?? null,
+      existingId,
     );
-    if (newId && newId !== batch?.qaCheckRunId) {
+    if (
+      newId &&
+      (newId !== batch?.qaCheckRunId || batch?.qaCheckSha !== args.headSha)
+    ) {
       await prisma.stagingBatch.update({
         where: { id: args.batchId },
-        data: { qaCheckRunId: newId },
+        data: { qaCheckRunId: newId, qaCheckSha: args.headSha },
       });
     }
   } catch (e) {

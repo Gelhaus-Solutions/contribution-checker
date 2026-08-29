@@ -1,0 +1,11 @@
+-- The QA check was published once per batch and then only PATCHed. A check run
+-- is bound to the commit it was created against and PATCH cannot move it, so
+-- every push to staging left the new head with no `contribution-checker / qa`
+-- run at all: branch protection reads the head SHA's checks and reported the
+-- required check as missing ("Expected — waiting for status to be reported"),
+-- which is the one state the check exists to prevent.
+--
+-- Remember which commit the stored run belongs to, so a changed head creates a
+-- fresh run instead of updating an invisible one. This is what PrCheck.headSha
+-- already does for the decision and CLA checks.
+ALTER TABLE "StagingBatch" ADD COLUMN "qaCheckSha" TEXT;

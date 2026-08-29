@@ -698,6 +698,13 @@ model StagingBatch {
   /// Check Run id for `contribution-checker / qa`, so upsertCheckRun PATCHes one
   /// run instead of creating a new one per verdict.
   qaCheckRunId   String?
+  /// The head SHA `qaCheckRunId` was created against. A check run cannot be
+  /// moved to another commit (PATCH ignores head_sha), so once staging's tip
+  /// moves the stored run belongs to a commit branch protection no longer looks
+  /// at, and reusing it publishes nothing on the new head: GitHub then reports
+  /// the required QA check as missing forever. Reuse the run only on a match,
+  /// exactly as PrCheck.headSha gates the decision and CLA checks.
+  qaCheckSha     String?
   /// Whether the failure label is currently on the aggregate PR. Same purpose
   /// as StagingBatchItem.qaLabelApplied.
   qaLabelApplied Boolean @default(false)
