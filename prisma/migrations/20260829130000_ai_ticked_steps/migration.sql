@@ -1,0 +1,19 @@
+-- Let a reviewer tick off model-suggested QA steps.
+--
+-- Author-written steps live in the pull request description and are ticked by
+-- rewriting that description on GitHub (src/lib/qa/tasks.ts). Generated steps
+-- cannot use that path: the text does not exist in the description, so
+-- `applyTaskChanges` would find nothing to match and every tick would fail.
+-- That is a deliberate constraint, not an oversight, and there is a test for it.
+--
+-- So the tick state for generated steps is stored here instead. It sits on
+-- AiResult rather than on StagingBatchItem for the same reason the generated
+-- steps themselves do: a reconcile re-derives every non-`qa*` column on the item
+-- and would need this one adding to its preserve list, whereas nothing re-derives
+-- an AiResult row.
+--
+-- Indices into the stored `steps` array, as a JSON array of integers. Indices
+-- rather than text because the steps are immutable for a given row: a
+-- regenerate changes the input hash, writes a new row, and correctly starts the
+-- checklist over rather than carrying ticks onto steps nobody has read.
+ALTER TABLE "AiResult" ADD COLUMN "tickedSteps" TEXT;

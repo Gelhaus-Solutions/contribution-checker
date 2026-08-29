@@ -1224,6 +1224,15 @@ model AiResult {
   costMicros       Int     @default(0)
   latencyMs        Int     @default(0)
 
+  /// Which steps a reviewer has ticked off, as a JSON array of indices into the
+  /// stored output's `steps`. Null when nothing has been ticked.
+  ///
+  /// The one mutable field on this row. Everything else records what a model was
+  /// asked and what it answered; this records what a human did about it, and is
+  /// kept here because a regenerate writes a new row and should start the
+  /// checklist over rather than inherit ticks against different steps.
+  tickedSteps String?
+
   /// Who pressed the button. Null means an automatic run.
   triggeredById String?
 

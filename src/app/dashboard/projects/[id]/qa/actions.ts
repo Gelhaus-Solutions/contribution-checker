@@ -9,6 +9,7 @@ import { requireProjectRole } from "@/lib/authz";
 import { rateLimit } from "@/lib/ratelimit";
 import { runAiTaskWorkflow } from "@/lib/temporal/start";
 import { qaStepsTask } from "@/lib/ai/tasks/qa-steps";
+import { subjectKeys } from "@/lib/ai/prompt";
 import { releaseNarrativeTask } from "@/lib/ai/tasks/release-narrative";
 import {
   runQaTaskToggle,
@@ -538,4 +539,57 @@ export async function generateReleaseNarrative(formData: FormData) {
   }
 
   revalidatePath(`/dashboard/projects/${parsed.projectId}/qa`);
+}
+
+const aiTickSchema = z.object({
+  projectId: z.string().min(1),
+  itemId: z.string().min(1),
+  ticked: z.array(z.number().int().min(0).max(50)).max(50),
+});
+
+/**
+ * Record which generated QA steps a reviewer has ticked off.
+ *
+ * Purely local state. Unlike `toggleQaStep`, which rewrites the pull request
+ * description on GitHub, this touches nothing outside our own database: the
+ * steps it refers to were written by a model and do not exist on the PR, so
+ * there is nowhere to write them back to and nothing to keep in sync.
+ *
+ * Ticks are progress tracking, not a verdict. The Pass/Fail/Skip buttons remain
+ * the only thing that sets `qaStatus`, so a fully ticked checklist still leaves
+ * the item unverified until somebody says so.
+ */
+export async function setAiStepTicks(input: {
+  projectId: string;
+  itemId: string;
+  ticked: number[];
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  const parsed = aiTickSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "Invalid request." };
+  await requireProjectRole(parsed.data.projectId, "REVIEWER");
+
+  const subjectKey = subjectKeys.batchItem(parsed.data.itemId);
+  const row = await prisma.aiResult.findFirst({
+    where: {
+      taskId: qaStepsTask.id,
+      subjectKey,
+      status: "OK",
+      project: { id: parsed.data.projectId },
+    },
+    orderBy: { createdAt: "desc" },
+    select: { id: true },
+  });
+  // Gone because somebody regenerated in another tab, which correctly starts a
+  // new checklist. Reporting an error would be noise: the reviewer's next render
+  // shows the new steps, unticked, which is the right answer.
+  if (!row) return { ok: false, error: "Those steps are no longer current." };
+
+  const unique = [...new Set(parsed.data.ticked)].sort((a, b) => a - b);
+  await prisma.aiResult.update({
+    where: { id: row.id },
+    data: { tickedSteps: unique.length > 0 ? JSON.stringify(unique) : null },
+  });
+
+  revalidatePath(`/dashboard/projects/${parsed.data.projectId}/qa`);
+  return { ok: true };
 }

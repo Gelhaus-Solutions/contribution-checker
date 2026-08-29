@@ -182,7 +182,14 @@ export default async function ProjectQa({
     const rows = await prisma.aiResult.findMany({
       where: { taskId: qaStepsTask.id, subjectKey: { in: keys }, status: "OK" },
       orderBy: { createdAt: "desc" },
-      select: { subjectKey: true, output: true, modelId: true, completedAt: true, createdAt: true },
+      select: {
+        subjectKey: true,
+        output: true,
+        tickedSteps: true,
+        modelId: true,
+        completedAt: true,
+        createdAt: true,
+      },
     });
     for (const row of rows) {
       // Newest first, so the first row per subject wins and later ones are
@@ -194,6 +201,7 @@ export default async function ProjectQa({
         summary: parsed.summary,
         steps: parsed.steps,
         unknowns: parsed.unknowns,
+        ticked: safeTicks(row.tickedSteps, parsed.steps.length),
         modelId: row.modelId,
         generatedAt: formatRelative(row.completedAt ?? row.createdAt),
       });
@@ -512,5 +520,25 @@ function safeJson(text: string): unknown {
     return JSON.parse(text);
   } catch {
     return null;
+  }
+}
+
+/**
+ * Ticked step indices, JSON-parsed defensively like every other JSON column.
+ *
+ * Bounded by the current step count so a stale value cannot light up a checkbox
+ * that no longer exists, which is the shape a regenerate would leave behind if
+ * anything ever wrote ticks without clearing them.
+ */
+function safeTicks(raw: string | null, stepCount: number): number[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (v): v is number => typeof v === "number" && Number.isInteger(v) && v >= 0 && v < stepCount
+    );
+  } catch {
+    return [];
   }
 }

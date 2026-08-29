@@ -80,6 +80,29 @@ describe("qaStepsTask output contract", () => {
   });
 });
 
+describe("generated-step ticks stay local", () => {
+  /**
+   * Two checklists now exist side by side and they persist in different places:
+   * author steps tick by rewriting the PR description on GitHub, generated steps
+   * tick into AiResult.tickedSteps. Crossing the wires would either write our
+   * text onto somebody's pull request or silently drop every tick.
+   */
+  it("ticking a generated step must not be expressible as a body edit", () => {
+    const body = ["## QA", "- [ ] Log in as an admin"].join("\n");
+    const generated = [
+      "Start the app in a staging environment",
+      "Open the analytics page and check no 5.0% badge appears",
+    ];
+    // Index 1 exists in the generated list but not in the body's task list.
+    const res = applyTaskChanges({
+      body,
+      changes: [{ index: 1, expectedText: generated[1], checked: true }],
+    });
+    expect(res.ok).toBe(false);
+    expect(parseTasksInBody(body).every((t) => !t.checked)).toBe(true);
+  });
+});
+
 describe("generated steps never reach the PR body editor", () => {
   /**
    * The failure this guards against is quiet and bad: pointing the checkbox
