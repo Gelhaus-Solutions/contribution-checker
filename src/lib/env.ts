@@ -115,18 +115,25 @@ const schema = z.object({
   // The judgment tier is used by the release narrative alone. In development
   // both are normally pinned to the cheap model to protect the spend cap.
   //
-  // The defaults are 3.x deliberately. Google retired the whole Gemini 2.5 line
-  // for new users, so on a BYOK key it answers 404 with "no longer available to
-  // new users, use models/gemini-3.5-flash-lite". 2.5-flash-lite is a third the
-  // price and is the obvious pick on a pricing table alone, which is exactly why
-  // this note is here: it cannot be called, and the cheaper number is a trap.
+  // Both default to gpt-oss-120b, chosen by measurement rather than price list:
+  // it passed all seven task cases including the prompt-injection case that this
+  // subsystem's safety rests on, and under a Groq BYOK key OpenRouter reports a
+  // cost of zero. Gemini 3.5 Flash Lite is the proven fallback (same seven
+  // passes, roughly 4x the cost) and 3.7 Flash is the judgment-tier option,
+  // though it returned intermittent 503s throughout development.
+  //
+  // Do NOT reach for a Gemini 2.5 slug however cheap the rate card looks. Google
+  // retired that line for new users and a BYOK key gets a 404 pointing at 3.5.
   OPENROUTER_BASE_URL: z.string().url().default("https://openrouter.ai/api/v1"),
-  AI_MODEL_CHEAP: z.string().default("google/gemini-3.5-flash-lite"),
-  AI_MODEL_JUDGMENT: z.string().default("google/gemini-3.7-flash"),
-  // Caps the completion, which is what actually costs money: output tokens are
-  // billed several times the input rate, and on the 3.x models reasoning tokens
-  // are billed as output too. Every task's JSON schema is far smaller than this.
-  AI_MAX_OUTPUT_TOKENS: z.coerce.number().int().positive().default(1024),
+  AI_MODEL_CHEAP: z.string().default("openai/gpt-oss-120b"),
+  AI_MODEL_JUDGMENT: z.string().default("openai/gpt-oss-120b"),
+  // Caps the completion. Sized for a REASONING model, which is why it looks
+  // generous next to answers that render as a hundred tokens of JSON: gpt-oss
+  // spends most of its completion thinking (measured: 742 output tokens for a
+  // QA-steps answer, against ~110 from Gemini for the same input), and thinking
+  // is billed as output. Too low a cap does not save money, it truncates the
+  // JSON mid-object and turns a good answer into a recorded schema failure.
+  AI_MAX_OUTPUT_TOKENS: z.coerce.number().int().positive().default(2048),
   AI_REQUEST_TIMEOUT_MS: z.coerce.number().int().positive().default(45_000),
 
   // Temporal: durable execution backend. The worker and the Next.js client both

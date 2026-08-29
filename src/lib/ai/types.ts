@@ -91,6 +91,16 @@ export type AiTask<TIn = unknown, TOut = unknown> = {
    */
   defaultEnabled: boolean;
   /**
+   * How hard the model should think, for models that reason. Omit to take the
+   * global default of "low", which measurement supports: on gpt-oss-120b, low
+   * cut output tokens by roughly 55% and still passed every task case including
+   * the prompt-injection one. Raise it only for a task whose output actually
+   * degrades, and never to "high" without re-checking the token ceiling: high
+   * produced 2491 output tokens on a QA-steps answer, overran the cap and
+   * returned truncated, unparseable JSON.
+   */
+  reasoningEffort?: "low" | "medium" | "high";
+  /**
    * The fixed half of the prompt: role, rules, and the shape of the answer.
    * Must not interpolate anything variable, or the provider's prompt cache
    * misses on every call. See the comment in prompt.ts.

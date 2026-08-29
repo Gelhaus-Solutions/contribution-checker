@@ -135,6 +135,7 @@ export async function runAiTask<TIn, TOut>(
     user,
     jsonSchema: task.jsonSchema,
     schemaName: task.id.replace(/[^a-zA-Z0-9_-]/g, "_"),
+    reasoningEffort: task.reasoningEffort,
   });
 
   if (!res.ok) {

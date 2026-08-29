@@ -39,6 +39,20 @@ export type AiCallArgs = {
   schemaName: string;
   maxOutputTokens?: number;
   timeoutMs?: number;
+  /**
+   * Reasoning budget for models that think. Defaults to "low".
+   *
+   * This is the single biggest lever on cost that exists here, because thinking
+   * is billed at the output rate and dominates the bill: on gpt-oss-120b a
+   * triage answer that renders as ~100 tokens of JSON spent 438 tokens
+   * reasoning at the default setting, and 114 at "low", with identical verdicts.
+   *
+   * Note that turning reasoning OFF is not an option on every endpoint (Groq
+   * answers 400 "Reasoning is mandatory for this endpoint"), and that the
+   * `exclude` flag is not a saving: it only hides the reasoning from the
+   * response while still billing every token of it.
+   */
+  reasoningEffort?: "low" | "medium" | "high";
 };
 
 /**
@@ -91,6 +105,9 @@ export async function callModel(args: AiCallArgs): Promise<AiCallResult> {
         // content-hash dedupe is actually worth something.
         temperature: 0,
         max_tokens: args.maxOutputTokens ?? env.AI_MAX_OUTPUT_TOKENS,
+        // Harmless on models that do not reason: OpenRouter drops parameters a
+        // model does not support rather than rejecting the request.
+        reasoning: { effort: args.reasoningEffort ?? "low" },
         response_format: {
           type: "json_schema",
           json_schema: {
@@ -168,12 +185,17 @@ export async function callModel(args: AiCallArgs): Promise<AiCallResult> {
       promptTokens: parsed.promptTokens,
       completionTokens: parsed.completionTokens,
       cachedTokens: parsed.cachedTokens,
-      costMicros: costMicrosFor({
-        model,
-        promptTokens: parsed.promptTokens,
-        completionTokens: parsed.completionTokens,
-        cachedTokens: parsed.cachedTokens,
-      }),
+      // Provider-reported cost wins; our rate card is the fallback for when the
+      // response carries no usage accounting.
+      costMicros:
+        parsed.reportedCost !== null
+          ? Math.round(parsed.reportedCost * 1_000_000)
+          : costMicrosFor({
+              model,
+              promptTokens: parsed.promptTokens,
+              completionTokens: parsed.completionTokens,
+              cachedTokens: parsed.cachedTokens,
+            }),
     },
     latencyMs: elapsed(),
   };
@@ -185,6 +207,17 @@ type Completion = {
   promptTokens: number;
   completionTokens: number;
   cachedTokens: number;
+  /**
+   * What the provider says the call cost, in dollars, or null when it did not
+   * say. Preferred over our own rate card because the same model slug is served
+   * by twenty providers at prices differing by 10x, and we do not know which one
+   * OpenRouter routed to.
+   *
+   * Zero is a real answer, not a missing one: a BYOK key means OpenRouter
+   * charged nothing because the upstream provider billed the user's own account
+   * (or their free tier absorbed it). That is exactly what we want recorded.
+   */
+  reportedCost: number | null;
 };
 
 /**
@@ -214,12 +247,17 @@ function readCompletion(body: unknown): Completion | null {
       ? (usage.prompt_tokens_details as Record<string, unknown>)
       : null;
 
+  const rawCost = usage?.cost;
   return {
     content,
     model: typeof b.model === "string" ? b.model : "",
     promptTokens: num(usage?.prompt_tokens),
     completionTokens: num(usage?.completion_tokens),
     cachedTokens: num(details?.cached_tokens),
+    reportedCost:
+      typeof rawCost === "number" && Number.isFinite(rawCost) && rawCost >= 0
+        ? rawCost
+        : null,
   };
 }
 

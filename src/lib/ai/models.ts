@@ -19,12 +19,16 @@ export function modelFor(tier: AiTier): string {
 /**
  * Dollars per million tokens, as published by OpenRouter.
  *
- * This exists only to record what a run cost. It is not a source of truth and
- * cannot be: OpenRouter can reprice, and a BYOK key bills the upstream provider
- * directly. An unknown model therefore records a zero cost rather than a guess,
- * and the token counts stay accurate regardless because they come off the
- * response. Treat the money column as indicative and the provider dashboard as
- * authoritative.
+ * A FALLBACK only. The client prefers the cost OpenRouter reports on the
+ * response, because a single model slug is served by many providers at prices
+ * differing by an order of magnitude (gpt-oss-120b ranges from $0.030 to $0.350
+ * per 1M input depending on who answers), and we do not choose the route. This
+ * table is what we fall back to when a response carries no usage accounting.
+ *
+ * An unknown model records zero rather than a guess. Token counts stay accurate
+ * either way because they come off the response. Treat the money column as
+ * indicative and the provider dashboard as authoritative, especially under BYOK
+ * where OpenRouter reports zero because the upstream provider did the billing.
  *
  * `cachedIn` is the rate for prompt tokens that hit the provider's cache, about
  * a tenth of fresh input. It is the whole reason prompt.ts keeps a stable
@@ -51,6 +55,14 @@ const PRICES: Record<string, Price> = {
   "google/gemini-2.5-flash:batch": { in: 0.15, out: 1.25, cachedIn: 0.03 },
   "google/gemini-3.5-flash-lite:batch": { in: 0.15, out: 1.25, cachedIn: 0.015 },
   "google/gemini-3.7-flash:batch": { in: 0.1875, out: 0.9375, cachedIn: 0.01875 },
+  // OpenAI's open-weight models. Roughly an order of magnitude below the Gemini
+  // Flash tier, which is why they are candidates for the cheap tier. Note the
+  // batch variant is *more* expensive here, the opposite of Gemini's: batch
+  // pricing is per-provider and cannot be assumed to be a discount.
+  "openai/gpt-oss-120b": { in: 0.037, out: 0.17, cachedIn: 0.0037 },
+  "openai/gpt-oss-120b:batch": { in: 0.15, out: 0.6, cachedIn: 0.015 },
+  "openai/gpt-oss-20b": { in: 0.03, out: 0.13, cachedIn: 0.003 },
+  "openai/gpt-oss-safeguard-20b": { in: 0.075, out: 0.3, cachedIn: 0.0075 },
 };
 
 /**

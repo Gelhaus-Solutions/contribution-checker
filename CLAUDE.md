@@ -423,6 +423,43 @@ Audit, notifications, jobs:
   across other people's repositories. It must not move, 404, require auth, or
   depend on the database.
 
+## AI cost model
+
+Measured against the real provider, not inferred from rate cards. Every number
+below was observed; re-measure before trusting any of it after a model change.
+
+- **Prompt caching does not fire on this deployment.** Identical back-to-back
+  calls report `cached_tokens: 0`, including at 4,161 input tokens. A BYOK key
+  routes straight to the upstream provider and OpenRouter's usage accounting
+  does not carry the cache back. `prompt.ts` still keeps a stable prefix because
+  the layout costs nothing when it misses, but **do not pad a prompt to chase a
+  cache threshold**: that was tested and it only bought 7x the input tokens.
+- **Reasoning is the dominant cost, and `reasoning.effort` is the biggest lever
+  that exists here.** On gpt-oss-120b a triage answer rendering as ~100 tokens of
+  JSON spent 438 tokens thinking at the default setting and 114 at `"low"`, with
+  identical verdicts. `low` cut total output 54-70% across all four tasks and
+  still passed every case, including the prompt-injection one. It is the default
+  in `client.ts`; a task may raise it via `AiTask.reasoningEffort`.
+- **`reasoning.exclude` is not a saving.** It hides the reasoning from the
+  response and bills every token of it.
+- **Reasoning cannot be switched off** on every endpoint: Groq answers 400
+  "Reasoning is mandatory for this endpoint".
+- **`effort: "high"` is a correctness hazard, not just an expensive one.** It
+  produced 2,491 output tokens on a QA-steps answer, overran `AI_MAX_OUTPUT_TOKENS`
+  and returned truncated, unparseable JSON, which the orchestrator then records
+  as a schema failure. Raising effort means re-checking the token ceiling.
+- **The only lever that reliably saves money is not calling the model.** That is
+  what the prefilters in each task and `src/lib/ai/prefilter.ts` are for, and why
+  `AiResult` dedupes on a content hash. An unfilled PR template is skipped
+  outright; `pr.quality` is the deliberate exception, because "the author wrote
+  nothing" is the finding it exists to report.
+- **Provider-reported cost beats our rate card.** One model slug is served by
+  twenty providers at prices differing by 10x and we do not choose the route, so
+  `client.ts` prefers `usage.cost` from the response and falls back to `PRICES`
+  in `models.ts` only when the response carries no accounting. Under BYOK the
+  reported cost is zero because the upstream provider did the billing; that is a
+  true statement about OpenRouter's charge, not a missing value.
+
 ## Request cost
 
 Every route is dynamic (`export const dynamic = "force-dynamic"` in the root
