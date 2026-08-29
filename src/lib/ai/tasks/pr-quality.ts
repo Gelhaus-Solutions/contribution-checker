@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { clamp } from "@/lib/ai/prompt";
+import { authoredText } from "@/lib/ai/prefilter";
 import type { AiTask } from "@/lib/ai/types";
 
 /**
@@ -96,9 +97,17 @@ export const prQualityTask: AiTask<PrQualityInput, PrQualityOutput> = {
     if (changed < MIN_CHANGED_LINES) return null;
 
     const parts = [`Title: ${pr.title}`];
-    const body = pr.body?.trim();
+    // Unlike the other tasks this one does NOT skip an unfilled template: "the
+    // author wrote nothing" is precisely the finding it exists to report, and
+    // returning null here would silently exempt the worst descriptions from the
+    // heuristic that judges descriptions. The scaffolding is still stripped, so
+    // the model sees an empty description rather than a page of template prose
+    // it might mistake for effort.
+    const description = authoredText(pr.body);
     parts.push(
-      body ? `Description:\n${clamp(body, MAX_BODY_CHARS)}` : "Description: (none written)"
+      description
+        ? `Description:\n${clamp(description, MAX_BODY_CHARS)}`
+        : "Description: (none written, or an unfilled template)"
     );
 
     if (pr.commitMessages.length > 0) {

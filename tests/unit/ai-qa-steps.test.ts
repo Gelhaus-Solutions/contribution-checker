@@ -41,8 +41,13 @@ describe("qaStepsTask prefilter", () => {
     expect(built).toContain("+40/-12");
   });
 
-  it("says so explicitly when there is no description", () => {
-    expect(qaStepsTask.buildInput({ ...base, body: null })).toContain("(none written)");
+  it("skips entirely when there is no description to work from", () => {
+    // Changed deliberately: with no QA section and no description, the only
+    // input left is a title and a file list, which is not enough to write a
+    // test plan worth reading. Skipping is the only lever that saves money on
+    // this deployment, since prompt caching does not fire (see prefilter.ts).
+    expect(qaStepsTask.buildInput({ ...base, body: null })).toBeNull();
+    expect(qaStepsTask.buildInput({ ...base, body: "" })).toBeNull();
   });
 
   it("caps the file list rather than sending an unbounded diff", () => {

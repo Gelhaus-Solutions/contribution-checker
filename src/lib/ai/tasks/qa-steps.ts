@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { clamp } from "@/lib/ai/prompt";
+import { authoredText, hasAuthoredContent } from "@/lib/ai/prefilter";
 import type { AiTask } from "@/lib/ai/types";
 
 /**
@@ -107,13 +108,20 @@ export const qaStepsTask: AiTask<QaStepsInput, QaStepsOutput> = {
     if (pr.authorQaSteps && pr.authorQaSteps.trim().length > 0) return null;
     if (pr.files.length < MIN_FILES) return null;
 
+    // An unfilled template is not a description. With no QA section and nothing
+    // the author actually wrote, the only input left is a title and a file list,
+    // which is not enough to write a test plan worth reading. Skipping costs
+    // nothing and is the only lever that genuinely saves money here: prompt
+    // caching does not fire on this deployment (see src/lib/ai/prefilter.ts).
+    if (!hasAuthoredContent(pr.body)) return null;
+    const description = authoredText(pr.body);
+
     const parts = [`Title: ${pr.title}`];
     if (pr.labels.length > 0) parts.push(`Labels: ${pr.labels.join(", ")}`);
 
-    const body = pr.body?.trim();
-    parts.push(
-      body ? `Description:\n${clamp(body, MAX_BODY_CHARS)}` : "Description: (none written)"
-    );
+    // The cleaned text, not the raw body: template guidance lines are tokens the
+    // model pays to read and would only mislead it about what the author said.
+    parts.push(`Description:\n${clamp(description, MAX_BODY_CHARS)}`);
 
     const shown = pr.files.slice(0, MAX_FILES);
     const fileLines = shown.map(
