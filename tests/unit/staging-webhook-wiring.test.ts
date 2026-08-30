@@ -456,15 +456,66 @@ describe("staging routing wiring in handlePullRequestEvent", () => {
     expect(decideForPR).not.toHaveBeenCalled();
   });
 
-  it("leaves a PR the bot never moved where its author pointed it", async () => {
+  // gitroomhq/postiz-app#1993: the author opened the PR against staging
+  // himself, so there was no retarget record, and requiring one meant the
+  // maintainer's opt-out label did nothing at all. Only a user with write
+  // access can label a PR, so their "keep this off staging" wins over the base
+  // they are the ones overriding.
+  it("moves a PR it never retargeted to the default branch on the label", async () => {
     retargetFindUnique.mockResolvedValue(null);
     const res = await handlePullRequestEvent(
       labeled(47, "staging:opt-out") as never,
     );
+    expect(setPullRequestBase).toHaveBeenCalledWith(
+      expect.anything(),
+      47,
+      "main",
+    );
+    // Nothing to drop: the move was not undoing a row of ours.
+    expect(retargetDelete).not.toHaveBeenCalled();
+    expect(res.staging).toEqual({
+      retargeted: false,
+      outcome: "opt_out_rerouted",
+    });
+    // The label routes; it says nothing about the contributor.
+    expect(decideForPR).not.toHaveBeenCalled();
+  });
+
+  // Undoing our own write survives the switch being turned off; forming a NEW
+  // opinion about a base in a repo that has opted out of routing does not.
+  it("does not move an unrecorded PR when retargeting is off", async () => {
+    retargetFindUnique.mockResolvedValue(null);
+    repoFindUnique.mockResolvedValue({
+      ...REPO,
+      project: { ...PROJECT, stagingRetargetEnabled: false },
+    });
+    const res = await handlePullRequestEvent(
+      labeled(49, "staging:opt-out") as never,
+    );
     expect(setPullRequestBase).not.toHaveBeenCalled();
     expect(res.staging).toEqual({
       retargeted: false,
-      outcome: "opt_out_label",
+      outcome: "retarget_disabled",
+    });
+  });
+
+  it("still reverts a PR it did retarget when retargeting is off", async () => {
+    retargetFindUnique.mockResolvedValue({ fromBase: "main" });
+    repoFindUnique.mockResolvedValue({
+      ...REPO,
+      project: { ...PROJECT, stagingRetargetEnabled: false },
+    });
+    const res = await handlePullRequestEvent(
+      labeled(51, "staging:opt-out") as never,
+    );
+    expect(setPullRequestBase).toHaveBeenCalledWith(
+      expect.anything(),
+      51,
+      "main",
+    );
+    expect(res.staging).toEqual({
+      retargeted: false,
+      outcome: "opt_out_reverted",
     });
   });
 

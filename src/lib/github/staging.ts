@@ -440,9 +440,9 @@ export function stagingRetargetSkipReason(args: {
  * ships in the batch anyway. The label has to work in both directions to mean
  * what it says.
  *
- * Pure, and deliberately says nothing about whether the bot is the one that
- * moved this PR: that lives in the `StagingRetarget` record, because a PR
- * opened against staging on purpose must stay there.
+ * Pure, and says nothing about where the PR should go: the `StagingRetarget`
+ * record answers that (the base it was opened against), and the default branch
+ * is the fallback when the bot never moved it. See `revertRetarget`.
  */
 export function optOutRequestsRevert(args: {
   baseRef: string;
@@ -457,14 +457,30 @@ export function optOutRequestsRevert(args: {
 }
 
 /**
- * Put a PR the bot retargeted back on the base it was opened against, because
- * it now carries the opt-out label. Returns the outcome, or null when there is
- * nothing to undo.
+ * Take a PR carrying the opt-out label off the staging branch. Returns the
+ * outcome, or null when there is nothing to move.
  *
- * The `StagingRetarget` row is the whole safety condition: without one, this
- * PR reached staging some other way (its author opened it there, a maintainer
- * moved it) and rewriting its base would redirect someone's change at the
- * default branch, which is a release rather than a routing decision.
+ * Two cases, and the difference is only where the PR goes:
+ *
+ *  - `opt_out_reverted`: the bot moved this PR, so a `StagingRetarget` row
+ *    says which base it was opened against, and that is where it goes back to.
+ *  - `opt_out_rerouted`: there is no row, because the PR was opened against
+ *    staging directly (gitroomhq/postiz-app#1993) or reached it some other way.
+ *    It goes to the default branch.
+ *
+ * The row used to be the whole safety condition, on the grounds that
+ * redirecting a deliberate staging PR at the default branch is a release
+ * decision rather than a routing one. That reasoning was wrong about who is
+ * speaking: only a user with write access can label a PR, the label means "keep
+ * this off staging" in the settings UI, and refusing to act on it left the
+ * label doing *nothing at all* on the PRs maintainers actually reach for it on.
+ * A maintainer who wants the PR left where it is has a simpler move available:
+ * not labelling it.
+ *
+ * A reroute with no row still requires retargeting to be enabled here: undoing
+ * a write the bot made must survive the switch being turned off afterwards, but
+ * forming a new opinion about a PR's base must not happen in a repo that has
+ * opted out of routing altogether.
  *
  * Loop-safe like the retarget itself: our PATCH echoes back as
  * `pull_request.edited` with the base already off staging, where
@@ -477,30 +493,38 @@ async function revertRetarget(args: {
   ref: RepoRef;
   prNumber: number;
   stagingBranch: string;
-}): Promise<"opt_out_reverted" | "revert_impossible" | null> {
+  defaultBranch: string;
+  /** May a PR with no retarget record be moved? See above. */
+  routingEnabled: boolean;
+}): Promise<"opt_out_reverted" | "opt_out_rerouted" | "revert_impossible" | null> {
   const record = await prisma.stagingRetarget.findUnique({
     where: {
       repoId_prNumber: { repoId: args.repoId, prNumber: args.prNumber },
     },
     select: { fromBase: true },
   });
-  if (!record || record.fromBase === args.stagingBranch) return null;
+  // A row whose `fromBase` is staging itself would be a no-op move; fall back
+  // to the default branch rather than PATCHing the base to what it already is.
+  const recorded =
+    record && record.fromBase !== args.stagingBranch ? record.fromBase : null;
+  const target = recorded ?? (args.routingEnabled ? args.defaultBranch : null);
+  if (!target || target === args.stagingBranch) return null;
 
   try {
-    await setPullRequestBase(args.ref, args.prNumber, record.fromBase);
+    await setPullRequestBase(args.ref, args.prNumber, target);
   } catch (e) {
-    // Staging has since been merged into the original base, so the PR would
-    // have no diff against it. The record is kept: the PR is still on staging,
-    // and a later push may make the revert possible after all.
+    // Staging has since been merged into the target base, so the PR would have
+    // no diff against it. Any record is kept: the PR is still on staging, and a
+    // later push may make the move possible after all.
     if (isNoNewCommitsError(e)) {
       logger.warn(
         {
           ghRepoId: args.ghRepoId,
           prNumber: args.prNumber,
-          fromBase: record.fromBase,
+          target,
         },
-        `staging opt-out revert impossible: the PR has no diff against ` +
-          `${record.fromBase} any more. It stays on staging; move it by hand ` +
+        `staging opt-out move impossible: the PR has no diff against ` +
+          `${target} any more. It stays on staging; move it by hand ` +
           `if it must not ship in the batch.`,
       );
       return "revert_impossible";
@@ -508,23 +532,29 @@ async function revertRetarget(args: {
     throw e;
   }
 
-  // Dropped only once the PR is actually off staging, so a failed revert stays
+  // Dropped only once the PR is actually off staging, so a failed move stays
   // retryable and a later retarget writes a fresh row.
-  await prisma.stagingRetarget.delete({
-    where: {
-      repoId_prNumber: { repoId: args.repoId, prNumber: args.prNumber },
-    },
-  });
+  if (record) {
+    await prisma.stagingRetarget.delete({
+      where: {
+        repoId_prNumber: { repoId: args.repoId, prNumber: args.prNumber },
+      },
+    });
+  }
   logger.info(
     {
       ghRepoId: args.ghRepoId,
       prNumber: args.prNumber,
       from: args.stagingBranch,
-      to: record.fromBase,
+      to: target,
+      recorded: !!recorded,
     },
-    "reverted staging retarget: PR carries the opt-out label",
+    recorded
+      ? "reverted staging retarget: PR carries the opt-out label"
+      : "moved PR off staging: it carries the opt-out label and the bot " +
+        "never retargeted it",
   );
-  return "opt_out_reverted";
+  return recorded ? "opt_out_reverted" : "opt_out_rerouted";
 }
 
 /**
@@ -742,6 +772,7 @@ async function ensureStagingBranch(args: {
 export type StagingRoutingOutcome =
   | "retargeted"
   | "opt_out_reverted"
+  | "opt_out_rerouted"
   | "revert_impossible"
   | "not_managed"
   | "pr_closed"
@@ -859,10 +890,11 @@ export async function applyStagingRouting(ctx: {
       touchesStaging: ctx.baseRef === cfg.stagingBranch,
     };
     // The label applied after the fact. Checked before `retargetEnabled`,
-    // because this undoes a write the bot already made: turning retargeting
-    // off afterwards must not strand a PR on staging that has been explicitly
-    // opted out. The aggregate PR is exempt: it lives on staging by design and
-    // has no retarget record to undo.
+    // because it can be undoing a write the bot already made: turning
+    // retargeting off afterwards must not strand a PR on staging that has been
+    // explicitly opted out. (A PR the bot never moved is a different case and
+    // `revertRetarget` gates it on the switch itself.) The aggregate PR is
+    // exempt: it lives on staging by design and moving it is meaningless.
     if (
       !isAggregate &&
       optOutRequestsRevert({
@@ -878,6 +910,8 @@ export async function applyStagingRouting(ctx: {
         ref,
         prNumber: ctx.prNumber,
         stagingBranch: cfg.stagingBranch,
+        defaultBranch,
+        routingEnabled: cfg.retargetEnabled,
       });
       if (outcome) return { ...base, retargeted: false, outcome };
     }

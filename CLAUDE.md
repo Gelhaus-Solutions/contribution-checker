@@ -175,17 +175,22 @@ Staging routing (`src/lib/github/staging.ts`, App mode only):
   and is readable from Temporal workflow history when logs are not. `retargeted:
   false` alone cannot answer "why is this PR still on the default branch?".
 - **The opt-out label works in both directions.** `Project.labelStagingOptOut`
-  (default `staging:opt-out`) keeps a PR off staging, and applied *after* a
-  retarget it moves the PR back to the base it was opened against
-  (`optOutRequestsRevert` + the revert half of `applyStagingRouting`, outcomes
-  `opt_out_reverted` / `revert_impossible`). Only PRs the bot moved are moved
-  back: every successful retarget writes a `StagingRetarget` row (repo + PR ->
-  `fromBase`), and no row means the PR reached staging some other way and is
-  left alone. Do not replace that row with "the base is staging", which would
-  redirect a PR opened against staging on purpose at the default branch. The
-  row is its own table because retargeting runs *before* the gate, so there is
-  no `PrCheck` row yet on `opened`. Removing the label routes the PR again on
-  the spot rather than at its next push, which is the only reason
+  (default `staging:opt-out`) keeps a PR off staging, and applied to a PR that
+  is *already on* staging it takes the PR back off it (`optOutRequestsRevert` +
+  the revert half of `applyStagingRouting`, outcomes `opt_out_reverted` /
+  `opt_out_rerouted` / `revert_impossible`). Where it goes depends on the
+  `StagingRetarget` row (repo + PR -> `fromBase`) every successful retarget
+  writes: with a row, back to the base the PR was opened against; **without
+  one, to the default branch**. The row is its own table because retargeting
+  runs *before* the gate, so there is no `PrCheck` row yet on `opened`.
+  Requiring the row before moving anything is what made the label do nothing on
+  gitroomhq/postiz-app#1993, a PR whose author opened it against staging
+  directly: only a user with write access can label a PR, and refusing their
+  explicit "keep this off staging" to protect a base they are the ones
+  overriding is the wrong side to take. A reroute with no row is still gated on
+  `retargetEnabled`, because undoing our own write must outlive the switch while
+  forming a *new* opinion about a base must not. Removing the label routes the
+  PR again on the spot rather than at its next push, which is the only reason
   `handlePullRequestEvent` handles `unlabeled` at all: it recognizes that one
   label and nothing else there, because the bot removes its own `labelEvaluate`
   after every re-eval and re-gating on that echo would loop. Both label paths
