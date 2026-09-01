@@ -81,7 +81,8 @@ const PROJECT = {
   stagingBatchPrEnabled: true,
   stagingBranch: "staging",
   labelStagingBatch: "staging:batch",
-  labelStagingOptOut: "staging:opt-out",
+  labelStagingIgnore: "staging:ignore",
+  labelStagingRepoint: "staging:repoint",
 };
 
 const REPO = {
@@ -382,12 +383,25 @@ describe("staging routing wiring in handlePullRequestEvent", () => {
     expect(decideForPR).not.toHaveBeenCalled();
   });
 
-  it("leaves a PR alone when it carries the opt-out label", async () => {
+  it("leaves a PR alone when it carries the ignore label", async () => {
     await handlePullRequestEvent(
       payload({
         pull_request: {
           ...payload().pull_request,
-          labels: [{ name: "staging:opt-out" }],
+          labels: [{ name: "staging:ignore" }],
+        },
+      }) as never,
+    );
+    expect(setPullRequestBase).not.toHaveBeenCalled();
+    expect(decideForPR).toHaveBeenCalled();
+  });
+
+  it("leaves a PR alone when it carries the repoint label", async () => {
+    await handlePullRequestEvent(
+      payload({
+        pull_request: {
+          ...payload().pull_request,
+          labels: [{ name: "staging:repoint" }],
         },
       }) as never,
     );
@@ -437,10 +451,10 @@ describe("staging routing wiring in handlePullRequestEvent", () => {
 
   /** A label added to a PR that is already on staging: the skip reason cannot
    * help there, so without the revert the label silently does nothing. */
-  it("puts a PR it retargeted back on the default branch when the opt-out label arrives", async () => {
+  it("puts a PR it retargeted back on the default branch when the repoint label arrives", async () => {
     retargetFindUnique.mockResolvedValue({ fromBase: "main" });
     const res = await handlePullRequestEvent(
-      labeled(46, "staging:opt-out") as never,
+      labeled(46, "staging:repoint") as never,
     );
     expect(setPullRequestBase).toHaveBeenCalledWith(
       expect.anything(),
@@ -450,21 +464,56 @@ describe("staging routing wiring in handlePullRequestEvent", () => {
     expect(retargetDelete).toHaveBeenCalled();
     expect(res.staging).toEqual({
       retargeted: false,
-      outcome: "opt_out_reverted",
+      outcome: "repoint_reverted",
     });
     // The label routes; it says nothing about the contributor.
     expect(decideForPR).not.toHaveBeenCalled();
   });
 
+  /** The whole point of the split: the ignore label is the one that promises
+   * the bot will not move the PR, so a PR already on staging stays on staging.
+   * Under the single opt-out label this was the only available behavior and it
+   * was the repoint one, so "stop touching this" moved the PR. */
+  it("leaves a PR on staging where it is when the ignore label arrives", async () => {
+    retargetFindUnique.mockResolvedValue({ fromBase: "main" });
+    const res = await handlePullRequestEvent(
+      labeled(52, "staging:ignore") as never,
+    );
+    expect(setPullRequestBase).not.toHaveBeenCalled();
+    expect(retargetDelete).not.toHaveBeenCalled();
+    expect(res.staging).toEqual({
+      retargeted: false,
+      outcome: "ignore_label",
+    });
+    expect(decideForPR).not.toHaveBeenCalled();
+  });
+
+  it("does not repoint a PR carrying both labels", async () => {
+    retargetFindUnique.mockResolvedValue({ fromBase: "main" });
+    const both = labeled(53, "staging:repoint");
+    const res = await handlePullRequestEvent({
+      ...both,
+      pull_request: {
+        ...both.pull_request,
+        labels: [{ name: "staging:repoint" }, { name: "staging:ignore" }],
+      },
+    } as never);
+    expect(setPullRequestBase).not.toHaveBeenCalled();
+    expect(res.staging).toEqual({
+      retargeted: false,
+      outcome: "ignore_label",
+    });
+  });
+
   // gitroomhq/postiz-app#1993: the author opened the PR against staging
   // himself, so there was no retarget record, and requiring one meant the
-  // maintainer's opt-out label did nothing at all. Only a user with write
+  // maintainer's repoint label did nothing at all. Only a user with write
   // access can label a PR, so their "keep this off staging" wins over the base
   // they are the ones overriding.
   it("moves a PR it never retargeted to the default branch on the label", async () => {
     retargetFindUnique.mockResolvedValue(null);
     const res = await handlePullRequestEvent(
-      labeled(47, "staging:opt-out") as never,
+      labeled(47, "staging:repoint") as never,
     );
     expect(setPullRequestBase).toHaveBeenCalledWith(
       expect.anything(),
@@ -475,7 +524,7 @@ describe("staging routing wiring in handlePullRequestEvent", () => {
     expect(retargetDelete).not.toHaveBeenCalled();
     expect(res.staging).toEqual({
       retargeted: false,
-      outcome: "opt_out_rerouted",
+      outcome: "repoint_rerouted",
     });
     // The label routes; it says nothing about the contributor.
     expect(decideForPR).not.toHaveBeenCalled();
@@ -490,7 +539,7 @@ describe("staging routing wiring in handlePullRequestEvent", () => {
       project: { ...PROJECT, stagingRetargetEnabled: false },
     });
     const res = await handlePullRequestEvent(
-      labeled(49, "staging:opt-out") as never,
+      labeled(49, "staging:repoint") as never,
     );
     expect(setPullRequestBase).not.toHaveBeenCalled();
     expect(res.staging).toEqual({
@@ -506,7 +555,7 @@ describe("staging routing wiring in handlePullRequestEvent", () => {
       project: { ...PROJECT, stagingRetargetEnabled: false },
     });
     const res = await handlePullRequestEvent(
-      labeled(51, "staging:opt-out") as never,
+      labeled(51, "staging:repoint") as never,
     );
     expect(setPullRequestBase).toHaveBeenCalledWith(
       expect.anything(),
@@ -515,7 +564,7 @@ describe("staging routing wiring in handlePullRequestEvent", () => {
     );
     expect(res.staging).toEqual({
       retargeted: false,
-      outcome: "opt_out_reverted",
+      outcome: "repoint_reverted",
     });
   });
 
@@ -531,22 +580,35 @@ describe("staging routing wiring in handlePullRequestEvent", () => {
       ),
     );
     const res = await handlePullRequestEvent(
-      labeled(48, "staging:opt-out") as never,
+      labeled(48, "staging:repoint") as never,
     );
     expect(retargetDelete).not.toHaveBeenCalled();
     expect(res.staging).toEqual({
       retargeted: false,
-      outcome: "revert_impossible",
+      outcome: "repoint_impossible",
     });
   });
 
-  it("routes the PR again when the opt-out label is removed", async () => {
+  it("routes the PR again when the repoint label is removed", async () => {
     const res = await handlePullRequestEvent(
-      unlabeled(50, "staging:opt-out") as never,
+      unlabeled(50, "staging:repoint") as never,
     );
     expect(setPullRequestBase).toHaveBeenCalledWith(
       expect.anything(),
       50,
+      "staging",
+    );
+    expect(res.staging).toEqual({ retargeted: true, outcome: "retargeted" });
+    expect(decideForPR).not.toHaveBeenCalled();
+  });
+
+  it("routes the PR again when the ignore label is removed", async () => {
+    const res = await handlePullRequestEvent(
+      unlabeled(54, "staging:ignore") as never,
+    );
+    expect(setPullRequestBase).toHaveBeenCalledWith(
+      expect.anything(),
+      54,
       "staging",
     );
     expect(res.staging).toEqual({ retargeted: true, outcome: "retargeted" });
@@ -564,7 +626,7 @@ describe("staging routing wiring in handlePullRequestEvent", () => {
     expect(res.staging).toBeUndefined();
   });
 
-  it("ignores a label that is neither the evaluate nor the opt-out label", async () => {
+  it("ignores a label that is neither the evaluate nor a staging label", async () => {
     const res = await handlePullRequestEvent(
       labeled(49, "needs-review") as never,
     );

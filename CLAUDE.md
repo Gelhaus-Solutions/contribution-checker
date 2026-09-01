@@ -174,35 +174,51 @@ Staging routing (`src/lib/github/staging.ts`, App mode only):
   `PrEventResult.staging`, so it lands in the `convergePrEvent` activity result
   and is readable from Temporal workflow history when logs are not. `retargeted:
   false` alone cannot answer "why is this PR still on the default branch?".
-- **The opt-out label works in both directions.** `Project.labelStagingOptOut`
-  (default `staging:opt-out`) keeps a PR off staging, and applied to a PR that
-  is *already on* staging it takes the PR back off it (`optOutRequestsRevert` +
-  the revert half of `applyStagingRouting`, outcomes `opt_out_reverted` /
-  `opt_out_rerouted` / `revert_impossible`). Where it goes depends on the
-  `StagingRetarget` row (repo + PR -> `fromBase`) every successful retarget
-  writes: with a row, back to the base the PR was opened against; **without
-  one, to the default branch**. The row is its own table because retargeting
-  runs *before* the gate, so there is no `PrCheck` row yet on `opened`.
-  Requiring the row before moving anything is what made the label do nothing on
-  gitroomhq/postiz-app#1993, a PR whose author opened it against staging
-  directly: only a user with write access can label a PR, and refusing their
-  explicit "keep this off staging" to protect a base they are the ones
-  overriding is the wrong side to take. A reroute with no row is still gated on
-  `retargetEnabled`, because undoing our own write must outlive the switch while
-  forming a *new* opinion about a base must not. Removing the label routes the
-  PR again on the spot rather than at its next push, which is the only reason
-  `handlePullRequestEvent` handles `unlabeled` at all: it recognizes that one
-  label and nothing else there, because the bot removes its own `labelEvaluate`
-  after every re-eval and re-gating on that echo would loop. Both label paths
-  route only and never reach the gate: a label the contributor cannot set says
-  nothing about the contributor.
+- **Two escape-hatch labels, and the difference is whether the bot may move the
+  PR.** `Project.labelStagingIgnore` (default `staging:ignore`) means hands off:
+  never retargeted onto staging, and a PR already sitting on staging stays
+  there. `Project.labelStagingRepoint` (default `staging:repoint`) means this
+  must not ship in the batch: it keeps a PR off staging the same way, and
+  applied to a PR that is *already on* staging it takes the PR back off it
+  (`repointRequestsRevert` + the revert half of `applyStagingRouting`, outcomes
+  `repoint_reverted` / `repoint_rerouted` / `repoint_impossible`). They were one
+  label, and it only had the second behavior, so a maintainer asking the bot to
+  stop having an opinion about a base got the PR moved out from under them as
+  the price of asking. Carrying both, **ignore wins** (`stagingIgnored` is
+  checked first in `stagingRetargetSkipReason` and short-circuits
+  `applyStagingRouting` before the repoint branch): doing nothing is the
+  instruction that cannot be half-followed, and a PR left alone can still be
+  moved by hand.
+- **Where a repoint sends the PR** depends on the `StagingRetarget` row (repo +
+  PR -> `fromBase`) every successful retarget writes: with a row, back to the
+  base the PR was opened against; **without one, to the default branch**. The
+  row is its own table because retargeting runs *before* the gate, so there is
+  no `PrCheck` row yet on `opened`. Requiring the row before moving anything is
+  what made the label do nothing on gitroomhq/postiz-app#1993, a PR whose author
+  opened it against staging directly: only a user with write access can label a
+  PR, and refusing their explicit "keep this out of the batch" to protect a base
+  they are the ones overriding is the wrong side to take. A reroute with no row
+  is still gated on `retargetEnabled`, because undoing our own write must
+  outlive the switch while forming a *new* opinion about a base must not.
+  Removing either label routes the PR again on the spot rather than at its next
+  push, which is the only reason `handlePullRequestEvent` handles `unlabeled` at
+  all: it recognizes those two labels and nothing else there, because the bot
+  removes its own `labelEvaluate` after every re-eval and re-gating on that echo
+  would loop. Every label path routes only and never reaches the gate: a label
+  the contributor cannot set says nothing about the contributor.
+- **Neither label changes what a release contains.** They govern routing, not
+  membership: a PR already merged into staging ships in the batch and stays in
+  the manifest whatever it is labelled afterwards, because the manifest is
+  derived from merge commit reachability and is a record of what the batch
+  contains. Taking merged work out of a release is a revert on the staging
+  branch.
 - `already_in_staging`: GitHub rejects a base change that would leave the PR
   with an empty diff (422, "no new commits between"), which happens when the
   head branch was already merged into staging by an earlier PR. Such a PR can
   never be retargeted and will bypass the batch if merged. Nothing in the bot
   can prevent that, so it is logged as a named warning rather than a stack
   trace.
-- The two staging labels live **outside** the `contribution:` namespace on
+- The three staging labels live **outside** the `contribution:` namespace on
   purpose: `setLabels` strips every `contribution:*` label the gate did not just
   set, so a staging label there would be wiped by the next converge.
   `updateLabelSettings` rejects the prefix.

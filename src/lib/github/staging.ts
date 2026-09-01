@@ -88,7 +88,8 @@ export type StagingProject = {
   qaStandingChecks: string;
   stagingBranch: string;
   labelStagingBatch: string;
-  labelStagingOptOut: string;
+  labelStagingIgnore: string;
+  labelStagingRepoint: string;
 };
 
 /** The per-repo overrides. Null on any field means "inherit the project". */
@@ -116,7 +117,8 @@ export const stagingProjectSelect = {
   qaStandingChecks: true,
   stagingBranch: true,
   labelStagingBatch: true,
-  labelStagingOptOut: true,
+  labelStagingIgnore: true,
+  labelStagingRepoint: true,
 } as const;
 
 export const stagingRepoSelect = {
@@ -380,7 +382,8 @@ export type StagingRetargetSkipReason =
   | "staging_is_default"
   | "aggregate_pr"
   | "head_is_staging"
-  | "opt_out_label"
+  | "ignore_label"
+  | "repoint_label"
   | "bypass_handle"
   | "base_not_default";
 
@@ -393,7 +396,8 @@ export function stagingRetargetSkipReason(args: {
   prNumber: number;
   aggregatePrNumber: number | null;
   prLabels: string[];
-  optOutLabel: string;
+  ignoreLabel: string;
+  repointLabel: string;
   authorGhLogin: string;
   bypassHandles: string[];
 }): StagingRetargetSkipReason | null {
@@ -420,7 +424,13 @@ export function stagingRetargetSkipReason(args: {
   ) {
     return "head_is_staging";
   }
-  if (args.prLabels.includes(args.optOutLabel)) return "opt_out_label";
+  // Both escape hatches stop a retarget; only one of them also moves the PR
+  // (see `repointRequestsRevert`). Ignore is checked first so a PR carrying
+  // both is reported as the label that wins.
+  if (stagingIgnored({ prLabels: args.prLabels, ignoreLabel: args.ignoreLabel })) {
+    return "ignore_label";
+  }
+  if (args.prLabels.includes(args.repointLabel)) return "repoint_label";
   if (matchesAnyPattern(args.authorGhLogin, args.bypassHandles)) {
     return "bypass_handle";
   }
@@ -432,50 +442,80 @@ export function stagingRetargetSkipReason(args: {
 }
 
 /**
- * Does the opt-out label want a PR the bot already moved put back?
+ * Does this PR carry the "leave it entirely alone" label?
+ *
+ * The strongest of the two escape hatches, and the only one that promises the
+ * bot will not *move* the PR: no retarget onto staging, and no repoint off it
+ * either. It exists because the other label answers a different question. A
+ * maintainer asking the bot to stop having an opinion about a base should not
+ * have the PR rebased out from under them as the price of asking, which is
+ * exactly what the single label used to do to a PR already on staging.
+ *
+ * It governs routing, not membership: a PR already merged into staging still
+ * ships in the batch and is still listed in the manifest, because the manifest
+ * is a record of what the release contains and this label cannot change that.
+ */
+export function stagingIgnored(args: {
+  prLabels: string[];
+  ignoreLabel: string;
+}): boolean {
+  return args.prLabels.includes(args.ignoreLabel);
+}
+
+/**
+ * Does the repoint label want a PR the bot already moved put back?
  *
  * `stagingRetargetSkipReason` only ever *prevents* a retarget, so labelling a
  * PR that is already on staging did nothing: the base is no longer the default
  * branch, so every later pass short-circuits on `base_not_default` and the PR
- * ships in the batch anyway. The label has to work in both directions to mean
+ * ships in the batch anyway. This label has to work in both directions to mean
  * what it says.
+ *
+ * The ignore label beats it. Both together read as "do not move this" and "move
+ * this", and the half that does nothing is the safe one to honor: a PR left
+ * where it is can still be moved by hand, a PR moved by mistake has already
+ * lost its base.
  *
  * Pure, and says nothing about where the PR should go: the `StagingRetarget`
  * record answers that (the base it was opened against), and the default branch
  * is the fallback when the bot never moved it. See `revertRetarget`.
  */
-export function optOutRequestsRevert(args: {
+export function repointRequestsRevert(args: {
   baseRef: string;
   stagingBranch: string;
   prLabels: string[];
-  optOutLabel: string;
+  repointLabel: string;
+  ignoreLabel: string;
 }): boolean {
+  if (stagingIgnored({ prLabels: args.prLabels, ignoreLabel: args.ignoreLabel })) {
+    return false;
+  }
   return (
-    args.prLabels.includes(args.optOutLabel) &&
+    args.prLabels.includes(args.repointLabel) &&
     args.baseRef === args.stagingBranch
   );
 }
 
 /**
- * Take a PR carrying the opt-out label off the staging branch. Returns the
+ * Take a PR carrying the repoint label off the staging branch. Returns the
  * outcome, or null when there is nothing to move.
  *
  * Two cases, and the difference is only where the PR goes:
  *
- *  - `opt_out_reverted`: the bot moved this PR, so a `StagingRetarget` row
+ *  - `repoint_reverted`: the bot moved this PR, so a `StagingRetarget` row
  *    says which base it was opened against, and that is where it goes back to.
- *  - `opt_out_rerouted`: there is no row, because the PR was opened against
+ *  - `repoint_rerouted`: there is no row, because the PR was opened against
  *    staging directly (gitroomhq/postiz-app#1993) or reached it some other way.
  *    It goes to the default branch.
  *
  * The row used to be the whole safety condition, on the grounds that
  * redirecting a deliberate staging PR at the default branch is a release
  * decision rather than a routing one. That reasoning was wrong about who is
- * speaking: only a user with write access can label a PR, the label means "keep
- * this off staging" in the settings UI, and refusing to act on it left the
- * label doing *nothing at all* on the PRs maintainers actually reach for it on.
- * A maintainer who wants the PR left where it is has a simpler move available:
- * not labelling it.
+ * speaking: only a user with write access can label a PR, the label means "this
+ * must not ship in the batch" in the settings UI, and refusing to act on it
+ * left the label doing *nothing at all* on the PRs maintainers actually reach
+ * for it on. A maintainer who wants the PR left exactly where it is has the
+ * ignore label for that, which is the whole reason the two are separate.
  *
  * A reroute with no row still requires retargeting to be enabled here: undoing
  * a write the bot made must survive the switch being turned off afterwards, but
@@ -484,8 +524,8 @@ export function optOutRequestsRevert(args: {
  *
  * Loop-safe like the retarget itself: our PATCH echoes back as
  * `pull_request.edited` with the base already off staging, where
- * `optOutRequestsRevert` is false and `stagingRetargetSkipReason` returns
- * `opt_out_label` before anything can move it again.
+ * `repointRequestsRevert` is false and `stagingRetargetSkipReason` returns
+ * `repoint_label` before anything can move it again.
  */
 async function revertRetarget(args: {
   repoId: string;
@@ -496,7 +536,9 @@ async function revertRetarget(args: {
   defaultBranch: string;
   /** May a PR with no retarget record be moved? See above. */
   routingEnabled: boolean;
-}): Promise<"opt_out_reverted" | "opt_out_rerouted" | "revert_impossible" | null> {
+}): Promise<
+  "repoint_reverted" | "repoint_rerouted" | "repoint_impossible" | null
+> {
   const record = await prisma.stagingRetarget.findUnique({
     where: {
       repoId_prNumber: { repoId: args.repoId, prNumber: args.prNumber },
@@ -523,11 +565,11 @@ async function revertRetarget(args: {
           prNumber: args.prNumber,
           target,
         },
-        `staging opt-out move impossible: the PR has no diff against ` +
+        `staging repoint impossible: the PR has no diff against ` +
           `${target} any more. It stays on staging; move it by hand ` +
           `if it must not ship in the batch.`,
       );
-      return "revert_impossible";
+      return "repoint_impossible";
     }
     throw e;
   }
@@ -550,15 +592,15 @@ async function revertRetarget(args: {
       recorded: !!recorded,
     },
     recorded
-      ? "reverted staging retarget: PR carries the opt-out label"
-      : "moved PR off staging: it carries the opt-out label and the bot " +
+      ? "reverted staging retarget: PR carries the repoint label"
+      : "moved PR off staging: it carries the repoint label and the bot " +
         "never retargeted it",
   );
-  return recorded ? "opt_out_reverted" : "opt_out_rerouted";
+  return recorded ? "repoint_reverted" : "repoint_rerouted";
 }
 
 /**
- * Ping-pong fuse. "Rewrite the base back unless opt-out-labeled" is, against a
+ * Ping-pong fuse. "Rewrite the base back unless label-exempt" is, against a
  * determined human or a competing automation that enforces base == default, an
  * unbounded two-cycle. Our own echo is already stopped structurally (the base
  * is staging by then), so anything that trips this is a real fight, and losing
@@ -771,9 +813,9 @@ async function ensureStagingBranch(args: {
  */
 export type StagingRoutingOutcome =
   | "retargeted"
-  | "opt_out_reverted"
-  | "opt_out_rerouted"
-  | "revert_impossible"
+  | "repoint_reverted"
+  | "repoint_rerouted"
+  | "repoint_impossible"
   | "not_managed"
   | "pr_closed"
   | "default_branch_unknown"
@@ -889,19 +931,42 @@ export async function applyStagingRouting(ctx: {
       isAggregatePr: isAggregate && cfg.batchPrEnabled,
       touchesStaging: ctx.baseRef === cfg.stagingBranch,
     };
-    // The label applied after the fact. Checked before `retargetEnabled`,
-    // because it can be undoing a write the bot already made: turning
-    // retargeting off afterwards must not strand a PR on staging that has been
-    // explicitly opted out. (A PR the bot never moved is a different case and
-    // `revertRetarget` gates it on the switch itself.) The aggregate PR is
-    // exempt: it lives on staging by design and moving it is meaningless.
+    // "Leave this PR alone", and the earliest possible exit so that it means
+    // it: before the repoint branch below, which would move the PR, and before
+    // `retargetEnabled`, which is a project switch and cannot answer a question
+    // asked about one PR. Nothing after this point writes to the PR.
+    //
+    // The aggregate PR is exempt from both labels: it lives on staging by
+    // design, it is the bot's own, and it is recognized structurally, so a
+    // label on it can only be someone's mistake.
     if (
       !isAggregate &&
-      optOutRequestsRevert({
+      stagingIgnored({
+        prLabels: ctx.prLabels,
+        ignoreLabel: project.labelStagingIgnore,
+      })
+    ) {
+      logger.info(
+        { ghRepoId: ctx.ghRepoId, prNumber: ctx.prNumber },
+        "staging routing skipped: PR carries the staging ignore label",
+      );
+      return { ...base, retargeted: false, outcome: "ignore_label" };
+    }
+
+    // The repoint label applied after the fact. Checked before
+    // `retargetEnabled`, because it can be undoing a write the bot already
+    // made: turning retargeting off afterwards must not strand a PR on staging
+    // that has been explicitly taken out of the batch. (A PR the bot never
+    // moved is a different case and `revertRetarget` gates it on the switch
+    // itself.)
+    if (
+      !isAggregate &&
+      repointRequestsRevert({
         baseRef: ctx.baseRef,
         stagingBranch: cfg.stagingBranch,
         prLabels: ctx.prLabels,
-        optOutLabel: project.labelStagingOptOut,
+        repointLabel: project.labelStagingRepoint,
+        ignoreLabel: project.labelStagingIgnore,
       })
     ) {
       const outcome = await revertRetarget({
@@ -929,7 +994,8 @@ export async function applyStagingRouting(ctx: {
       prNumber: ctx.prNumber,
       aggregatePrNumber: repo.stagingBatchPrNumber,
       prLabels: ctx.prLabels,
-      optOutLabel: project.labelStagingOptOut,
+      ignoreLabel: project.labelStagingIgnore,
+      repointLabel: project.labelStagingRepoint,
       authorGhLogin: ctx.authorGhLogin,
       bypassHandles: parseBypassHandles(project.bypassHandles),
     });
@@ -948,7 +1014,7 @@ export async function applyStagingRouting(ctx: {
       logger.warn(
         { ghRepoId: ctx.ghRepoId, prNumber: ctx.prNumber },
         `staging retarget fuse tripped: the base has been moved back to the ` +
-          `default branch repeatedly. Add the staging opt-out label to settle ` +
+          `default branch repeatedly. Add the staging ignore label to settle ` +
           `it, or check for another automation enforcing the base.`,
       );
       return { ...base, retargeted: false, outcome: "fuse_tripped" };
@@ -989,7 +1055,7 @@ export async function applyStagingRouting(ctx: {
       }
       throw e;
     }
-    // Remember where it came from, so the opt-out label can put it back. Best
+    // Remember where it came from, so the repoint label can put it back. Best
     // effort on purpose: the PR is already moved, and a bookkeeping row is not
     // worth failing the routing pass (and with it the batch signal) over.
     try {
@@ -1009,7 +1075,8 @@ export async function applyStagingRouting(ctx: {
       logger.warn(
         { err: e, ghRepoId: ctx.ghRepoId, prNumber: ctx.prNumber },
         "staging retarget recorded on GitHub but not in the database: the " +
-          "opt-out label will not be able to revert this PR",
+          "repoint label will send this PR to the default branch rather than " +
+          "the base it was opened against",
       );
     }
 

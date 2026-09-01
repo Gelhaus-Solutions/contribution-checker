@@ -94,7 +94,8 @@ function makeRepo(overrides: Record<string, unknown> = {}) {
       stagingDigestSections: "[]",
       stagingBranch: "staging",
       labelStagingBatch: "staging:batch",
-      labelStagingOptOut: "staging:opt-out",
+      labelStagingIgnore: "staging:ignore",
+      labelStagingRepoint: "staging:repoint",
     },
     ...overrides,
   };

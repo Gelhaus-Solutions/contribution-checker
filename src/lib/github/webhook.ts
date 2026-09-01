@@ -510,18 +510,19 @@ export async function handlePullRequestEvent(
   const prNumber = payload.pull_request.number;
   const author = payload.pull_request.user;
 
-  // Label events matter for exactly two labels: the project's evaluate label
-  // (re-run the gate) and its staging opt-out label, which routes in both
-  // directions. Added, it puts a PR the bot already retargeted back where it
-  // was; removed, it releases the PR into routing again, which is what makes
-  // the opt-out reversible without waiting for the PR's next push. Anything
-  // else (the bot's own status labels included) must short-circuit before we
-  // touch the DB or run the decision pipeline.
+  // Label events matter for exactly three labels: the project's evaluate label
+  // (re-run the gate) and its two staging escape hatches, which route in both
+  // directions. Added, the repoint label puts a PR the bot already retargeted
+  // back where it was and the ignore label freezes it where it is; removed,
+  // either releases the PR into routing again, which is what makes both
+  // reversible without waiting for the PR's next push. Anything else (the
+  // bot's own status labels included) must short-circuit before we touch the
+  // DB or run the decision pipeline.
   //
-  // The opt-out label routes only: it says nothing about the contributor, so
-  // running the gate again on it would be work for no decision. Losing a label
+  // The staging labels route only: they say nothing about the contributor, so
+  // running the gate again on one would be work for no decision. Losing a label
   // decides nothing about the contributor either, which is why `unlabeled`
-  // recognizes only that one label and never reaches the gate: the evaluate
+  // recognizes only those labels and never reaches the gate: the evaluate
   // label is removed by the bot itself after every re-eval, and re-gating on
   // that echo would loop.
   let stagingLabelOnly = false;
@@ -531,13 +532,22 @@ export async function handlePullRequestEvent(
     const repoForLabelGate = await prisma.repo.findUnique({
       where: { ghRepoId },
       select: {
-        project: { select: { labelEvaluate: true, labelStagingOptOut: true } },
+        project: {
+          select: {
+            labelEvaluate: true,
+            labelStagingIgnore: true,
+            labelStagingRepoint: true,
+          },
+        },
       },
     });
     if (!repoForLabelGate) return NOT_TERMINAL;
-    const { labelEvaluate, labelStagingOptOut } = repoForLabelGate.project;
+    const { labelEvaluate, labelStagingIgnore, labelStagingRepoint } =
+      repoForLabelGate.project;
     if (isUnlabeled || labelEvaluate !== labelName) {
-      if (labelStagingOptOut !== labelName) return NOT_TERMINAL;
+      if (labelStagingIgnore !== labelName && labelStagingRepoint !== labelName) {
+        return NOT_TERMINAL;
+      }
       stagingLabelOnly = true;
     }
   }
@@ -593,8 +603,8 @@ export async function handlePullRequestEvent(
 
   // A title edit changes nothing the gate cares about: the batch manifest was
   // already refreshed above, so stop before the decision pipeline. The staging
-  // opt-out label is the same story: routing has had its say, and the label
-  // carries no information about the contributor.
+  // labels are the same story: routing has had its say, and a label only a
+  // maintainer can set carries no information about the contributor.
   if (isEdited || stagingLabelOnly) return notTerminal(staging);
 
   await convergePr({

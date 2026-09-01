@@ -288,7 +288,7 @@ export default async function StagingSettings({
                 <span className="block text-xs text-muted-foreground">
                   Every PR opened against the default branch is rewritten to
                   target staging, whatever the contributor gate decides.
-                  Accounts on the bypass list, and PRs carrying the opt-out
+                  Accounts on the bypass list, and PRs carrying either staging
                   label, keep targeting the default branch. GitHub recomputes
                   the merge base on retarget, so a PR&apos;s diff and CI results
                   can shift once staging diverges from the default branch.
@@ -400,23 +400,40 @@ export default async function StagingSettings({
                 </p>
               </div>
               <div className="space-y-2">
-                <Label htmlFor="labelStagingOptOut">Opt-out label</Label>
+                <Label htmlFor="labelStagingIgnore">Ignore label</Label>
                 <Input
-                  id="labelStagingOptOut"
-                  name="labelStagingOptOut"
-                  defaultValue={project.labelStagingOptOut}
+                  id="labelStagingIgnore"
+                  name="labelStagingIgnore"
+                  defaultValue={project.labelStagingIgnore}
                   className="font-mono"
                 />
                 <p className="text-xs text-muted-foreground">
-                  Add it to a PR to keep that PR on the default branch. Add it
-                  to a PR already on staging and the PR comes back off it: to
-                  the branch it was opened against if the bot retargeted it,
-                  otherwise to the default branch. Remove it and the PR is
-                  routed to staging again. Cannot use the{" "}
-                  <code>contribution:</code> prefix, which the gate owns and
-                  strips.
+                  Hands off: the bot never moves this PR. It is not retargeted
+                  onto staging, and if it is already on staging it stays there.
+                  Use it when the base is already right. Remove it and the PR
+                  is routed as usual.
                 </p>
               </div>
+              <div className="space-y-2">
+                <Label htmlFor="labelStagingRepoint">Repoint label</Label>
+                <Input
+                  id="labelStagingRepoint"
+                  name="labelStagingRepoint"
+                  defaultValue={project.labelStagingRepoint}
+                  className="font-mono"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Keep this out of the batch: the PR is not retargeted, and one
+                  already on staging is moved back off it, to the branch it was
+                  opened against if the bot retargeted it and otherwise to the
+                  default branch. A PR carrying both labels is only ignored,
+                  never moved.
+                </p>
+              </div>
+              <p className="text-xs text-muted-foreground sm:col-span-2">
+                None of these can use the <code>contribution:</code> prefix,
+                which the gate owns and strips.
+              </p>
             </div>
             <SubmitButton>Save defaults</SubmitButton>
           </form>
@@ -768,16 +785,26 @@ export default async function StagingSettings({
           <p>
             If someone moves a PR back to the default branch, the bot moves it
             to staging again. Add the{" "}
-            <code className="font-mono">{project.labelStagingOptOut}</code>{" "}
-            label to settle it permanently. Repeated fights trip a fuse and the
-            bot backs off.
+            <code className="font-mono">{project.labelStagingIgnore}</code>{" "}
+            label to settle it permanently: the bot stops moving that PR in
+            either direction and leaves it wherever it currently sits. Repeated
+            fights trip a fuse and the bot backs off on its own.
           </p>
           <p>
-            The label works after the fact too: put it on a PR already sitting
-            on staging and the PR is taken off it, back to the branch it was
-            opened against if the bot retargeted it, otherwise to the default
-            branch. Take the label off again and the PR is routed to staging as
-            usual.
+            <code className="font-mono">{project.labelStagingRepoint}</code> is
+            the stronger one, for a PR that must not ship in this batch. It
+            keeps the PR off staging the same way, and put on a PR already
+            sitting on staging it takes the PR off it, back to the branch it was
+            opened against if the bot retargeted it and otherwise to the default
+            branch. Take either label off again and the PR is routed to staging
+            as usual.
+          </p>
+          <p>
+            Both are about routing, not about the release. A PR that has already
+            merged into staging ships in this batch and stays in the manifest
+            whatever you label it afterwards: the manifest is a record of what
+            the batch contains. To take merged work out of a release, revert it
+            on the staging branch.
           </p>
           <p>
             The aggregate PR is exempt from the gate and from retargeting, and

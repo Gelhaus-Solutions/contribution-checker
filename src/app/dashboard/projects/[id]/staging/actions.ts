@@ -63,7 +63,8 @@ const defaultsSchema = z.object({
   stagingDigestSections: z.array(digestSection),
   stagingBranch: branchName,
   labelStagingBatch: stagingLabel,
-  labelStagingOptOut: stagingLabel,
+  labelStagingIgnore: stagingLabel,
+  labelStagingRepoint: stagingLabel,
 });
 
 export async function updateStagingDefaults(formData: FormData) {
@@ -77,7 +78,8 @@ export async function updateStagingDefaults(formData: FormData) {
     stagingDigestSections: formData.getAll("stagingDigestSections"),
     stagingBranch: formData.get("stagingBranch"),
     labelStagingBatch: formData.get("labelStagingBatch"),
-    labelStagingOptOut: formData.get("labelStagingOptOut"),
+    labelStagingIgnore: formData.get("labelStagingIgnore"),
+    labelStagingRepoint: formData.get("labelStagingRepoint"),
   });
   const { session } = await requireProjectRole(parsed.projectId, "ADMIN");
 
@@ -91,7 +93,8 @@ export async function updateStagingDefaults(formData: FormData) {
       stagingDigestSections: true,
       stagingBranch: true,
       labelStagingBatch: true,
-      labelStagingOptOut: true,
+      labelStagingIgnore: true,
+      labelStagingRepoint: true,
       labelPending: true,
       labelApproved: true,
       labelDenied: true,
@@ -108,7 +111,8 @@ export async function updateStagingDefaults(formData: FormData) {
     before.labelDenied,
     before.labelEvaluate,
     parsed.labelStagingBatch,
-    parsed.labelStagingOptOut,
+    parsed.labelStagingIgnore,
+    parsed.labelStagingRepoint,
   ];
   if (new Set(allLabels).size !== allLabels.length) {
     throw new Error(
@@ -126,7 +130,8 @@ export async function updateStagingDefaults(formData: FormData) {
     stagingDigestSections: serializeDigestSections(parsed.stagingDigestSections),
     stagingBranch: parsed.stagingBranch,
     labelStagingBatch: parsed.labelStagingBatch,
-    labelStagingOptOut: parsed.labelStagingOptOut,
+    labelStagingIgnore: parsed.labelStagingIgnore,
+    labelStagingRepoint: parsed.labelStagingRepoint,
   };
 
   await prisma.project.update({
@@ -167,9 +172,13 @@ export async function updateStagingDefaults(formData: FormData) {
             before.labelStagingBatch,
             after.labelStagingBatch,
           ],
-          labelStagingOptOut: [
-            before.labelStagingOptOut,
-            after.labelStagingOptOut,
+          labelStagingIgnore: [
+            before.labelStagingIgnore,
+            after.labelStagingIgnore,
+          ],
+          labelStagingRepoint: [
+            before.labelStagingRepoint,
+            after.labelStagingRepoint,
           ],
         }).filter(([, [a, b]]) => a !== b),
       ),
@@ -390,7 +399,8 @@ export async function updateQaSettings(formData: FormData) {
       labelDenied: true,
       labelEvaluate: true,
       labelStagingBatch: true,
-      labelStagingOptOut: true,
+      labelStagingIgnore: true,
+      labelStagingRepoint: true,
     },
   });
   if (!before) throw new Error("Project not found");
@@ -403,7 +413,8 @@ export async function updateQaSettings(formData: FormData) {
     before.labelDenied,
     before.labelEvaluate,
     before.labelStagingBatch,
-    before.labelStagingOptOut,
+    before.labelStagingIgnore,
+    before.labelStagingRepoint,
     parsed.qaFailedLabel,
   ];
   if (new Set(allLabels).size !== allLabels.length) {

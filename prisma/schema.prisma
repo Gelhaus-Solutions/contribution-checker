@@ -138,9 +138,21 @@ model Project {
   // path can recognize it and the reconciler can find it again if the tracked
   // number is lost.
   labelStagingBatch  String  @default("staging:batch")
-  // Escape hatch: a PR carrying this label is never retargeted to staging,
-  // and keeps targeting the default branch.
-  labelStagingOptOut String  @default("staging:opt-out")
+  // Two escape hatches, and the difference is whether the bot is allowed to
+  // move the PR at all.
+  //
+  // `labelStagingIgnore` means "leave this PR alone": it is never retargeted
+  // onto staging, and a PR already sitting on staging stays there. It is the
+  // label to reach for when the base is already right and the only problem is
+  // the bot having an opinion about it.
+  //
+  // `labelStagingRepoint` means "this must not ship in the batch": it prevents
+  // a retarget the same way, and applied to a PR already on staging it takes
+  // the PR back off it (to the base it was opened against, or the default
+  // branch). Carrying both, ignore wins: doing nothing is the one instruction
+  // that cannot be half-followed.
+  labelStagingIgnore  String @default("staging:ignore")
+  labelStagingRepoint String @default("staging:repoint")
 
   // Staging routing. Two independent switches:
   //  - stagingRetargetEnabled rewrites PRs based on the default branch to
@@ -648,11 +660,10 @@ model PrQuality {
 /**
  * One PR the bot moved onto the staging branch, and the base it moved it off.
  * Written only when a retarget actually succeeds, which is what makes the
- * opt-out label reversible: labelling a PR after the fact repoints it at
- * `fromBase`, and a PR the bot never touched is left exactly where its author
- * put it. Inferring this from "the base is staging" would move PRs opened
- * against staging on purpose down to the default branch, which is a release,
- * not a routing change.
+ * repoint label send a PR somewhere useful: labelling a PR after the fact
+ * points it back at `fromBase`, and a PR the bot never touched goes to the
+ * default branch instead, because there is no earlier base on record to
+ * return it to.
  * Not on PrCheck, because retargeting runs *before* the gate: on `opened`
  * there is no PrCheck row yet, and when the checker is disabled without
  * `trackWhenDisabled` there never will be.

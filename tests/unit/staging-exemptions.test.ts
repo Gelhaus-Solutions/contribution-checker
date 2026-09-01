@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   isAggregatePr,
-  optOutRequestsRevert,
+  repointRequestsRevert,
+  stagingIgnored,
   stagingRetargetSkipReason,
 } from "@/lib/github/staging";
 
@@ -17,7 +18,8 @@ function args(overrides: Partial<Parameters<typeof stagingRetargetSkipReason>[0]
     prNumber: 42,
     aggregatePrNumber: null,
     prLabels: [] as string[],
-    optOutLabel: "staging:opt-out",
+    ignoreLabel: "staging:ignore",
+    repointLabel: "staging:repoint",
     authorGhLogin: "octocat",
     bypassHandles: [] as string[],
     ...overrides,
@@ -44,10 +46,26 @@ describe("stagingRetargetSkipReason", () => {
     );
   });
 
-  it("skips a PR carrying the opt-out label", () => {
+  it("skips a PR carrying the ignore label", () => {
     expect(
-      stagingRetargetSkipReason(args({ prLabels: ["staging:opt-out"] })),
-    ).toBe("opt_out_label");
+      stagingRetargetSkipReason(args({ prLabels: ["staging:ignore"] })),
+    ).toBe("ignore_label");
+  });
+
+  it("skips a PR carrying the repoint label", () => {
+    expect(
+      stagingRetargetSkipReason(args({ prLabels: ["staging:repoint"] })),
+    ).toBe("repoint_label");
+  });
+
+  // Both mean "not onto staging", so the retarget is skipped either way; the
+  // reported reason is the label that also governs the other direction.
+  it("reports ignore first when a PR carries both labels", () => {
+    expect(
+      stagingRetargetSkipReason(
+        args({ prLabels: ["staging:repoint", "staging:ignore"] }),
+      ),
+    ).toBe("ignore_label");
   });
 
   it("skips accounts on the bypass list, including glob patterns", () => {
@@ -103,12 +121,20 @@ describe("stagingRetargetSkipReason", () => {
     expect(stagingRetargetSkipReason(args({ baseRef: "main" }))).toBeNull();
   });
 
-  it("respects the opt-out label after a human reverts the base", () => {
+  it("respects the ignore label after a human reverts the base", () => {
     expect(
       stagingRetargetSkipReason(
-        args({ baseRef: "main", prLabels: ["staging:opt-out"] }),
+        args({ baseRef: "main", prLabels: ["staging:ignore"] }),
       ),
-    ).toBe("opt_out_label");
+    ).toBe("ignore_label");
+  });
+
+  it("respects the repoint label after a human reverts the base", () => {
+    expect(
+      stagingRetargetSkipReason(
+        args({ baseRef: "main", prLabels: ["staging:repoint"] }),
+      ),
+    ).toBe("repoint_label");
   });
 });
 
@@ -151,32 +177,63 @@ describe("isAggregatePr", () => {
   });
 });
 
-describe("optOutRequestsRevert", () => {
+describe("stagingIgnored", () => {
+  it("recognizes the label wherever the PR currently sits", () => {
+    expect(
+      stagingIgnored({
+        prLabels: ["staging:ignore"],
+        ignoreLabel: "staging:ignore",
+      }),
+    ).toBe(true);
+  });
+
+  it("is not fooled by a label that merely looks like it", () => {
+    expect(
+      stagingIgnored({
+        prLabels: ["staging:ignore-me-later"],
+        ignoreLabel: "staging:ignore",
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("repointRequestsRevert", () => {
   const revertArgs = (overrides: Record<string, unknown> = {}) => ({
     baseRef: "staging",
     stagingBranch: "staging",
-    prLabels: ["staging:opt-out"],
-    optOutLabel: "staging:opt-out",
+    prLabels: ["staging:repoint"],
+    repointLabel: "staging:repoint",
+    ignoreLabel: "staging:ignore",
     ...overrides,
   });
 
   it("wants a PR already sitting on staging put back", () => {
     // The skip reason can only prevent a retarget. Once the base is staging,
     // labelling the PR would otherwise do nothing at all.
-    expect(optOutRequestsRevert(revertArgs())).toBe(true);
+    expect(repointRequestsRevert(revertArgs())).toBe(true);
   });
 
   it("wants nothing when the PR is not on staging", () => {
-    expect(optOutRequestsRevert(revertArgs({ baseRef: "main" }))).toBe(false);
+    expect(repointRequestsRevert(revertArgs({ baseRef: "main" }))).toBe(false);
   });
 
   it("wants nothing without the label", () => {
-    expect(optOutRequestsRevert(revertArgs({ prLabels: [] }))).toBe(false);
+    expect(repointRequestsRevert(revertArgs({ prLabels: [] }))).toBe(false);
   });
 
-  it("is not fooled by a label that merely looks like the opt-out one", () => {
+  it("is not fooled by a label that merely looks like the repoint one", () => {
     expect(
-      optOutRequestsRevert(revertArgs({ prLabels: ["staging:opt-out-later"] })),
+      repointRequestsRevert(revertArgs({ prLabels: ["staging:repoint-later"] })),
+    ).toBe(false);
+  });
+
+  // "Do not move this" and "move this" together: the instruction that does
+  // nothing is the one that can be taken back later.
+  it("defers to the ignore label when a PR carries both", () => {
+    expect(
+      repointRequestsRevert(
+        revertArgs({ prLabels: ["staging:repoint", "staging:ignore"] }),
+      ),
     ).toBe(false);
   });
 });

@@ -192,13 +192,19 @@ export async function updateLabelSettings(formData: FormData) {
   // from this side too so the two forms cannot converge on one name.
   const staging = await prisma.project.findUnique({
     where: { id: parsed.projectId },
-    select: { labelStagingBatch: true, labelStagingOptOut: true },
+    select: {
+      labelStagingBatch: true,
+      labelStagingIgnore: true,
+      labelStagingRepoint: true,
+    },
   });
   if (
     staging &&
-    [staging.labelStagingBatch, staging.labelStagingOptOut].some((l) =>
-      labelSet.has(l),
-    )
+    [
+      staging.labelStagingBatch,
+      staging.labelStagingIgnore,
+      staging.labelStagingRepoint,
+    ].some((l) => labelSet.has(l))
   ) {
     throw new Error(
       "These labels must differ from the staging labels set on the Staging page.",
