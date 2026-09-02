@@ -318,6 +318,26 @@ QA on the staging batch (`src/lib/qa/`, App mode only):
   `StagingBatch`, and possibly no `PrCheck` row yet), so it reads the run
   standing on the commit with `findCheckRunIdByName` rather than stacking a
   duplicate on every event.
+- **A merge queue needs its own answer, on both protected branches.** GitHub
+  builds a throwaway `gh-readonly-queue/...` commit and requires every check to
+  report against *that* SHA, so a queue on the default branch holds a fully
+  verified release forever unless the verdict is republished there, and a queue
+  on the staging branch holds every contribution on a check that is about a
+  release they have not joined yet. `publishMergeGroupQaCheck` answers both:
+  the batch's real verdict when the group carries the aggregate PR (matched by
+  `Repo.stagingBatchPrNumber`, since `merge_group` carries no head or base for a
+  structural test), "does not apply" otherwise. `publishQaVerdictCheck` and
+  `publishQaNotApplicableCheck` share `publishStandaloneQaCheck`, which stores
+  **no** run id: `StagingBatch.qaCheckRunId` and `qaCheckSha` belong to the
+  batch head, and overwriting them with a transient queue SHA would leave the
+  release PR's own check unreachable. It reads the run standing on the commit
+  instead.
+- **The aggregate PR is exempt from the gate inside a merge group too.** It has
+  no application, so evaluating it there finds PENDING and blocks the release on
+  the queue's commit, which is the same hole `publishAggregatePrChecks` closes
+  on the PR path. Its number is filtered out of the group's evaluation and the
+  checks publish as `APPROVED { bypassReason: "staging_batch" }` plus CLA
+  `exempt`; contributions batched alongside it are still gated normally.
 - **Label state is tracked on the row** (`qaLabelApplied` on both the item and
   the batch). Reconciles run on every push, so recomputing labels by listing or
   by unconditionally issuing add/remove would cost calls per PR every time; the

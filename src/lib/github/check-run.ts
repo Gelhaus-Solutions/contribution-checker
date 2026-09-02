@@ -12,6 +12,8 @@ import type { PrDecision } from "@/lib/applications/decide-pr";
 import {
   buildQaCheckPayload,
   buildQaNotApplicablePayload,
+  type QaCheckPayload,
+  type QaNotApplicableReason,
   type QaRenderItem,
 } from "@/lib/qa/render";
 
@@ -442,40 +444,30 @@ export async function publishQaCheck(args: {
 }
 
 /**
- * Publish the QA check as a pass on a PR that staging QA has no say over.
+ * Publish a QA check payload on a commit that has nowhere to store a run id.
  *
- * The counterpart to `publishAggregatePrChecks` in `webhook.ts`, and the same
- * bargain: skipping the thing must not skip the check. A PR carrying
- * `staging:ignore` or `staging:repoint` while based on the default branch will
- * never ship inside a batch, so `publishQaCheck` (which only ever runs against
- * the aggregate PR's head) will never report on it. Where the check is required
- * on the default branch that PR is blocked on a status nobody is going to send.
- *
- * Gated exactly like its sibling: `qaCheckEnabled` says whether this project
- * publishes the check at all, and an installation without `checks:write` gets
- * no check rather than an error. Whether QA even applies to the PR is decided
- * upstream, in `applyStagingRouting`.
+ * `publishQaCheck` remembers its run on `StagingBatch` so the release PR
+ * accumulates one check that changes. The callers here have no such row: a
+ * labelled PR may not even have a `PrCheck` yet, and a merge-queue head SHA is
+ * transient and must never overwrite the ids bound to the real batch head. So
+ * the run standing on the commit is looked up instead, which costs one call on
+ * paths that are rare and keeps repeat deliveries from stacking duplicates
+ * under one name.
  */
-export async function publishQaNotApplicableCheck(args: {
+async function publishStandaloneQaCheck(args: {
   installationId: number;
   repoFullName: string;
   headSha: string | null;
-  project: { id: string; checksEnabled: boolean; qaCheckEnabled: boolean };
-  /** The escape-hatch label that earned the exemption. */
-  label: string;
+  project: { checksEnabled: boolean; qaCheckEnabled: boolean };
+  payload: QaCheckPayload;
+  detailsUrl?: string;
 }): Promise<void> {
   if (!args.project.checksEnabled || !args.project.qaCheckEnabled) return;
   if (!args.headSha) return;
   if (!(await installationHasChecksWrite(args.installationId))) return;
 
-  const payload = buildQaNotApplicablePayload({ label: args.label });
   const ref = repoRef(args.repoFullName, args.installationId);
   try {
-    // There is no `StagingBatch` behind this PR and its `PrCheck` row may not
-    // exist yet, so there is nowhere to remember the run id. This publishes on
-    // every event a labelled PR emits, which without a lookup would stack a
-    // duplicate run under one name on the same commit each time. The read is
-    // one call on a path only labelled PRs reach.
     const existingId = await findCheckRunIdByName(
       ref,
       args.headSha,
@@ -486,17 +478,81 @@ export async function publishQaNotApplicableCheck(args: {
       {
         headSha: args.headSha,
         name: QA_CHECK_RUN_NAME,
-        status: payload.status,
-        conclusion: payload.conclusion,
-        title: payload.title,
-        summary: payload.summary,
+        status: args.payload.status,
+        conclusion: args.payload.conclusion,
+        title: args.payload.title,
+        summary: args.payload.summary,
+        ...(args.detailsUrl ? { detailsUrl: args.detailsUrl } : {}),
       },
       existingId,
     );
   } catch (e) {
     logger.warn(
       { err: e, repoFullName: args.repoFullName, headSha: args.headSha },
-      "publishQaNotApplicableCheck failed",
+      "standalone QA check publish failed",
     );
   }
+}
+
+/**
+ * Publish the QA check as a pass on a commit staging QA has no say over.
+ *
+ * The counterpart to `publishAggregatePrChecks` in `webhook.ts`, and the same
+ * bargain: skipping the thing must not skip the check. A PR carrying
+ * `staging:ignore` or `staging:repoint` while based on the default branch will
+ * never ship inside a batch, and a merge group that carries no batch is not a
+ * release, so `publishQaCheck` (which only ever runs against the aggregate PR's
+ * head) will never report on either. Where the check is required on that
+ * branch, the PR is blocked on a status nobody is going to send and a merge
+ * queue there never drains.
+ *
+ * Gated exactly like its sibling: `qaCheckEnabled` says whether this project
+ * publishes the check at all, and an installation without `checks:write` gets
+ * no check rather than an error. Whether QA even applies is decided upstream.
+ */
+export async function publishQaNotApplicableCheck(args: {
+  installationId: number;
+  repoFullName: string;
+  headSha: string | null;
+  project: { id: string; checksEnabled: boolean; qaCheckEnabled: boolean };
+  /** Why QA has nothing to report here. Spelled out in the check summary. */
+  reason: QaNotApplicableReason;
+}): Promise<void> {
+  await publishStandaloneQaCheck({
+    installationId: args.installationId,
+    repoFullName: args.repoFullName,
+    headSha: args.headSha,
+    project: args.project,
+    payload: buildQaNotApplicablePayload({ reason: args.reason }),
+  });
+}
+
+/**
+ * Republish the batch's real QA verdict on a commit that is not the batch head.
+ *
+ * The merge queue's case. GitHub builds a throwaway `gh-readonly-queue/...`
+ * commit and requires the check to report against THAT SHA, so a release PR
+ * whose batch is fully verified still sits in the queue forever unless the same
+ * verdict is published again on the queue's head. It is the same payload
+ * `publishQaCheck` builds, on a different commit, and deliberately stores no
+ * id: `StagingBatch.qaCheckRunId` and `qaCheckSha` belong to the batch head,
+ * and overwriting them with a transient queue SHA would leave the release PR's
+ * own check unreachable.
+ */
+export async function publishQaVerdictCheck(args: {
+  installationId: number;
+  repoFullName: string;
+  headSha: string | null;
+  project: { id: string; checksEnabled: boolean; qaCheckEnabled: boolean };
+  items: QaRenderItem[];
+  boardUrl: string;
+}): Promise<void> {
+  await publishStandaloneQaCheck({
+    installationId: args.installationId,
+    repoFullName: args.repoFullName,
+    headSha: args.headSha,
+    project: args.project,
+    payload: buildQaCheckPayload({ items: args.items, boardUrl: args.boardUrl }),
+    detailsUrl: args.boardUrl,
+  });
 }

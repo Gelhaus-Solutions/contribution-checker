@@ -23,6 +23,7 @@ import {
   publishDecisionCheck,
   publishClaCheck,
   publishQaNotApplicableCheck,
+  publishQaVerdictCheck,
   type ClaCheckState,
 } from "@/lib/github/check-run";
 import {
@@ -350,6 +351,7 @@ async function publishStagingQaExemption(args: {
   repoFullName: string;
   installationId: number;
   headSha: string | null;
+  /** The escape-hatch label that earned the exemption. */
   label: string;
 }): Promise<void> {
   if (!args.repoId || !args.headSha) return;
@@ -368,7 +370,7 @@ async function publishStagingQaExemption(args: {
     repoFullName: args.repoFullName,
     headSha: args.headSha,
     project: repo.project,
-    label: args.label,
+    reason: { kind: "label", label: args.label },
   }).catch((e) =>
     logger.warn({ err: e, repoId: args.repoId }, "staging QA exemption check failed"),
   );
@@ -1318,6 +1320,113 @@ export function parsePrNumbersFromMergeRef(ref: string): number[] {
   return [...seen];
 }
 
+/** `refs/heads/main` and `main` both reach us; the config holds branch names. */
+function shortBranchName(ref: string): string {
+  return ref.replace(/^refs\/heads\//, "");
+}
+
+/**
+ * Answer `contribution-checker / qa` for a merge group.
+ *
+ * The queue requires every protected-branch check to report against its own
+ * throwaway head commit, and the QA check otherwise only ever lands on the
+ * aggregate PR's head. Both branches a staging project protects need an answer
+ * here or the queue on them never drains:
+ *
+ *  - The release itself queueing into the default branch: republish the batch's
+ *    real verdict, so a batch nobody has verified still holds the queue and a
+ *    verified one lets it through.
+ *  - Anything else, most often work queueing into the staging branch: QA is
+ *    recorded against the assembled batch and reported on the release PR, so
+ *    there is nothing to verify at this point and blocking would be a gate that
+ *    can never be satisfied.
+ *
+ * Gated on the repo actually recording QA, like every other QA surface: a repo
+ * that runs none publishes this check nowhere, so there is nothing here for a
+ * queue to be waiting on.
+ */
+async function publishMergeGroupQaCheck(args: {
+  ghRepoId: number;
+  installationId: number;
+  repoFullName: string;
+  headSha: string;
+  prNumbers: number[];
+  baseRef: string;
+}): Promise<void> {
+  const repo = await prisma.repo.findUnique({
+    where: { ghRepoId: args.ghRepoId },
+    select: {
+      id: true,
+      stagingBatchPrNumber: true,
+      ...stagingRepoSelect,
+      project: { select: stagingProjectSelect },
+    },
+  });
+  if (!repo) return;
+  const project = repo.project;
+  const cfg = resolveStagingConfig(project, repo);
+  if (!cfg.qaEnabled) return;
+
+  const checkProject = {
+    id: project.id,
+    checksEnabled: project.checksEnabled,
+    qaCheckEnabled: project.qaCheckEnabled,
+  };
+
+  // Matched by the tracked number alone. The structural test `isAggregatePr`
+  // also runs needs the PR's head and base, which the merge_group payload does
+  // not carry, and fetching every member PR to find out would cost a call per
+  // queue entry to cover a window that lasts one reconcile.
+  const aggregate = repo.stagingBatchPrNumber;
+  if (aggregate != null && args.prNumbers.includes(aggregate)) {
+    const batch = await prisma.stagingBatch.findFirst({
+      where: { repoId: repo.id, status: "OPEN" },
+      orderBy: { openedAt: "desc" },
+      select: { id: true },
+    });
+    // No open batch means nothing has been merged into staging yet, which
+    // `buildQaCheckPayload` already reports as "nothing to verify".
+    const items = batch
+      ? await prisma.stagingBatchItem.findMany({
+          where: { batchId: batch.id },
+          select: {
+            key: true,
+            kind: true,
+            prNumber: true,
+            title: true,
+            authorLogin: true,
+            qaStatus: true,
+            qaNotes: true,
+            droppedAt: true,
+          },
+          orderBy: { prNumber: "asc" },
+        })
+      : [];
+    await publishQaVerdictCheck({
+      installationId: args.installationId,
+      repoFullName: args.repoFullName,
+      headSha: args.headSha,
+      project: checkProject,
+      items,
+      boardUrl:
+        `${env.PUBLIC_BASE_URL.replace(/\/$/, "")}` +
+        `/dashboard/projects/${project.id}/qa?repo=${repo.id}`,
+    });
+    return;
+  }
+
+  await publishQaNotApplicableCheck({
+    installationId: args.installationId,
+    repoFullName: args.repoFullName,
+    headSha: args.headSha,
+    project: checkProject,
+    reason:
+      shortBranchName(args.baseRef) === cfg.stagingBranch
+        ? { kind: "merge_into_staging", stagingBranch: cfg.stagingBranch }
+        : { kind: "no_batch" },
+  });
+}
+
 /**
  * GitHub `merge_group` event (merge queue). When a PR enters the queue GitHub
  * builds a temporary `gh-readonly-queue/...` branch with a fresh head commit and
@@ -1375,14 +1484,40 @@ export async function handleMergeGroupEvent(payload: MergeGroupPayload) {
   // Checks disabled → the publishers would no-op anyway; skip the eval work.
   if (!project.checksEnabled) return;
 
+  // Independent of the gate, and published first so it is answered even when
+  // no member PR is gateable at all: QA is a question about a release, not
+  // about a contributor.
+  await publishMergeGroupQaCheck({
+    ghRepoId,
+    installationId,
+    repoFullName,
+    headSha,
+    prNumbers,
+    baseRef: payload.merge_group?.base_ref ?? "",
+  }).catch((e) =>
+    logger.warn({ err: e, repoFullName }, "merge_group qa check failed"),
+  );
+
   const applyUrl = `${env.PUBLIC_BASE_URL.replace(/\/$/, "")}/p/${project.slug}`;
   const claUrl = `${applyUrl}/cla`;
+
+  // The bot's own aggregate PR never goes through the gate, so evaluating it
+  // here would find no application, call it PENDING and hold the release in the
+  // queue on a check the PR path deliberately publishes as a pass. Same
+  // exemption `publishAggregatePrChecks` makes, applied to the queue's commit.
+  // A group that batches it with real contributions still gates those.
+  const aggregatePrNumber = repo.stagingBatchPrNumber;
+  const gatedPrNumbers =
+    aggregatePrNumber == null
+      ? prNumbers
+      : prNumbers.filter((n) => n !== aggregatePrNumber);
+  const carriesAggregatePr = gatedPrNumbers.length !== prNumbers.length;
 
   const evaluations: Array<{
     decision: PrDecision & { repoId?: string; projectId?: string };
     claState: ClaCheckState | null;
   }> = [];
-  for (const prNumber of prNumbers) {
+  for (const prNumber of gatedPrNumbers) {
     // Author comes from the stored PrCheck row when the PR already went through
     // the pull_request path; fall back to the GitHub API otherwise.
     const prior = await prisma.prCheck.findUnique({
@@ -1433,7 +1568,10 @@ export async function handleMergeGroupEvent(payload: MergeGroupPayload) {
     });
     evaluations.push({ decision, claState });
   }
-  if (evaluations.length === 0) return;
+  // Nothing gateable in the group. When that is because the only member was
+  // the aggregate PR, the checks still have to be published or the release sits
+  // in the queue forever; otherwise there is genuinely nothing to report.
+  if (evaluations.length === 0 && !carriesAggregatePr) return;
 
   // Most-blocking wins: any non-allowing decision (or required/stale CLA) gates
   // the whole group. Decision and CLA picks may come from different members.
@@ -1441,12 +1579,20 @@ export async function handleMergeGroupEvent(payload: MergeGroupPayload) {
     (e) =>
       e.decision.status !== "APPROVED" && e.decision.status !== "BYPASSED",
   );
-  const chosenDecision = (blocking ?? evaluations[0]).decision;
+  const chosenDecision: PrDecision =
+    evaluations.length > 0
+      ? (blocking ?? evaluations[0]).decision
+      : { status: "APPROVED", bypassReason: "staging_batch" };
   if (chosenDecision.status === "IGNORED") return;
   const claBlocking = evaluations.find(
     (e) => e.claState === "required" || e.claState === "stale",
   );
-  const chosenCla = claBlocking?.claState ?? evaluations[0].claState;
+  // The batch is the project's own merged work, so the CLA question does not
+  // apply to it; "exempt" keeps the required context green rather than absent.
+  const chosenCla: ClaCheckState | null =
+    evaluations.length > 0
+      ? (claBlocking?.claState ?? evaluations[0].claState)
+      : "exempt";
 
   await publishDecisionCheck({
     installationId,

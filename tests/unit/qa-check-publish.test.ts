@@ -119,13 +119,14 @@ describe("publishQaCheck head-sha binding", () => {
  * branch these PRs sit on "waiting for status to be reported" for good.
  */
 describe("publishQaNotApplicableCheck", () => {
-  function exemptArgs(overrides: Record<string, unknown> = {}) {
+  type ExemptArgs = Parameters<typeof publishQaNotApplicableCheck>[0];
+  function exemptArgs(overrides: Partial<ExemptArgs> = {}): ExemptArgs {
     return {
       installationId: 1,
       repoFullName: "acme/app",
-      headSha: "sha-a" as string | null,
+      headSha: "sha-a",
       project: PROJECT,
-      label: "staging:ignore",
+      reason: { kind: "label", label: "staging:ignore" },
       ...overrides,
     };
   }

@@ -242,30 +242,70 @@ export function buildQaCheckPayload(args: {
 }
 
 /**
- * The same check, published on a PR that no batch will ever speak for.
+ * Why staging QA has nothing to say about the commit being checked.
  *
- * `contribution-checker / qa` reports on the staging batch and is published on
- * the aggregate PR alone, so a PR carrying one of the two staging escape
- * hatches while sitting on the default branch has nothing that will ever
- * report it. Where the check is required on that branch, "no batch" reads as
- * "waiting for status to be reported", forever. `success` is the honest
- * answer: QA is a question about a release, and this PR is not in one.
+ * Named rather than free text because each of these is a different question a
+ * reviewer might ask of a green check, and the summary is the only place the
+ * answer is written down.
  *
- * The label is named in the summary because it is the whole reason the check
- * passed, and because removing it is what puts the PR back in a batch.
+ *  - `label`: a PR held on the default branch by one of the escape hatches. It
+ *    is outside every batch, so no batch will ever report on it.
+ *  - `merge_into_staging`: a merge queue on the staging branch. Work is being
+ *    collected here; it is verified later, on the release PR that ships the
+ *    assembled batch.
+ *  - `no_batch`: a merge group carrying no batch at all, so there is no set of
+ *    items for a verdict to be about.
+ */
+export type QaNotApplicableReason =
+  | { kind: "label"; label: string }
+  | { kind: "merge_into_staging"; stagingBranch: string }
+  | { kind: "no_batch" };
+
+/**
+ * The same check, published where staging QA has no say.
+ *
+ * `contribution-checker / qa` reports on a batch and is otherwise published on
+ * the aggregate PR alone, so anything that is not a batch has nothing that will
+ * ever report it. Where the check is required on a branch, "no batch" reads as
+ * "waiting for status to be reported", forever, and a merge queue on that
+ * branch never drains. `success` is the honest answer: QA is a question about a
+ * release, and none of these commits are in one.
+ *
+ * The reason is spelled out in the summary because a green required check with
+ * no explanation is the kind of thing people stop trusting.
  */
 export function buildQaNotApplicablePayload(args: {
-  label: string;
+  reason: QaNotApplicableReason;
 }): QaCheckPayload {
+  const summary = (() => {
+    switch (args.reason.kind) {
+      case "label":
+        return (
+          `This PR carries the \`${args.reason.label}\` label and targets the ` +
+          `default branch, so it does not ship in a staging batch and there is ` +
+          `nothing for staging QA to verify. Remove the label to route it into ` +
+          `the batch and have it verified with the rest of the release.`
+        );
+      case "merge_into_staging":
+        return (
+          `This merges into \`${args.reason.stagingBranch}\`, where work is ` +
+          `collected for the next release. Staging QA is recorded against the ` +
+          `batch as a whole and reported on the release pull request, so there ` +
+          `is nothing to verify at this point.`
+        );
+      case "no_batch":
+        return (
+          `Nothing being merged here ships through a staging batch, so there ` +
+          `is no set of items for staging QA to report on.`
+        );
+    }
+  })();
+
   return {
     status: "completed",
     conclusion: "success",
     title: "QA does not apply",
-    summary:
-      `This PR carries the \`${args.label}\` label and targets the default ` +
-      `branch, so it does not ship in a staging batch and there is nothing ` +
-      `for staging QA to verify. Remove the label to route it into the batch ` +
-      `and have it verified with the rest of the release.`,
+    summary,
   };
 }
 

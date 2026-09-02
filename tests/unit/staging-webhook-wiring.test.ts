@@ -720,7 +720,10 @@ describe("QA check on PRs the staging labels keep off the batch", () => {
       labelledOnDefault(60, "staging:ignore") as never,
     );
     expect(publishQaNotApplicableCheck).toHaveBeenCalledWith(
-      expect.objectContaining({ headSha: "abc", label: "staging:ignore" }),
+      expect.objectContaining({
+        headSha: "abc",
+        reason: { kind: "label", label: "staging:ignore" },
+      }),
     );
   });
 
@@ -730,7 +733,9 @@ describe("QA check on PRs the staging labels keep off the batch", () => {
       labelledOnDefault(61, "staging:repoint") as never,
     );
     expect(publishQaNotApplicableCheck).toHaveBeenCalledWith(
-      expect.objectContaining({ label: "staging:repoint" }),
+      expect.objectContaining({
+        reason: { kind: "label", label: "staging:repoint" },
+      }),
     );
   });
 
@@ -754,7 +759,9 @@ describe("QA check on PRs the staging labels keep off the batch", () => {
       "main",
     );
     expect(publishQaNotApplicableCheck).toHaveBeenCalledWith(
-      expect.objectContaining({ label: "staging:repoint" }),
+      expect.objectContaining({
+        reason: { kind: "label", label: "staging:repoint" },
+      }),
     );
   });
 
