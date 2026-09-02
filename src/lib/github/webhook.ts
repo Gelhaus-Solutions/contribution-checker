@@ -22,6 +22,7 @@ import {
 import {
   publishDecisionCheck,
   publishClaCheck,
+  publishQaNotApplicableCheck,
   type ClaCheckState,
 } from "@/lib/github/check-run";
 import {
@@ -329,6 +330,50 @@ async function publishAggregatePrChecks(args: {
   );
 }
 
+/**
+ * Publish `contribution-checker / qa` as a pass on a PR staging QA cannot
+ * speak for.
+ *
+ * The QA check reports on a batch and is published on the aggregate PR's head
+ * alone, so a PR that will never be routed into a batch has nothing that will
+ * ever report it. Where the check is required on the default branch, that reads
+ * as "Expected - waiting for status to be reported" for the life of the PR.
+ * Same shape as `publishAggregatePrChecks` above, and the same reason: the PR
+ * being outside the mechanism must not leave a required check unpublished.
+ *
+ * Whether the exemption applies at all is `applyStagingRouting`'s answer (it
+ * holds the labels, the bases and the resolved staging config); this only needs
+ * to know whether the project publishes the check.
+ */
+async function publishStagingQaExemption(args: {
+  repoId: string | null;
+  repoFullName: string;
+  installationId: number;
+  headSha: string | null;
+  label: string;
+}): Promise<void> {
+  if (!args.repoId || !args.headSha) return;
+  const repo = await prisma.repo.findUnique({
+    where: { id: args.repoId },
+    select: {
+      project: {
+        select: { id: true, checksEnabled: true, qaCheckEnabled: true },
+      },
+    },
+  });
+  if (!repo) return;
+
+  await publishQaNotApplicableCheck({
+    installationId: args.installationId,
+    repoFullName: args.repoFullName,
+    headSha: args.headSha,
+    project: repo.project,
+    label: args.label,
+  }).catch((e) =>
+    logger.warn({ err: e, repoId: args.repoId }, "staging QA exemption check failed"),
+  );
+}
+
 async function postDecisionSideEffects(args: {
   installationId: number;
   repoFullName: string;
@@ -601,6 +646,21 @@ export async function handlePullRequestEvent(
     return notTerminal(staging);
   }
 
+  // A PR carrying one of the staging escape hatches while based on the default
+  // branch is outside every batch, so the QA check that reports on batches will
+  // never report on it. Publish it as a pass rather than leave a required check
+  // hanging: the exemption is decided in `applyStagingRouting`, which knows the
+  // labels, the base and whether this repo runs QA at all.
+  if (staging.qaExemptLabel) {
+    await publishStagingQaExemption({
+      repoId: staging.repoId,
+      repoFullName: payload.repository.full_name,
+      installationId: payload.installation.id,
+      headSha: payload.pull_request.head?.sha ?? null,
+      label: staging.qaExemptLabel,
+    });
+  }
+
   // A title edit changes nothing the gate cares about: the batch manifest was
   // already refreshed above, so stop before the decision pipeline. The staging
   // labels are the same story: routing has had its say, and a label only a
@@ -638,6 +698,7 @@ const NO_STAGING_ROUTING: StagingRoutingResult = {
   isAggregatePr: false,
   touchesStaging: false,
   outcome: "not_managed",
+  qaExemptLabel: null,
 };
 
 async function runStagingRouting(args: {

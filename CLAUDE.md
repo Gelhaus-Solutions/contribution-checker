@@ -301,6 +301,23 @@ QA on the staging batch (`src/lib/qa/`, App mode only):
   exactly like `digestEnabled`: the batch is the unit of QA. `qaCheckEnabled` is
   a **second, separate** switch, because turning QA on to see the state must not
   start failing a required check on a project that never asked to be gated.
+- **A PR the staging labels keep off the batch passes the QA check as "does
+  not apply".** The check is published on the aggregate PR's head alone, so a
+  PR carrying `staging:ignore` or `staging:repoint` while based on the default
+  branch is outside every batch and nothing would ever report it: where
+  `contribution-checker / qa` is required on that branch, it waits on a status
+  that is never coming. Same rule as `publishAggregatePrChecks` on the release
+  PR, skipping the thing must not skip the check. `stagingQaExemptLabel` is the
+  pure rule and `applyStagingRouting` returns it as `qaExemptLabel`, re-asked
+  against the base a repoint just moved the PR onto rather than the one it
+  arrived with. **Base, not label, settles it**: the labels govern routing and
+  not membership, so a PR already on staging ships in the batch and its real
+  verdict is the one that has to speak. The aggregate PR is excluded outright,
+  since a stray label on it would turn an unverified release green.
+  `publishQaNotApplicableCheck` has nowhere to store a run id (no
+  `StagingBatch`, and possibly no `PrCheck` row yet), so it reads the run
+  standing on the commit with `findCheckRunIdByName` rather than stacking a
+  duplicate on every event.
 - **Label state is tracked on the row** (`qaLabelApplied` on both the item and
   the batch). Reconciles run on every push, so recomputing labels by listing or
   by unconditionally issuing add/remove would cost calls per PR every time; the

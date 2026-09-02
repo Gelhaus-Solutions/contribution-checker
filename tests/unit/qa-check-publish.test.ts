@@ -14,9 +14,11 @@ vi.mock("@/lib/db", () => ({
 
 const upsertCheckRun = vi.fn();
 const installationHasChecksWrite = vi.fn();
+const findCheckRunIdByName = vi.fn();
 
 vi.mock("@/lib/github/pr-actions", () => ({
   upsertCheckRun: (...a: unknown[]) => upsertCheckRun(...a),
+  findCheckRunIdByName: (...a: unknown[]) => findCheckRunIdByName(...a),
   installationHasChecksWrite: (...a: unknown[]) =>
     installationHasChecksWrite(...a),
   repoRef: (fullName: string, installationId: number) => {
@@ -25,7 +27,11 @@ vi.mock("@/lib/github/pr-actions", () => ({
   },
 }));
 
-import { publishQaCheck } from "@/lib/github/check-run";
+import {
+  publishQaCheck,
+  publishQaNotApplicableCheck,
+  QA_CHECK_RUN_NAME,
+} from "@/lib/github/check-run";
 
 const PROJECT = { id: "p1", checksEnabled: true, qaCheckEnabled: true };
 
@@ -103,6 +109,80 @@ describe("publishQaCheck head-sha binding", () => {
 
   it("publishes nothing without a head sha", async () => {
     await publishQaCheck(args(null));
+    expect(upsertCheckRun).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * A PR that no batch will ever speak for. `publishQaCheck` runs against the
+ * aggregate PR's head alone, so where the check is required on the default
+ * branch these PRs sit on "waiting for status to be reported" for good.
+ */
+describe("publishQaNotApplicableCheck", () => {
+  function exemptArgs(overrides: Record<string, unknown> = {}) {
+    return {
+      installationId: 1,
+      repoFullName: "acme/app",
+      headSha: "sha-a" as string | null,
+      project: PROJECT,
+      label: "staging:ignore",
+      ...overrides,
+    };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    installationHasChecksWrite.mockResolvedValue(true);
+    findCheckRunIdByName.mockResolvedValue(null);
+    upsertCheckRun.mockResolvedValue("777");
+  });
+
+  it("publishes a passing QA check naming the label", async () => {
+    await publishQaNotApplicableCheck(exemptArgs());
+
+    expect(upsertCheckRun).toHaveBeenCalledTimes(1);
+    const input = upsertCheckRun.mock.calls[0][1];
+    expect(input.name).toBe(QA_CHECK_RUN_NAME);
+    expect(input.headSha).toBe("sha-a");
+    expect(input.conclusion).toBe("success");
+    expect(input.summary).toContain("staging:ignore");
+  });
+
+  // No StagingBatch to hang an id off and possibly no PrCheck row either, so
+  // without the lookup every event on a labelled PR would stack another run
+  // under the same name on the same commit.
+  it("updates the run already standing on the commit", async () => {
+    findCheckRunIdByName.mockResolvedValue("777");
+    await publishQaNotApplicableCheck(exemptArgs());
+
+    expect(findCheckRunIdByName).toHaveBeenCalledWith(
+      expect.objectContaining({ owner: "acme", repo: "app" }),
+      "sha-a",
+      QA_CHECK_RUN_NAME,
+    );
+    expect(upsertCheckRun.mock.calls[0][2]).toBe("777");
+  });
+
+  it("publishes nothing without a head sha", async () => {
+    await publishQaNotApplicableCheck(exemptArgs({ headSha: null }));
+    expect(upsertCheckRun).not.toHaveBeenCalled();
+  });
+
+  // Turning QA on to see the state must not start publishing a check on a
+  // project that never asked to be gated by one, in either direction.
+  it("publishes nothing when the project does not publish the QA check", async () => {
+    await publishQaNotApplicableCheck(
+      exemptArgs({ project: { ...PROJECT, qaCheckEnabled: false } }),
+    );
+    await publishQaNotApplicableCheck(
+      exemptArgs({ project: { ...PROJECT, checksEnabled: false } }),
+    );
+    expect(upsertCheckRun).not.toHaveBeenCalled();
+  });
+
+  it("publishes nothing without checks:write", async () => {
+    installationHasChecksWrite.mockResolvedValue(false);
+    await publishQaNotApplicableCheck(exemptArgs());
     expect(upsertCheckRun).not.toHaveBeenCalled();
   });
 });

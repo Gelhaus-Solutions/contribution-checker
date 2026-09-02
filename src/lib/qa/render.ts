@@ -241,4 +241,32 @@ export function buildQaCheckPayload(args: {
   };
 }
 
+/**
+ * The same check, published on a PR that no batch will ever speak for.
+ *
+ * `contribution-checker / qa` reports on the staging batch and is published on
+ * the aggregate PR alone, so a PR carrying one of the two staging escape
+ * hatches while sitting on the default branch has nothing that will ever
+ * report it. Where the check is required on that branch, "no batch" reads as
+ * "waiting for status to be reported", forever. `success` is the honest
+ * answer: QA is a question about a release, and this PR is not in one.
+ *
+ * The label is named in the summary because it is the whole reason the check
+ * passed, and because removing it is what puts the PR back in a batch.
+ */
+export function buildQaNotApplicablePayload(args: {
+  label: string;
+}): QaCheckPayload {
+  return {
+    status: "completed",
+    conclusion: "success",
+    title: "QA does not apply",
+    summary:
+      `This PR carries the \`${args.label}\` label and targets the default ` +
+      `branch, so it does not ship in a staging batch and there is nothing ` +
+      `for staging QA to verify. Remove the label to route it into the batch ` +
+      `and have it verified with the rest of the release.`,
+  };
+}
+
 export { isGreen };

@@ -2,13 +2,18 @@ import { prisma } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import {
   upsertCheckRun,
+  findCheckRunIdByName,
   installationHasChecksWrite,
   repoRef,
   type CheckRunStatus,
   type CheckRunConclusion,
 } from "@/lib/github/pr-actions";
 import type { PrDecision } from "@/lib/applications/decide-pr";
-import { buildQaCheckPayload, type QaRenderItem } from "@/lib/qa/render";
+import {
+  buildQaCheckPayload,
+  buildQaNotApplicablePayload,
+  type QaRenderItem,
+} from "@/lib/qa/render";
 
 export const CHECK_RUN_NAME = "contribution-checker / decision";
 // A second, independent Check Run dedicated to the CLA gate so maintainers can
@@ -433,5 +438,65 @@ export async function publishQaCheck(args: {
     }
   } catch (e) {
     logger.warn({ err: e, batchId: args.batchId }, "publishQaCheck failed");
+  }
+}
+
+/**
+ * Publish the QA check as a pass on a PR that staging QA has no say over.
+ *
+ * The counterpart to `publishAggregatePrChecks` in `webhook.ts`, and the same
+ * bargain: skipping the thing must not skip the check. A PR carrying
+ * `staging:ignore` or `staging:repoint` while based on the default branch will
+ * never ship inside a batch, so `publishQaCheck` (which only ever runs against
+ * the aggregate PR's head) will never report on it. Where the check is required
+ * on the default branch that PR is blocked on a status nobody is going to send.
+ *
+ * Gated exactly like its sibling: `qaCheckEnabled` says whether this project
+ * publishes the check at all, and an installation without `checks:write` gets
+ * no check rather than an error. Whether QA even applies to the PR is decided
+ * upstream, in `applyStagingRouting`.
+ */
+export async function publishQaNotApplicableCheck(args: {
+  installationId: number;
+  repoFullName: string;
+  headSha: string | null;
+  project: { id: string; checksEnabled: boolean; qaCheckEnabled: boolean };
+  /** The escape-hatch label that earned the exemption. */
+  label: string;
+}): Promise<void> {
+  if (!args.project.checksEnabled || !args.project.qaCheckEnabled) return;
+  if (!args.headSha) return;
+  if (!(await installationHasChecksWrite(args.installationId))) return;
+
+  const payload = buildQaNotApplicablePayload({ label: args.label });
+  const ref = repoRef(args.repoFullName, args.installationId);
+  try {
+    // There is no `StagingBatch` behind this PR and its `PrCheck` row may not
+    // exist yet, so there is nowhere to remember the run id. This publishes on
+    // every event a labelled PR emits, which without a lookup would stack a
+    // duplicate run under one name on the same commit each time. The read is
+    // one call on a path only labelled PRs reach.
+    const existingId = await findCheckRunIdByName(
+      ref,
+      args.headSha,
+      QA_CHECK_RUN_NAME,
+    );
+    await upsertCheckRun(
+      ref,
+      {
+        headSha: args.headSha,
+        name: QA_CHECK_RUN_NAME,
+        status: payload.status,
+        conclusion: payload.conclusion,
+        title: payload.title,
+        summary: payload.summary,
+      },
+      existingId,
+    );
+  } catch (e) {
+    logger.warn(
+      { err: e, repoFullName: args.repoFullName, headSha: args.headSha },
+      "publishQaNotApplicableCheck failed",
+    );
   }
 }

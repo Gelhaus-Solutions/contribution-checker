@@ -3,6 +3,7 @@ import {
   isAggregatePr,
   repointRequestsRevert,
   stagingIgnored,
+  stagingQaExemptLabel,
   stagingRetargetSkipReason,
 } from "@/lib/github/staging";
 
@@ -235,5 +236,69 @@ describe("repointRequestsRevert", () => {
         revertArgs({ prLabels: ["staging:repoint", "staging:ignore"] }),
       ),
     ).toBe(false);
+  });
+});
+
+describe("stagingQaExemptLabel", () => {
+  function qaArgs(
+    overrides: Partial<Parameters<typeof stagingQaExemptLabel>[0]> = {},
+  ) {
+    return {
+      prLabels: ["staging:ignore"],
+      baseRef: "main",
+      defaultBranch: "main",
+      stagingBranch: "staging",
+      ignoreLabel: "staging:ignore",
+      repointLabel: "staging:repoint",
+      ...overrides,
+    };
+  }
+
+  // The whole point: the QA check only ever publishes on the aggregate PR, so
+  // a PR that will never be routed into a batch is blocked forever on a status
+  // nothing is going to send.
+  it("exempts an ignored PR sitting on the default branch", () => {
+    expect(stagingQaExemptLabel(qaArgs())).toBe("staging:ignore");
+  });
+
+  it("exempts a repointed PR sitting on the default branch", () => {
+    expect(
+      stagingQaExemptLabel(qaArgs({ prLabels: ["staging:repoint"] })),
+    ).toBe("staging:repoint");
+  });
+
+  it("names the ignore label when a PR carries both", () => {
+    expect(
+      stagingQaExemptLabel(
+        qaArgs({ prLabels: ["staging:repoint", "staging:ignore"] }),
+      ),
+    ).toBe("staging:ignore");
+  });
+
+  it("exempts nothing without one of the two labels", () => {
+    expect(stagingQaExemptLabel(qaArgs({ prLabels: [] }))).toBeNull();
+    expect(
+      stagingQaExemptLabel(qaArgs({ prLabels: ["staging:ignore-later"] })),
+    ).toBeNull();
+  });
+
+  // The labels govern routing, not membership. A PR merged from staging ships
+  // in the batch whatever it is labelled afterwards, so QA very much applies.
+  it("exempts nothing once the PR is on staging", () => {
+    expect(stagingQaExemptLabel(qaArgs({ baseRef: "staging" }))).toBeNull();
+  });
+
+  it("exempts nothing on a base that is neither staging nor the default", () => {
+    expect(stagingQaExemptLabel(qaArgs({ baseRef: "release/2.0" }))).toBeNull();
+  });
+
+  // Staging configured as the default branch leaves no off-the-batch state for
+  // a label to describe: every PR is on staging.
+  it("exempts nothing when staging IS the default branch", () => {
+    expect(
+      stagingQaExemptLabel(
+        qaArgs({ stagingBranch: "main", defaultBranch: "main" }),
+      ),
+    ).toBeNull();
   });
 });

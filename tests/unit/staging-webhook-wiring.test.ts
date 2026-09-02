@@ -14,6 +14,7 @@ const signalStagingBatch = vi.fn();
 const decideForPR = vi.fn();
 const publishDecisionCheck = vi.fn();
 const publishClaCheck = vi.fn();
+const publishQaNotApplicableCheck = vi.fn();
 
 vi.mock("@/lib/db", () => ({
   prisma: {
@@ -63,6 +64,8 @@ vi.mock("@/lib/temporal/start", () => ({
 vi.mock("@/lib/github/check-run", () => ({
   publishDecisionCheck: (...a: unknown[]) => publishDecisionCheck(...a),
   publishClaCheck: (...a: unknown[]) => publishClaCheck(...a),
+  publishQaNotApplicableCheck: (...a: unknown[]) =>
+    publishQaNotApplicableCheck(...a),
 }));
 
 vi.mock("@/lib/applications/decide-pr", async () => {
@@ -169,11 +172,13 @@ beforeEach(() => {
     decideForPR,
     publishDecisionCheck,
     publishClaCheck,
+    publishQaNotApplicableCheck,
   ]) {
     fn.mockReset();
   }
   publishDecisionCheck.mockResolvedValue(undefined);
   publishClaCheck.mockResolvedValue(undefined);
+  publishQaNotApplicableCheck.mockResolvedValue(undefined);
   repoFindUnique.mockResolvedValue({ ...REPO });
   repoUpdate.mockResolvedValue({});
   prCheckFindUnique.mockResolvedValue(null);
@@ -678,5 +683,106 @@ describe("PR close handling", () => {
     );
     expect(signalStagingBatch).not.toHaveBeenCalled();
     expect(res).toEqual({ terminal: true });
+  });
+});
+
+/**
+ * `contribution-checker / qa` reports on a batch and publishes on the aggregate
+ * PR's head alone. A PR held on the default branch by one of the two escape
+ * hatches will never be in a batch, so nothing would ever report it, and a
+ * maintainer who requires the check there has blocked it on a status that is
+ * never coming. Same rule as the aggregate PR's gate checks.
+ */
+describe("QA check on PRs the staging labels keep off the batch", () => {
+  /** QA on, and the project publishes the check. */
+  const QA_REPO = {
+    ...REPO,
+    project: {
+      ...PROJECT,
+      stagingQaEnabled: true,
+      checksEnabled: true,
+      qaCheckEnabled: true,
+    },
+  };
+
+  /** A labelled PR still based on the default branch. */
+  function labelledOnDefault(number: number, label: string) {
+    const p = payload();
+    return {
+      ...p,
+      pull_request: { ...p.pull_request, number, labels: [{ name: label }] },
+    };
+  }
+
+  it("passes the QA check for an ignored PR on the default branch", async () => {
+    repoFindUnique.mockResolvedValue({ ...QA_REPO });
+    await handlePullRequestEvent(
+      labelledOnDefault(60, "staging:ignore") as never,
+    );
+    expect(publishQaNotApplicableCheck).toHaveBeenCalledWith(
+      expect.objectContaining({ headSha: "abc", label: "staging:ignore" }),
+    );
+  });
+
+  it("passes the QA check for a repointed PR on the default branch", async () => {
+    repoFindUnique.mockResolvedValue({ ...QA_REPO });
+    await handlePullRequestEvent(
+      labelledOnDefault(61, "staging:repoint") as never,
+    );
+    expect(publishQaNotApplicableCheck).toHaveBeenCalledWith(
+      expect.objectContaining({ label: "staging:repoint" }),
+    );
+  });
+
+  // The labels govern routing, not membership: this PR ships in the batch, so
+  // the real QA verdict is the one that has to speak for it.
+  it("says nothing for an ignored PR already sitting on staging", async () => {
+    repoFindUnique.mockResolvedValue({ ...QA_REPO });
+    await handlePullRequestEvent(labeled(62, "staging:ignore") as never);
+    expect(publishQaNotApplicableCheck).not.toHaveBeenCalled();
+  });
+
+  // The repoint label moves the PR off staging in the same pass, so the answer
+  // has to be asked against the base it lands on, not the one it arrived with.
+  it("passes the QA check once a repoint lands the PR back on the default branch", async () => {
+    repoFindUnique.mockResolvedValue({ ...QA_REPO });
+    retargetFindUnique.mockResolvedValue({ fromBase: "main" });
+    await handlePullRequestEvent(labeled(63, "staging:repoint") as never);
+    expect(setPullRequestBase).toHaveBeenCalledWith(
+      expect.anything(),
+      63,
+      "main",
+    );
+    expect(publishQaNotApplicableCheck).toHaveBeenCalledWith(
+      expect.objectContaining({ label: "staging:repoint" }),
+    );
+  });
+
+  it("says nothing for an unlabelled PR", async () => {
+    repoFindUnique.mockResolvedValue({ ...QA_REPO });
+    await handlePullRequestEvent(prNumbered(64) as never);
+    expect(publishQaNotApplicableCheck).not.toHaveBeenCalled();
+  });
+
+  // A repo that records no QA publishes no QA check, so there is nothing for
+  // an exemption to unblock and a brand-new context on ordinary PRs would be
+  // the only effect.
+  it("says nothing when the repo does not run QA at all", async () => {
+    repoFindUnique.mockResolvedValue({ ...REPO });
+    await handlePullRequestEvent(
+      labelledOnDefault(65, "staging:ignore") as never,
+    );
+    expect(publishQaNotApplicableCheck).not.toHaveBeenCalled();
+  });
+
+  // A stray label on the release PR must never turn its real QA verdict into
+  // a pass: that check is the one thing standing between an unverified batch
+  // and production.
+  it("never exempts the aggregate PR, however it is labelled", async () => {
+    repoFindUnique.mockResolvedValue({ ...QA_REPO, stagingBatchPrNumber: 66 });
+    await handlePullRequestEvent(
+      labelledOnDefault(66, "staging:ignore") as never,
+    );
+    expect(publishQaNotApplicableCheck).not.toHaveBeenCalled();
   });
 });

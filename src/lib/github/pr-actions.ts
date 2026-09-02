@@ -933,6 +933,48 @@ export async function upsertCheckRun(
   }
 }
 
+/**
+ * The id of the check run standing on `headSha` under `name`, or null.
+ *
+ * For a check that has nowhere to store its run id. `PrCheck.checkRunId` and
+ * `StagingBatch.qaCheckRunId` exist so the common paths never pay for this
+ * call; a check published against a PR that has neither row would otherwise
+ * POST a fresh run on every webhook event and stack duplicates under one name
+ * on the same commit.
+ *
+ * GitHub defaults this endpoint to `filter=latest`, which returns the most
+ * recent run per name, so the first hit is the one to update. Failures return
+ * null: creating a duplicate run is a worse outcome than no check at all, but
+ * only just, and the caller is publishing either way.
+ */
+export async function findCheckRunIdByName(
+  ref: RepoRef,
+  headSha: string,
+  name: string,
+): Promise<string | null> {
+  const octokit = await getInstallationOctokit(ref.installationId);
+  try {
+    const res = await octokit.request(
+      "GET /repos/{owner}/{repo}/commits/{ref}/check-runs",
+      {
+        owner: ref.owner,
+        repo: ref.repo,
+        ref: headSha,
+        check_name: name,
+        per_page: 1,
+      },
+    );
+    recordGithubMetric("check_run.list", "ok", ref);
+    const runs =
+      (res.data as { check_runs?: { id: number | string }[] }).check_runs ?? [];
+    return runs.length > 0 ? String(runs[0].id) : null;
+  } catch (e) {
+    recordGithubMetric("check_run.list", "error", ref, statusOf(e));
+    logger.warn({ err: e, ref, headSha, name }, "check-run lookup failed");
+    return null;
+  }
+}
+
 const permsCache = new Map<
   number,
   { value: Record<string, string>; expiresAt: number }
