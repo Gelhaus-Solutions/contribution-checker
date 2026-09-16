@@ -432,11 +432,19 @@ Path guard (`src/lib/guard/`, App mode only):
   failed reviews read is left `null`, not treated as "nobody approved": absence
   of evidence is not evidence, and `evaluateGuard` falls back to the stored
   sign-off.
-- **The blocked label and the comment are one transition, tracked on the row.**
-  `PrCheck.guardLabelApplied` is what keeps the steady state free, the same
-  bargain `qaLabelApplied` makes: a PR green for a week pays nothing per push.
-  The comment carries an HTML marker and is edited in place (`upsertPrComment`
-  diffs the body first), never reposted, and is deleted once the check clears.
+- **The guard posts no PR comment, deliberately.** Everything a contributor
+  needs (which paths tripped it, and the two ways to clear it) is in the check's
+  own summary, and a bot paragraph re-stating that on every PR is noise in a
+  thread people still have to read. The blocked marker label is the only thing
+  written to the PR, and it is compared against `PrCheck.guardLabelApplied`
+  before either call, which is what keeps the steady state free: reconciles run
+  on every push, and a PR green for a week must pay nothing. Same bargain
+  `qaLabelApplied` makes.
+- **The approver list renders with "or", not "and"** (`formatList` takes the
+  conjunction). Any one approver clears the check; joining them with "and"
+  describes a rule that needs all of them, which is heavier than what is
+  enforced and sends a contributor chasing signatures they do not need. The
+  people who *did* sign off are a real "and" and keep it.
 - **A merge group needs its own answer on both protected branches**, exactly as
   the QA check does. `publishMergeGroupGuardCheck` reports "does not apply" for a
   group targeting anything but the default branch, and most-blocking-wins

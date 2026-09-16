@@ -22,10 +22,6 @@ export type GuardCheckPayload = {
  * who has to scroll has stopped reading. */
 const MAX_LISTED = 15;
 
-/** The HTML marker that identifies the bot's own guard comment, so it is edited
- * rather than reposted. Invisible in rendered markdown. */
-export const GUARD_COMMENT_MARKER = "<!-- contribution-checker:guard -->";
-
 export function buildGuardCheckPayload(
   verdict: GuardVerdict,
 ): GuardCheckPayload {
@@ -144,40 +140,6 @@ export function buildMergeGroupGuardPayload(
   }
 }
 
-/**
- * The comment, or null when there is nothing to say.
- *
- * Only a blocked or undecidable PR gets one. A passing guard says its piece in
- * the check and leaves the conversation alone; the caller deletes any comment it
- * previously left.
- */
-export function buildGuardComment(verdict: GuardVerdict): string | null {
-  if (verdict.kind === "undecidable") {
-    return [
-      GUARD_COMMENT_MARKER,
-      "### Guarded paths: sign-off required",
-      "",
-      "This PR changes more files than the guard can read in one pass, so it cannot rule out a guarded path among them. It fails closed.",
-      "",
-      "A review approval from a maintainer clears it.",
-    ].join("\n");
-  }
-  if (verdict.kind !== "blocked") return null;
-
-  return [
-    GUARD_COMMENT_MARKER,
-    "### Guarded paths: sign-off required",
-    "",
-    `This PR changes ${countPhrase(verdict.hits).toLowerCase()} that a maintainer has to sign off before it can merge:`,
-    "",
-    ...renderHitLines(verdict.hits),
-    "",
-    ...renderUnlockInstructions(verdict),
-    "",
-    "Nothing is wrong with the change. The check is asking for a second pair of eyes on these files specifically.",
-  ].join("\n");
-}
-
 // --- pieces ------------------------------------------------------------------
 
 function countPhrase(hits: GuardHit[]): string {
@@ -216,7 +178,13 @@ function renderUnlockInstructions(
 ): string[] {
   const reviewLine =
     verdict.approvers.length > 0
-      ? `- An approving review from ${formatList(verdict.approvers.map((a) => `\`${a}\``))}`
+      ? // "or", never "and": any ONE of them clears it. Listing approvers with
+        // "and" reads as needing all of them, which is a different and much
+        // heavier rule than the one being enforced.
+        `- An approving review from ${formatList(
+          verdict.approvers.map((a) => `\`${a}\``),
+          "or",
+        )}`
       : "- An approving review from a configured approver (this project has none set yet, so only the label can clear it)";
   const labelLine = `- The \`${verdict.unlockLabel}\` label, added by one of those people`;
 
@@ -248,9 +216,14 @@ function describeUnlocksLong(unlocks: GuardUnlock[]): string {
   return formatList(parts) || "a maintainer signed off";
 }
 
-/** "a", "a and b", "a, b and c". */
-function formatList(items: string[]): string {
+/** "a", "a and b", "a, b and c". The conjunction is a parameter because the two
+ * lists here mean opposite things: the people who DID sign off are an "and",
+ * and the people who COULD are an "or". */
+function formatList(
+  items: string[],
+  conjunction: "and" | "or" = "and",
+): string {
   if (items.length === 0) return "";
   if (items.length === 1) return items[0];
-  return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
+  return `${items.slice(0, -1).join(", ")} ${conjunction} ${items[items.length - 1]}`;
 }

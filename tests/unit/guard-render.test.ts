@@ -1,9 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildGuardCheckPayload,
-  buildGuardComment,
   buildMergeGroupGuardPayload,
-  GUARD_COMMENT_MARKER,
 } from "@/lib/guard/render";
 import type { GuardVerdict } from "@/lib/guard/evaluate";
 
@@ -105,47 +103,6 @@ describe("buildGuardCheckPayload", () => {
   });
 });
 
-describe("buildGuardComment", () => {
-  it("carries the marker so it is edited rather than reposted", () => {
-    const body = buildGuardComment({
-      kind: "blocked",
-      hits: [hit("a.sql")],
-      missing: "any",
-      approvers: ["alice"],
-      unlockLabel: "guard:approved",
-    });
-    expect(body).toContain(GUARD_COMMENT_MARKER);
-  });
-
-  // A passing guard says its piece in the check and leaves the thread alone.
-  it.each([
-    ["clear", { kind: "clear" } as GuardVerdict],
-    [
-      "unlocked",
-      {
-        kind: "unlocked",
-        hits: [hit("a.sql")],
-        unlocks: [{ source: "review", by: "alice" }],
-      } as GuardVerdict,
-    ],
-    [
-      "not applicable",
-      {
-        kind: "not_applicable",
-        reason: { kind: "base", baseRef: "staging", defaultBranch: "main" },
-      } as GuardVerdict,
-    ],
-  ])("writes no comment when %s", (_label, verdict) => {
-    expect(buildGuardComment(verdict)).toBeNull();
-  });
-
-  it("writes one for an unreadable diff", () => {
-    expect(
-      buildGuardComment({ kind: "undecidable", reason: "diff_too_large" }),
-    ).toContain(GUARD_COMMENT_MARKER);
-  });
-});
-
 describe("buildMergeGroupGuardPayload", () => {
   it("a group onto another branch → success", () => {
     const p = buildMergeGroupGuardPayload({
@@ -177,5 +134,46 @@ describe("buildMergeGroupGuardPayload", () => {
     expect(buildMergeGroupGuardPayload({ kind: "clear" }).conclusion).toBe(
       "success",
     );
+  });
+});
+
+describe("the approver list", () => {
+  // Any ONE of them clears it. Joining with "and" describes a rule that needs
+  // all of them, which is heavier than what is actually enforced and would send
+  // a contributor chasing signatures they do not need.
+  it("joins approvers with 'or', never 'and'", () => {
+    const p = buildGuardCheckPayload({
+      kind: "blocked",
+      hits: [hit("a.sql")],
+      missing: "any",
+      approvers: ["nevo-david", "egelhaus"],
+      unlockLabel: "guard:approved",
+    });
+    expect(p.summary).toContain("`nevo-david` or `egelhaus`");
+    expect(p.summary).not.toContain("`nevo-david` and `egelhaus`");
+  });
+
+  it("uses commas then 'or' for three or more", () => {
+    const p = buildGuardCheckPayload({
+      kind: "blocked",
+      hits: [hit("a.sql")],
+      missing: "any",
+      approvers: ["a", "b", "c"],
+      unlockLabel: "guard:approved",
+    });
+    expect(p.summary).toContain("`a`, `b` or `c`");
+  });
+
+  // The people who DID sign off are a genuine "and": both of them really did.
+  it("still joins actual signatories with 'and'", () => {
+    const p = buildGuardCheckPayload({
+      kind: "unlocked",
+      hits: [hit("a.sql")],
+      unlocks: [
+        { source: "review", by: "alice" },
+        { source: "label", by: "bob" },
+      ],
+    });
+    expect(p.title).toContain("alice and bob");
   });
 });

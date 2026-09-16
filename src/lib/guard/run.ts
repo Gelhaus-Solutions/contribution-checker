@@ -2,9 +2,14 @@
  * The path guard's one impure entry point.
  *
  * Gathers the inputs, hands them to `evaluateGuard`, and applies the verdict:
- * the Check Run, the blocked marker label, the comment and the stored sign-off.
- * Every decision about what blocks a PR is in `evaluate.ts`; this file is the
+ * the Check Run, the blocked marker label and the stored sign-off. Every
+ * decision about what blocks a PR is in `evaluate.ts`; this file is the
  * plumbing around it.
+ *
+ * It deliberately posts NO pull request comment. The check's own summary already
+ * carries the guarded paths and the way to clear them, and a bot paragraph
+ * re-stating that on every contributor's PR is noise in a thread people still
+ * have to read.
  *
  * Never throws. A guard that crashes the webhook handler would have GitHub
  * retrying the delivery forever, and the house rule is that PR side effects are
@@ -32,13 +37,11 @@ import { recordAudit } from "@/lib/audit";
 import { matchesAnyPattern } from "@/lib/applications/decide-pr";
 import {
   addLabel,
-  deletePrCommentIfPresent,
   ensureLabel,
   listPullRequestFiles,
   listPullRequestReviews,
   removeLabelIfPresent,
   repoRef,
-  upsertPrComment,
   type PrFileSummary,
 } from "@/lib/github/pr-actions";
 import { publishGuardCheck } from "@/lib/github/check-run";
@@ -56,11 +59,7 @@ import {
   unlockCovers,
   type GuardHit,
 } from "@/lib/guard/match";
-import {
-  buildGuardCheckPayload,
-  buildGuardComment,
-  GUARD_COMMENT_MARKER,
-} from "@/lib/guard/render";
+import { buildGuardCheckPayload } from "@/lib/guard/render";
 
 /**
  * How many pages of the file list to read before giving up and failing closed.
@@ -274,12 +273,12 @@ async function runGuardInner(args: {
     approvedFiles,
   });
 
-  await reconcileBlockedMarkers({
+  await reconcileBlockedLabel({
     ref,
     prNumber: args.prNumber,
     prCheckId: prCheck?.id ?? null,
     label: cfg.blockedLabel,
-    verdict,
+    blocked: !guardPasses(verdict),
     wasBlocked: prCheck?.guardLabelApplied ?? false,
   });
 
@@ -396,70 +395,47 @@ async function persistUnlock(args: {
 }
 
 /**
- * Put the blocked label and the explanatory comment on, or take them off.
+ * Put the blocked marker label on, or take it off.
  *
- * Both are driven by one tracked flag (`PrCheck.guardLabelApplied`) because
- * they go on and come off together, and because the flag is what keeps the
- * steady state free. Reconciles run on every push: a PR that has been green for
- * a week must not pay a "remove the label" and a "is there a comment to delete"
- * call on each one. Same bargain `qaLabelApplied` makes on the QA board.
- *
- * A blocked PR does pay the comment upsert every time, and should: the paths it
- * lists change as the diff does, and `upsertPrComment` compares the body before
- * writing, so an unchanged comment costs a read and produces no notification.
- * Blocked is the small set.
+ * Compared against the tracked flag (`PrCheck.guardLabelApplied`) first, which
+ * is what keeps the steady state free: reconciles run on every push, and a PR
+ * that has been green for a week must not pay a "remove the label" call on each
+ * one. Same bargain `qaLabelApplied` makes on the QA board.
  *
  * A failed call leaves the flag where it was, so the next pass retries.
  */
-async function reconcileBlockedMarkers(args: {
+async function reconcileBlockedLabel(args: {
   ref: ReturnType<typeof repoRef>;
   prNumber: number;
   prCheckId: string | null;
   label: string;
-  verdict: GuardVerdict;
+  blocked: boolean;
   wasBlocked: boolean;
 }): Promise<void> {
-  const blocked = !guardPasses(args.verdict);
-  if (!blocked && !args.wasBlocked) return;
+  if (args.blocked === args.wasBlocked) return;
 
   try {
-    if (blocked) {
-      const body = buildGuardComment(args.verdict);
-      if (body) {
-        await upsertPrComment(
-          args.ref,
-          args.prNumber,
-          GUARD_COMMENT_MARKER,
-          body,
-        );
-      }
-      if (!args.wasBlocked) {
-        await ensureLabel(
-          args.ref,
-          args.label,
-          "b60205",
-          "Touches a guarded path and is awaiting sign-off",
-        );
-        await addLabel(args.ref, args.prNumber, args.label);
-      }
+    if (args.blocked) {
+      await ensureLabel(
+        args.ref,
+        args.label,
+        "b60205",
+        "Touches a guarded path and is awaiting sign-off",
+      );
+      await addLabel(args.ref, args.prNumber, args.label);
     } else {
       await removeLabelIfPresent(args.ref, args.prNumber, args.label);
-      await deletePrCommentIfPresent(
-        args.ref,
-        args.prNumber,
-        GUARD_COMMENT_MARKER,
-      );
     }
     if (args.prCheckId) {
       await prisma.prCheck.update({
         where: { id: args.prCheckId },
-        data: { guardLabelApplied: blocked },
+        data: { guardLabelApplied: args.blocked },
       });
     }
   } catch (e) {
     logger.warn(
       { err: e, prNumber: args.prNumber, label: args.label },
-      "guard: blocked marker reconcile failed",
+      "guard: blocked label reconcile failed",
     );
   }
 }

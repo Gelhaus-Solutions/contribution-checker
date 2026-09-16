@@ -700,7 +700,10 @@ export async function mergeBranch(
   }
 }
 
-const defaultBranchCache = new Map<string, { value: string; expiresAt: number }>();
+const defaultBranchCache = new Map<
+  string,
+  { value: string; expiresAt: number }
+>();
 const DEFAULT_BRANCH_TTL_MS = 5 * 60 * 1000;
 
 /**
@@ -890,114 +893,6 @@ export async function prHasCommentContaining(
     logger.warn({ err: e, prNumber }, "prHasCommentContaining failed");
     return false;
   }
-}
-
-/**
- * One comment on a PR, created once and edited afterwards.
- *
- * `commentOnPr` only ever appends, which is right for the gate's one-shot
- * "here is why this PR was closed". It is wrong for anything that re-evaluates
- * on every push: the path guard would leave a fresh copy of the same paragraph
- * on the PR each time somebody pushed, and notify everyone watching for it.
- *
- * The comment is found by an invisible HTML marker rather than by author, so it
- * works without knowing the App's own bot login, and the body is compared
- * before it is written: an unchanged comment costs one read and no edit, no
- * notification and no entry in the PR's timeline.
- *
- * Returns the comment id, or null when nothing was written. Best-effort like
- * every other side effect here; a failure is logged and swallowed.
- */
-export async function upsertPrComment(
-  ref: RepoRef,
-  prNumber: number,
-  marker: string,
-  body: string,
-): Promise<string | null> {
-  try {
-    const existing = await findMarkedComment(ref, prNumber, marker);
-    const octokit = await getInstallationOctokit(ref.installationId);
-    if (existing) {
-      if (existing.body === body) return existing.id;
-      const res = await octokit.request(
-        "PATCH /repos/{owner}/{repo}/issues/comments/{comment_id}",
-        {
-          owner: ref.owner,
-          repo: ref.repo,
-          comment_id: Number(existing.id),
-          body,
-        },
-      );
-      recordGithubMetric("comment.update", "ok", ref, res.status);
-      return existing.id;
-    }
-    const res = await octokit.request(
-      "POST /repos/{owner}/{repo}/issues/{issue_number}/comments",
-      { owner: ref.owner, repo: ref.repo, issue_number: prNumber, body },
-    );
-    recordGithubMetric("comment.create", "ok", ref, res.status);
-    return String((res.data as { id: number }).id);
-  } catch (e) {
-    recordGithubMetric("comment.upsert", "error", ref, statusOf(e));
-    logger.warn({ err: e, prNumber }, "upsertPrComment failed");
-    return null;
-  }
-}
-
-/**
- * Remove a marked comment if it is there.
- *
- * Deleting rather than editing to "never mind" is deliberate: once the thing the
- * comment asked for has happened, the comment is noise in a thread people still
- * have to read. A 404 means somebody deleted it by hand, which is the outcome
- * we wanted anyway.
- */
-export async function deletePrCommentIfPresent(
-  ref: RepoRef,
-  prNumber: number,
-  marker: string,
-): Promise<void> {
-  try {
-    const existing = await findMarkedComment(ref, prNumber, marker);
-    if (!existing) return;
-    const octokit = await getInstallationOctokit(ref.installationId);
-    await octokit
-      .request("DELETE /repos/{owner}/{repo}/issues/comments/{comment_id}", {
-        owner: ref.owner,
-        repo: ref.repo,
-        comment_id: Number(existing.id),
-      })
-      .catch((e: unknown) => {
-        if (statusOf(e) !== 404) throw e;
-      });
-    recordGithubMetric("comment.delete", "ok", ref);
-  } catch (e) {
-    recordGithubMetric("comment.delete", "error", ref, statusOf(e));
-    logger.warn({ err: e, prNumber }, "deletePrCommentIfPresent failed");
-  }
-}
-
-/** Newest marked comment wins, so a duplicate left behind by an older version
- * does not pin the bot to editing the stale one forever. */
-async function findMarkedComment(
-  ref: RepoRef,
-  prNumber: number,
-  marker: string,
-): Promise<{ id: string; body: string } | null> {
-  const octokit = await getInstallationOctokit(ref.installationId);
-  const res = await octokit.request(
-    "GET /repos/{owner}/{repo}/issues/{issue_number}/comments",
-    { owner: ref.owner, repo: ref.repo, issue_number: prNumber, per_page: 100 },
-  );
-  recordGithubMetric("list_comments", "ok", ref, res.status);
-  const comments = res.data as Array<{ id: number; body?: string | null }>;
-  for (let i = comments.length - 1; i >= 0; i--) {
-    const c = comments[i];
-    if (typeof c.body === "string" && c.body.includes(marker)) {
-      return { id: String(c.id), body: c.body };
-    }
-  }
-  return null;
 }
 
 // ----- Check Runs -----
@@ -1215,7 +1110,10 @@ async function installationPermissions(
     return value;
   } catch (e) {
     logger.warn({ err: e, installationId }, "installation-perms probe failed");
-    permsCache.set(installationId, { value: {}, expiresAt: now + PERMS_TTL_MS });
+    permsCache.set(installationId, {
+      value: {},
+      expiresAt: now + PERMS_TTL_MS,
+    });
     return {};
   }
 }

@@ -583,7 +583,9 @@ export default async function ProjectSettings({
             <p className="text-xs text-muted-foreground">
               Neither may use the <code>contribution:</code> prefix, which the
               gate owns and strips. The blocked label is the bot&apos;s; it goes
-              on while the check is red and comes off when it clears.
+              on while the check is red and comes off when it clears. The bot
+              posts no comment on the PR: the guarded paths and the way to clear
+              them are in the check&apos;s own summary.
             </p>
 
             <p className="text-xs text-muted-foreground">
