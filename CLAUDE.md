@@ -374,6 +374,93 @@ External QA boards (`src/lib/qa/board/`, Notion and Trello, two-way):
   card between columns is what people actually do on a QA board. `targetId` is
   the board id and the status map holds list names, which are created on demand.
 
+Path guard (`src/lib/guard/`, App mode only):
+- A fourth Check Run, `contribution-checker / guard`, answering the one question
+  branch protection cannot ask: not "has this PR been reviewed" but "has the
+  thing it touches been signed off, by someone we named". It fails when a PR
+  **into the default branch** changes a guarded path, and passes once a
+  configured approver has approved the PR or added the unlock label
+  (`Project.guardUnlockMode` picks either-or-both). Off by default.
+- **Where it does not apply, it publishes a pass.** A PR onto staging, a project
+  guarding nothing in a merge group, a PR the guard has no say over: all get an
+  explicit green. Same rule as `publishAggregatePrChecks` and
+  `publishQaNotApplicableCheck`, and the same reason: a required check nothing
+  will ever report on blocks a PR forever. The fourth state is still "no check
+  at all", when `guardEnabled` is false or the project has ticked no rule and
+  written no glob, because a green check on every PR of a project that guards
+  nothing is noise, not information.
+- **The aggregate staging PR is guarded.** It is exempt from the *contributor*
+  gate because it has no application, and that exemption deliberately does not
+  extend here: it is the one PR that merges every migration in a batch into the
+  default branch, which is exactly where the sign-off is worth having.
+- **A sign-off is a statement about content, not about paths.**
+  `PrCheck.guardApprovedFiles` stores `{ path: blobSha }` for the guarded files
+  that were approved, and the unlock holds only while every currently-guarded
+  file is in it with the same blob. That makes both directions exact: a push
+  touching only ordinary files keeps the unlock, one character in a guarded file
+  loses it, and a rebase that leaves content identical does not re-block a PR
+  nobody changed. A path list alone could not tell the last two apart.
+- **A diff we could not read whole fails closed.** `listPullRequestFiles` is
+  asked for 3 pages (300 files) and anything beyond reports `undecidable` ->
+  failure, never "looks fine". Passing because the guard stopped looking is the
+  one failure mode it cannot have. Consequence to expect: a release PR with more
+  than 300 changed files always needs a sign-off.
+- **The label is trusted because of who applied it, never because it is there.**
+  `handlePullRequestEvent` records the unlock from `payload.sender` on the one
+  `labeled` event that carried it, and removes the label again when the sender is
+  not an approver (`guard.label_rejected`). Every later event reads the stored
+  record. Re-deriving trust from label presence would hand an approver's
+  authority to anyone who got the name onto the PR by another route.
+- **`pull_request_review` is a new subscription, and the feature does not work
+  without it.** It is the only event that says an approval arrived; without it
+  approving a PR to clear the guard does nothing until the next push, which reads
+  as the check being broken. It routes through `dispatchPullRequestEvent` like a
+  `pull_request` event, because that keys the contributor gate on
+  `pull_request.user.id` (the PR's author, which the review payload also
+  carries), so a review and a push land on the same per-PR entity and cannot be
+  processed concurrently. `convergePrEvent` branches on `env.eventName` and
+  returns `terminal: false`: a review never ends a PR.
+- **The guard never re-runs the gate, and the gate never runs the guard.** A
+  review says nothing about whether the author has an application, and the
+  unlock label is a maintainer's opinion about files. Both are routing-free and
+  gate-free, the same argument the staging labels already make.
+- **Order of operations is the cost model.** Config and base are database-only;
+  the file list is one call, paid by guard-enabled projects on default-branch
+  PRs; the reviews call happens only when a guarded file was actually touched
+  *and* the stored sign-off does not already cover it. An ordinary contribution
+  costs one request and a PR sitting green on a prior approval costs one. A
+  failed reviews read is left `null`, not treated as "nobody approved": absence
+  of evidence is not evidence, and `evaluateGuard` falls back to the stored
+  sign-off.
+- **The blocked label and the comment are one transition, tracked on the row.**
+  `PrCheck.guardLabelApplied` is what keeps the steady state free, the same
+  bargain `qaLabelApplied` makes: a PR green for a week pays nothing per push.
+  The comment carries an HTML marker and is edited in place (`upsertPrComment`
+  diffs the body first), never reposted, and is deleted once the check clears.
+- **A merge group needs its own answer on both protected branches**, exactly as
+  the QA check does. `publishMergeGroupGuardCheck` reports "does not apply" for a
+  group targeting anything but the default branch, and most-blocking-wins
+  otherwise, read from `guardLabelApplied` rather than re-derived (two calls per
+  queue entry to recompute an answer we hold). It publishes standalone and stores
+  **no** run id: `guardCheckRunId`/`guardCheckSha` belong to the PR head.
+- `Project.guardRules` parses **permissive-open** (unreadable means every rule
+  on) while `guardGlobs` and `guardApprovers` parse permissive-closed. Both point
+  the same way: a guard must not silently stop guarding, and a corrupt approver
+  list must not hand unlocks to logins nobody configured.
+- The two labels live outside the `contribution:` namespace for the reason the
+  staging labels do. All ten label columns are now checked for collisions through
+  `assertLabelsUnique` (`src/lib/labels.ts`) rather than an array literal per
+  form, so adding a label column is one edit instead of four.
+
+Guard modules:
+- `src/lib/github/file-groups.ts`: path predicates shared with the staging digest
+- `src/lib/guard/rules.ts`: the `GUARD_RULES` catalog the settings UI renders
+- `src/lib/guard/config.ts`: globs, approvers, `resolveGuardConfig`
+- `src/lib/guard/match.ts`: glob matching and the blob-SHA sign-off snapshot
+- `src/lib/guard/evaluate.ts`: the pure verdict
+- `src/lib/guard/render.ts`: check payloads and the PR comment
+- `src/lib/guard/run.ts`: the one impure orchestrator
+
 GitHub side effects (all Octokit calls):
 - `src/lib/github/pr-actions.ts`: close/reopen, labels, comments, Check Runs
 - `src/lib/github/check-run.ts`: `buildDecisionCheckPayload` (pure mapping)
@@ -632,6 +719,17 @@ observability. Do not sample it down without asking.
    `PrQuality.signalsRaw` after the next run.
 4. No DB migration needed.
 
+## Adding a new guarded path rule
+
+1. Add `{ id, label, hint, matches }` to `GUARD_RULES` in
+   `src/lib/guard/rules.ts`. If the predicate is one the staging digest also
+   wants, put it in `src/lib/github/file-groups.ts` instead and pull it in from
+   both.
+2. The settings UI auto-renders the new checkbox. No DB migration: the project's
+   choice is a JSON array of ids in `Project.guardRules`.
+3. Retiring a rule is deleting it from the catalog. `parseGuardRules` drops
+   unknown ids, so no data migration is needed there either.
+
 ## Operational runbook
 
 ```bash
@@ -653,6 +751,9 @@ DBs:
 Manual GitHub App setup is documented in-app at `/admin/setup`. The required
 permissions are listed there; `checks:write` is required for status checks
 and `contents:read` is required for PR Quality scoring (file diff fetching).
+The subscribed events are Pull request, Push, Installation target, Installation
+repositories, Merge group and Pull request review; the last is what makes an
+approval clear the path guard without waiting for the PR's next push.
 
 ## Don'ts
 
@@ -679,6 +780,10 @@ and `contents:read` is required for PR Quality scoring (file diff fetching).
 - Staging routing is App mode only. CI mode (`src/lib/ci/check-pr-core.ts` and
   the generated workflow YAML) neither retargets nor maintains a batch PR. QA
   rides on the batch, so it is App mode only for the same reason.
+- The path guard is App mode only, for a different reason: it needs the reviews
+  API and somewhere to store the sign-off snapshot, and the OIDC path has
+  neither. CI-mode repos publish no `contribution-checker / guard` at all, so
+  requiring it in branch protection there would block every PR.
 - QA verdicts are recorded on the dashboard or on a linked Notion/Trello board.
   There is deliberately no PR-body checkbox or `/qa` comment surface: the
   aggregate PR's `pull_request.edited` body changes are short-circuited in

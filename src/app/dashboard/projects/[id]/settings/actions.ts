@@ -5,11 +5,19 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
 import { requireProjectRole } from "@/lib/authz";
 import { recordAudit } from "@/lib/audit";
+import { assertLabelsUnique } from "@/lib/labels";
 import { slugSchema } from "@/lib/slug";
 import { enqueueProjectWebhook } from "@/lib/notifications/webhooks";
 import { reGateProjectPrs } from "@/lib/temporal/start";
 import { ALL_AI_TASKS } from "@/lib/ai/registry";
 import { serializeAiConfig } from "@/lib/ai/config";
+import { ALL_GUARD_RULE_IDS, serializeGuardRules } from "@/lib/guard/rules";
+import {
+  parseGuardApproversInput,
+  parseGuardGlobsInput,
+  serializeGuardApprovers,
+  serializeGuardGlobs,
+} from "@/lib/guard/config";
 import {
   assertSafeOutboundUrl,
   UnsafeOutboundUrlError,
@@ -177,39 +185,17 @@ export async function updateLabelSettings(formData: FormData) {
     labelDenied: formData.get("labelDenied"),
     labelEvaluate: formData.get("labelEvaluate"),
   });
-  const labelSet = new Set([
-    parsed.labelPending,
-    parsed.labelApproved,
-    parsed.labelDenied,
-    parsed.labelEvaluate,
-  ]);
-  if (labelSet.size !== 4) {
-    throw new Error("All four labels must be unique.");
-  }
   const { session } = await requireProjectRole(parsed.projectId, "ADMIN");
 
-  // The staging labels are edited on the Staging page; guard the collision
-  // from this side too so the two forms cannot converge on one name.
-  const staging = await prisma.project.findUnique({
-    where: { id: parsed.projectId },
-    select: {
-      labelStagingBatch: true,
-      labelStagingIgnore: true,
-      labelStagingRepoint: true,
-    },
+  // Checked against every label the bot owns, not just these four: the staging,
+  // QA and guard labels are edited on other forms, and two forms converging on
+  // one name is exactly the collision that silently breaks one of them.
+  await assertLabelsUnique(parsed.projectId, {
+    labelPending: parsed.labelPending,
+    labelApproved: parsed.labelApproved,
+    labelDenied: parsed.labelDenied,
+    labelEvaluate: parsed.labelEvaluate,
   });
-  if (
-    staging &&
-    [
-      staging.labelStagingBatch,
-      staging.labelStagingIgnore,
-      staging.labelStagingRepoint,
-    ].some((l) => labelSet.has(l))
-  ) {
-    throw new Error(
-      "These labels must differ from the staging labels set on the Staging page.",
-    );
-  }
 
   await prisma.project.update({
     where: { id: parsed.projectId },
@@ -549,6 +535,122 @@ export async function updateAiSettings(formData: FormData) {
         }).filter(([, [a, b]]) => a !== b)
       ),
     },
+  });
+
+  revalidatePath(`/dashboard/projects/${parsed.projectId}/settings`);
+}
+
+/** The `contribution:` namespace belongs to the gate: setLabels strips every
+ * label in it that the gate did not just set, so a guard label placed there
+ * would survive exactly until the next converge. Same rule the staging labels
+ * are held to on the Staging page. */
+const guardLabel = z
+  .string()
+  .min(1)
+  .max(50)
+  .refine(
+    (v) => !v.startsWith("contribution:"),
+    "guard labels cannot use the contribution: prefix, which the gate owns",
+  );
+
+/** Rule ids come from a checkbox group, so the browser sends only the checked
+ * ones and an all-off form sends nothing at all. Unknown ids are rejected
+ * rather than dropped: they can only come from a hand-edited form. */
+const guardRule = z.enum(
+  ALL_GUARD_RULE_IDS as [string, ...string[]],
+);
+
+const guardSchema = z.object({
+  projectId: z.string().min(1),
+  guardEnabled: z.string().optional(),
+  guardRules: z.array(guardRule),
+  guardGlobs: z.string().max(8000),
+  guardApprovers: z.string().max(8000),
+  guardUnlockMode: z.enum(["either", "both"]),
+  labelGuardUnlock: guardLabel,
+  labelGuardBlocked: guardLabel,
+});
+
+export async function updateGuardSettings(formData: FormData) {
+  const parsed = guardSchema.parse({
+    projectId: formData.get("projectId"),
+    guardEnabled: formData.get("guardEnabled") ?? undefined,
+    guardRules: formData.getAll("guardRules"),
+    guardGlobs: formData.get("guardGlobs") ?? "",
+    guardApprovers: formData.get("guardApprovers") ?? "",
+    guardUnlockMode: formData.get("guardUnlockMode") ?? "either",
+    labelGuardUnlock: formData.get("labelGuardUnlock"),
+    labelGuardBlocked: formData.get("labelGuardBlocked"),
+  });
+  const { session } = await requireProjectRole(parsed.projectId, "ADMIN");
+
+  await assertLabelsUnique(parsed.projectId, {
+    labelGuardUnlock: parsed.labelGuardUnlock,
+    labelGuardBlocked: parsed.labelGuardBlocked,
+  });
+
+  const before = await prisma.project.findUnique({
+    where: { id: parsed.projectId },
+    select: {
+      guardEnabled: true,
+      guardRules: true,
+      guardGlobs: true,
+      guardApprovers: true,
+      guardUnlockMode: true,
+      labelGuardUnlock: true,
+      labelGuardBlocked: true,
+    },
+  });
+  if (!before) throw new Error("Project not found");
+
+  // Everything normalized through its serializer so a value written here reads
+  // back identically, which is what keeps a no-op save from looking like a
+  // change in the audit log.
+  const after = {
+    guardEnabled: !!parsed.guardEnabled,
+    guardRules: serializeGuardRules(parsed.guardRules),
+    guardGlobs: serializeGuardGlobs(parseGuardGlobsInput(parsed.guardGlobs)),
+    guardApprovers: serializeGuardApprovers(
+      parseGuardApproversInput(parsed.guardApprovers),
+    ),
+    guardUnlockMode: parsed.guardUnlockMode,
+    labelGuardUnlock: parsed.labelGuardUnlock,
+    labelGuardBlocked: parsed.labelGuardBlocked,
+  };
+
+  await prisma.project.update({
+    where: { id: parsed.projectId },
+    data: after,
+  });
+
+  await recordAudit({
+    projectId: parsed.projectId,
+    actorId: session.user.id,
+    kind: "guard.settings_changed",
+    payload: {
+      changed: Object.fromEntries(
+        Object.entries({
+          guardEnabled: [before.guardEnabled, after.guardEnabled],
+          guardRules: [before.guardRules, after.guardRules],
+          guardGlobs: [before.guardGlobs, after.guardGlobs],
+          guardApprovers: [before.guardApprovers, after.guardApprovers],
+          guardUnlockMode: [before.guardUnlockMode, after.guardUnlockMode],
+          labelGuardUnlock: [before.labelGuardUnlock, after.labelGuardUnlock],
+          labelGuardBlocked: [
+            before.labelGuardBlocked,
+            after.labelGuardBlocked,
+          ],
+        }).filter(([, [a, b]]) => a !== b),
+      ),
+    },
+  });
+
+  // A newly guarded path has to take effect on PRs that are already open, not
+  // only on the next one somebody pushes to. Same reason a bypass change
+  // re-gates: the setting describes the PRs, not the events.
+  await reGateProjectPrs({
+    projectId: parsed.projectId,
+    reason: "guard_settings_changed",
   });
 
   revalidatePath(`/dashboard/projects/${parsed.projectId}/settings`);

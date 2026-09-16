@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
 import { requireProjectRole } from "@/lib/authz";
 import { recordAudit } from "@/lib/audit";
+import { assertLabelsUnique } from "@/lib/labels";
 import { reGateProjectPrs, signalStagingBatch } from "@/lib/temporal/start";
 import {
   ALL_DIGEST_SECTION_IDS,
@@ -95,30 +96,17 @@ export async function updateStagingDefaults(formData: FormData) {
       labelStagingBatch: true,
       labelStagingIgnore: true,
       labelStagingRepoint: true,
-      labelPending: true,
-      labelApproved: true,
-      labelDenied: true,
-      labelEvaluate: true,
     },
   });
   if (!before) throw new Error("Project not found");
 
-  // The gate labels are edited on the settings page, so check the collision
-  // here rather than leaving two forms able to converge on the same name.
-  const allLabels = [
-    before.labelPending,
-    before.labelApproved,
-    before.labelDenied,
-    before.labelEvaluate,
-    parsed.labelStagingBatch,
-    parsed.labelStagingIgnore,
-    parsed.labelStagingRepoint,
-  ];
-  if (new Set(allLabels).size !== allLabels.length) {
-    throw new Error(
-      "The staging labels must differ from each other and from the PR labels.",
-    );
-  }
+  // The gate, QA and guard labels are edited on other forms, so check the
+  // collision here rather than leaving two forms able to converge on one name.
+  await assertLabelsUnique(parsed.projectId, {
+    labelStagingBatch: parsed.labelStagingBatch,
+    labelStagingIgnore: parsed.labelStagingIgnore,
+    labelStagingRepoint: parsed.labelStagingRepoint,
+  });
 
   const after = {
     stagingRetargetEnabled: !!parsed.stagingRetargetEnabled,
@@ -407,21 +395,9 @@ export async function updateQaSettings(formData: FormData) {
 
   // Same collision check the staging labels get. Two labels with one name means
   // one of the two features silently stops being able to find its own PRs.
-  const allLabels = [
-    before.labelPending,
-    before.labelApproved,
-    before.labelDenied,
-    before.labelEvaluate,
-    before.labelStagingBatch,
-    before.labelStagingIgnore,
-    before.labelStagingRepoint,
-    parsed.qaFailedLabel,
-  ];
-  if (new Set(allLabels).size !== allLabels.length) {
-    throw new Error(
-      "The QA label must differ from the staging and PR labels.",
-    );
-  }
+  await assertLabelsUnique(parsed.projectId, {
+    qaFailedLabel: parsed.qaFailedLabel,
+  });
 
   const after = {
     stagingQaEnabled: !!parsed.stagingQaEnabled,

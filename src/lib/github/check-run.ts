@@ -16,6 +16,7 @@ import {
   type QaNotApplicableReason,
   type QaRenderItem,
 } from "@/lib/qa/render";
+import type { GuardCheckPayload } from "@/lib/guard/render";
 
 export const CHECK_RUN_NAME = "contribution-checker / decision";
 // A second, independent Check Run dedicated to the CLA gate so maintainers can
@@ -555,4 +556,143 @@ export async function publishQaVerdictCheck(args: {
     payload: buildQaCheckPayload({ items: args.items, boardUrl: args.boardUrl }),
     detailsUrl: args.boardUrl,
   });
+}
+
+// ===== Dedicated Path Guard Check Run =====
+
+/**
+ * A fourth independent check reporting whether the guarded paths this PR
+ * touches have been signed off, so a maintainer can require a named person's
+ * approval on migrations, workflow code or CI definitions without requiring one
+ * on every README typo.
+ *
+ * Published only on PRs into the repo's default branch. Anything else gets a
+ * deliberate pass rather than silence, for the reason the QA check does: where
+ * this is a required status check, a PR nothing will ever report on is a PR
+ * blocked forever on a status that is not coming.
+ */
+export const GUARD_CHECK_RUN_NAME = "contribution-checker / guard";
+
+/**
+ * Publish the guard check for one PR.
+ *
+ * Feature-detected and swallowed like its siblings: an installation without
+ * `checks:write` gets no check rather than an error.
+ *
+ * The run id is bound to `PrCheck.guardCheckSha` rather than to `headSha`,
+ * which the decision and CLA checks share. Those are reset by `convergePr` when
+ * the SHA advances; the guard also republishes on `pull_request_review`, which
+ * never reaches `convergePr`, so it carries its own SHA and reuses the stored id
+ * only while the two match. Same rule as `StagingBatch.qaCheckSha`: a check run
+ * belongs to its commit and PATCH cannot move it.
+ */
+export async function publishGuardCheck(args: {
+  installationId: number;
+  repoFullName: string;
+  /** Null when the PR has no tracked row yet; the run is then created fresh. */
+  prCheckId: string | null;
+  headSha: string | null;
+  project: { id: string; checksEnabled: boolean };
+  payload: GuardCheckPayload;
+  detailsUrl?: string;
+}): Promise<void> {
+  if (!args.project.checksEnabled) return;
+  if (!args.headSha) return;
+  if (!(await installationHasChecksWrite(args.installationId))) return;
+
+  const row = args.prCheckId
+    ? await prisma.prCheck.findUnique({
+        where: { id: args.prCheckId },
+        select: { guardCheckRunId: true, guardCheckSha: true },
+      })
+    : null;
+  const existingId =
+    row?.guardCheckRunId && row.guardCheckSha === args.headSha
+      ? row.guardCheckRunId
+      : null;
+
+  const ref = repoRef(args.repoFullName, args.installationId);
+  try {
+    const newId = await upsertCheckRun(
+      ref,
+      {
+        headSha: args.headSha,
+        name: GUARD_CHECK_RUN_NAME,
+        status: args.payload.status,
+        conclusion: args.payload.conclusion,
+        title: args.payload.title,
+        summary: args.payload.summary,
+        ...(args.detailsUrl ? { detailsUrl: args.detailsUrl } : {}),
+      },
+      existingId,
+    );
+    if (
+      args.prCheckId &&
+      newId &&
+      (newId !== row?.guardCheckRunId || row?.guardCheckSha !== args.headSha)
+    ) {
+      await prisma.prCheck.update({
+        where: { id: args.prCheckId },
+        data: { guardCheckRunId: newId, guardCheckSha: args.headSha },
+      });
+    }
+  } catch (e) {
+    logger.warn(
+      { err: e, prCheckId: args.prCheckId },
+      "publishGuardCheck failed",
+    );
+  }
+}
+
+/**
+ * Publish the guard check on a commit that has nowhere to store a run id.
+ *
+ * The merge queue's case, and the exact counterpart to
+ * `publishStandaloneQaCheck`. GitHub builds a throwaway
+ * `gh-readonly-queue/...` commit and requires every check to report against
+ * THAT SHA, so a PR whose guard is satisfied still sits in the queue forever
+ * unless the verdict is published again on the queue's head.
+ *
+ * It deliberately stores no id: `PrCheck.guardCheckRunId` and `guardCheckSha`
+ * belong to the PR head, and overwriting them with a transient queue SHA would
+ * leave the PR's own check unreachable. The run standing on the commit is read
+ * instead, which costs one call on a rare path and stops repeat deliveries
+ * stacking duplicates under one name.
+ */
+export async function publishStandaloneGuardCheck(args: {
+  installationId: number;
+  repoFullName: string;
+  headSha: string | null;
+  project: { checksEnabled: boolean };
+  payload: GuardCheckPayload;
+}): Promise<void> {
+  if (!args.project.checksEnabled) return;
+  if (!args.headSha) return;
+  if (!(await installationHasChecksWrite(args.installationId))) return;
+
+  const ref = repoRef(args.repoFullName, args.installationId);
+  try {
+    const existingId = await findCheckRunIdByName(
+      ref,
+      args.headSha,
+      GUARD_CHECK_RUN_NAME,
+    );
+    await upsertCheckRun(
+      ref,
+      {
+        headSha: args.headSha,
+        name: GUARD_CHECK_RUN_NAME,
+        status: args.payload.status,
+        conclusion: args.payload.conclusion,
+        title: args.payload.title,
+        summary: args.payload.summary,
+      },
+      existingId,
+    );
+  } catch (e) {
+    logger.warn(
+      { err: e, repoFullName: args.repoFullName, headSha: args.headSha },
+      "standalone guard check publish failed",
+    );
+  }
 }

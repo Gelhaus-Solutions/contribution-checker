@@ -78,6 +78,14 @@ export type AuditKind =
   | "qa.board_linked"
   | "qa.board_unlinked"
   | "qa.board_sync_failed"
+  // Path guard. `blocked` and `unlocked` are the state changes a maintainer
+  // cares about; `relocked` is the one worth looking for, because it means a PR
+  // that had been signed off stopped being.
+  | "guard.blocked"
+  | "guard.unlocked"
+  | "guard.relocked"
+  | "guard.label_rejected"
+  | "guard.settings_changed"
   // AI (OpenRouter). Only real calls are audited: a cache hit changes nothing
   // and would fill the log with rows saying so.
   | "ai.run_completed"

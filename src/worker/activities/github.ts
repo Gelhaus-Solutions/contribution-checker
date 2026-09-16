@@ -3,6 +3,7 @@ import {
   handleInstallationReposEvent,
   handleMergeGroupEvent,
   handlePullRequestEvent,
+  handlePullRequestReviewEvent,
   handlePushEvent,
   reGatePr,
   type PrEventResult,
@@ -36,6 +37,14 @@ export async function convergePrEvent(
   env: GithubEventEnvelope
 ): Promise<PrEventResult> {
   try {
+    // A review arrives on the same entity as the PR's own events, so it is
+    // handled here rather than through a workflow of its own. It is never
+    // terminal: approving a PR does not close it, and reporting otherwise would
+    // complete the entity while the PR is still open.
+    if (env.eventName === "pull_request_review") {
+      await handlePullRequestReviewEvent(env.payload as never);
+      return { terminal: false };
+    }
     return await handlePullRequestEvent(env.payload as never);
   } catch (e) {
     throw classifyGithubError(e);

@@ -154,6 +154,37 @@ model Project {
   labelStagingIgnore  String @default("staging:ignore")
   labelStagingRepoint String @default("staging:repoint")
 
+  // Path guard labels. Outside the `contribution:` namespace for exactly the
+  // reason the staging labels are: setLabels() strips every `contribution:*`
+  // label the gate did not just set.
+  //
+  // `labelGuardUnlock` is an unlock: added by a configured approver it signs
+  // off the guarded files currently in the diff, and added by anyone else the
+  // bot removes it. `labelGuardBlocked` is a marker the bot owns, applied while
+  // the guard check is red so blocked PRs are filterable in the PR list.
+  labelGuardUnlock  String @default("guard:approved")
+  labelGuardBlocked String @default("guard:blocked")
+
+  // ----- Path guard -----
+  // A fourth Check Run ("contribution-checker / guard") that fails when a PR
+  // into the DEFAULT branch changes files matching the project's guarded path
+  // rules, and passes once a configured approver has signed off. Off by
+  // default. Project-level only: unlike the staging settings, which genuinely
+  // differ per repo, a rule about migrations is a rule about the project.
+  guardEnabled    Boolean @default(false)
+  // JSON string[] of GuardRuleId from the GUARD_RULES catalog. Read with
+  // parseGuardRules (permissive-OPEN: unreadable means every rule on, because
+  // a guard that silently stops guarding is the failure that matters).
+  guardRules      String  @default("[]")
+  // JSON string[] of extra glob patterns. parseGuardGlobs, permissive-closed.
+  guardGlobs      String  @default("[]")
+  // JSON string[] of GitHub login patterns (`*`/`?` supported, matched with
+  // matchesAnyPattern). parseGuardApprovers, permissive-closed: a corrupt
+  // column must not hand unlocks to logins nobody configured.
+  guardApprovers  String  @default("[]")
+  // "either" (an approving review OR the unlock label) | "both".
+  guardUnlockMode String  @default("either")
+
   // Staging routing. Two independent switches:
   //  - stagingRetargetEnabled rewrites PRs based on the default branch to
   //    target `stagingBranch` instead.
@@ -621,6 +652,30 @@ model PrCheck {
   claCheckRunId String?
   // Latest commit SHA evaluated; used to detect re-eval on push (synchronize).
   headSha       String?
+
+  // ----- Path guard -----
+  // Its own run id AND its own SHA, rather than riding on `headSha` above.
+  // convergePr resets checkRunId/claCheckRunId when headSha advances, but the
+  // guard also republishes on `pull_request_review`, which never reaches
+  // convergePr. Pairing the id with the SHA it was created against makes reuse
+  // self-contained: same rule as StagingBatch.qaCheckSha.
+  guardCheckRunId    String?
+  guardCheckSha      String?
+  // Who signed off and how: "review" | "label". Null when nothing has.
+  guardUnlockSource  String?
+  guardUnlockBy      String?
+  guardUnlockAt      DateTime?
+  // JSON { path: blobSha } of the guarded files that were signed off. Comparing
+  // blob SHAs is what makes "re-require approval only when guarded files
+  // changed" exact: a push touching only ordinary files leaves every guarded
+  // blob where it was and keeps the unlock, while one character in a guarded
+  // file changes its blob and takes the unlock away. A rebase that leaves
+  // content identical produces the same blob, so it does not re-block.
+  guardApprovedFiles String  @default("{}")
+  // Whether the bot's blocked marker label is currently on the PR. Tracked so
+  // the steady state costs no GitHub call, the same bargain qaLabelApplied
+  // makes; a failed call leaves the flag unset so the next pass retries.
+  guardLabelApplied  Boolean @default(false)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

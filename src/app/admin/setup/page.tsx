@@ -200,12 +200,21 @@ STACK_WEBHOOK_SECRET="<svix signing secret>"`} />
                 <code className="rounded bg-muted px-1 py-0.5 text-xs">
                   Merge group
                 </code>
+                , and{" "}
+                <code className="rounded bg-muted px-1 py-0.5 text-xs">
+                  Pull request review
+                </code>
                 . If you skip <code>Push</code>, use the <strong>Sync now</strong>{" "}
                 button on the CLA page to publish repo-file changes manually.{" "}
                 <strong>Merge group</strong> is required if you put the checker&apos;s
                 status checks behind a GitHub <strong>merge queue</strong>: the queue
                 builds a temporary commit and re-requests checks on it, so without
-                this event the queue waits forever and never merges.
+                this event the queue waits forever and never merges.{" "}
+                <strong>Pull request review</strong> is required if you use{" "}
+                <strong>guarded paths</strong>: it is the only event that says an
+                approval arrived, so without it approving a PR to clear the guard
+                does nothing visible until somebody pushes again, which reads as
+                the check being broken.
               </li>
               <li>
                 Under &ldquo;Where can this GitHub App be installed?&rdquo;,

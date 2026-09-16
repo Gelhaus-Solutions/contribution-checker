@@ -143,6 +143,20 @@ export async function POST(req: Request) {
             }
             break;
           }
+          // Routed to the same per-PR entity as `pull_request`, and on purpose:
+          // `dispatchPullRequestEvent` keys the contributor gate on
+          // `pull_request.user.id`, which this payload also carries and which is
+          // the PR's author, not the reviewer. So a review and a push cannot be
+          // processed against the same PR concurrently. The action filter lives
+          // in the handler, as it does for `pull_request`.
+          case "pull_request_review": {
+            const repoId = String(p.repository?.id ?? "");
+            const prNumber = p.pull_request?.number;
+            if (repoId && prNumber) {
+              await dispatchPullRequestEvent(repoId, prNumber, envelope);
+            }
+            break;
+          }
           case "merge_group": {
             const repoId = String(p.repository?.id ?? "");
             const headSha = p.merge_group?.head_sha ?? deliveryId;

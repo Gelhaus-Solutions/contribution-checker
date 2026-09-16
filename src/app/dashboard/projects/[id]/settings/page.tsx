@@ -12,6 +12,11 @@ import { Select } from "@/components/ui/select";
 import { env } from "@/lib/env";
 import { ALL_AI_TASKS, isAiTaskEnabled } from "@/lib/ai/registry";
 import { parseAiConfig } from "@/lib/ai/config";
+import { GUARD_RULES, parseGuardRules } from "@/lib/guard/rules";
+import {
+  parseGuardApprovers,
+  parseGuardGlobs,
+} from "@/lib/guard/config";
 import {
   updateProjectSettings,
   addProjectWebhook,
@@ -22,6 +27,7 @@ import {
   updateBypassSettings,
   updateGatingSettings,
   updateAiSettings,
+  updateGuardSettings,
 } from "./actions";
 
 export default async function ProjectSettings({
@@ -53,6 +59,13 @@ export default async function ProjectSettings({
       return [];
     }
   })();
+
+  // Read straight off the columns rather than through resolveGuardConfig, which
+  // reports nothing while the guard is switched off. The form has to keep
+  // showing what a project picked so turning the guard back on restores it.
+  const guardRules = parseGuardRules(project.guardRules);
+  const guardGlobs = parseGuardGlobs(project.guardGlobs);
+  const guardApprovers = parseGuardApprovers(project.guardApprovers);
 
   return (
     <div className="space-y-6">
@@ -422,9 +435,165 @@ export default async function ProjectSettings({
               </p>
             </div>
             <p className="text-xs text-muted-foreground">
-              The two staging labels are configured on the Staging page.
+              The staging labels are configured on the Staging page, and the
+              guarded-paths labels in the card below. Every label the bot
+              manages must have its own name.
             </p>
             <SubmitButton>Save labels</SubmitButton>
+          </form>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Guarded paths</CardTitle>
+          <CardDescription>
+            Fail a status check when a PR into the default branch changes
+            something that needs a human to look at it, and pass it once one
+            has. Branch protection can require a review on every PR; this
+            requires one only when a migration, a workflow or your own chosen
+            paths are in the diff.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form action={updateGuardSettings} className="space-y-5">
+            <input type="hidden" name="projectId" value={project.id} />
+
+            <label className="flex items-start gap-3 text-sm">
+              <input
+                type="checkbox"
+                name="guardEnabled"
+                value="1"
+                defaultChecked={project.guardEnabled}
+                className="mt-0.5 h-4 w-4 rounded border-border"
+              />
+              <span>
+                <span className="font-medium">
+                  Publish the guarded-paths check
+                </span>
+                <span className="block text-xs text-muted-foreground">
+                  Adds{" "}
+                  <code className="rounded bg-muted px-1 py-0.5">
+                    contribution-checker / guard
+                  </code>{" "}
+                  to PRs targeting the default branch. PRs targeting anything
+                  else pass it automatically, so it is safe to require in branch
+                  protection. Nothing is published at all until at least one
+                  rule or glob below is set.
+                </span>
+              </span>
+            </label>
+
+            <div className="space-y-2">
+              <p className="text-sm font-medium">Guarded rules</p>
+              <fieldset className="ml-1 space-y-2 border-l border-border pl-4">
+                <legend className="sr-only">Guarded rules</legend>
+                {GUARD_RULES.map((rule) => (
+                  <label
+                    key={rule.id}
+                    className="flex items-start gap-3 text-sm"
+                  >
+                    <input
+                      type="checkbox"
+                      name="guardRules"
+                      value={rule.id}
+                      defaultChecked={guardRules.has(rule.id)}
+                      className="mt-0.5 h-4 w-4 rounded border-border"
+                    />
+                    <span>
+                      <span>{rule.label}</span>
+                      <span className="block text-xs text-muted-foreground">
+                        {rule.hint}
+                      </span>
+                    </span>
+                  </label>
+                ))}
+              </fieldset>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="guardGlobs">Extra paths</Label>
+              <Textarea
+                id="guardGlobs"
+                name="guardGlobs"
+                rows={4}
+                defaultValue={guardGlobs.join("\n")}
+                placeholder={"src/lib/billing/\nsrc/**/*.proto\ninfra/prod.tf"}
+                className="font-mono"
+              />
+              <p className="text-xs text-muted-foreground">
+                One glob per line, on top of the rules above. A bare directory
+                name means everything under it. Dotfiles are matched, so{" "}
+                <code>.github/**</code> works as written.
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="guardApprovers">Approvers</Label>
+              <Textarea
+                id="guardApprovers"
+                name="guardApprovers"
+                rows={4}
+                defaultValue={guardApprovers.join("\n")}
+                placeholder={"alice\nbob\nplatform-*"}
+                className="font-mono"
+              />
+              <p className="text-xs text-muted-foreground">
+                GitHub logins, one per line. Supports <code>*</code> wildcards.
+                An approving review from any of them clears the check, and only
+                they can apply the unlock label: the bot takes it straight back
+                off anyone else.
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="guardUnlockMode">What clears the check</Label>
+              <Select
+                id="guardUnlockMode"
+                name="guardUnlockMode"
+                defaultValue={project.guardUnlockMode}
+              >
+                <option value="either">
+                  An approving review or the unlock label
+                </option>
+                <option value="both">
+                  An approving review and the unlock label
+                </option>
+              </Select>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="labelGuardUnlock">Unlock label</Label>
+                <Input
+                  id="labelGuardUnlock"
+                  name="labelGuardUnlock"
+                  defaultValue={project.labelGuardUnlock}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="labelGuardBlocked">Blocked label</Label>
+                <Input
+                  id="labelGuardBlocked"
+                  name="labelGuardBlocked"
+                  defaultValue={project.labelGuardBlocked}
+                />
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Neither may use the <code>contribution:</code> prefix, which the
+              gate owns and strips. The blocked label is the bot&apos;s; it goes
+              on while the check is red and comes off when it clears.
+            </p>
+
+            <p className="text-xs text-muted-foreground">
+              A sign-off covers the guarded files exactly as they were when it
+              was given. Pushing to an unrelated file keeps it; changing a
+              guarded file asks again. A diff too large to read whole fails
+              closed and needs a sign-off either way.
+            </p>
+
+            <SubmitButton>Save guarded paths</SubmitButton>
           </form>
         </CardContent>
       </Card>

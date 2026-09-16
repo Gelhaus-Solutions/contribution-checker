@@ -24,8 +24,14 @@ import {
   publishClaCheck,
   publishQaNotApplicableCheck,
   publishQaVerdictCheck,
+  publishStandaloneGuardCheck,
   type ClaCheckState,
 } from "@/lib/github/check-run";
+import { resolveGuardConfig, guardProjectSelect } from "@/lib/guard/config";
+import {
+  buildMergeGroupGuardPayload,
+  type MergeGroupGuardState,
+} from "@/lib/guard/render";
 import {
   applyStagingRouting,
   handleAggregatePrClosed,
@@ -35,6 +41,7 @@ import {
   type StagingRoutingResult,
   type StagingRoutingOutcome,
 } from "@/lib/github/staging";
+import { runGuardForPr } from "@/lib/guard/run";
 import { signalStagingBatch } from "@/lib/temporal/start";
 import { runQualityForPrCheck } from "@/lib/quality/run";
 import { getInstallationOctokit } from "@/lib/github/app";
@@ -74,6 +81,9 @@ type WebhookPayload = {
     body?: { from?: string };
   };
   label?: { name: string };
+  /** Who caused the event. Read only for the guard's unlock label, where the
+   * whole point is that a label is trusted because of who added it. */
+  sender?: { login?: string };
   repositories?: Array<{ id: number; full_name: string }>;
   repositories_added?: Array<{ id: number; full_name: string }>;
   repositories_removed?: Array<{ id: number; full_name: string }>;
@@ -573,6 +583,12 @@ export async function handlePullRequestEvent(
   // label is removed by the bot itself after every re-eval, and re-gating on
   // that echo would loop.
   let stagingLabelOnly = false;
+  // Set on the one event that carried the guard's unlock label. The guard trusts
+  // a label because of who added it, and this is the only moment that is
+  // knowable: on every later event the label is just a name sitting on a PR.
+  let guardLabelAppliedBy: string | null = null;
+  let guardLabelRemoved = false;
+  let guardLabelOnly = false;
   if (isReEvalLabel || isUnlabeled) {
     const labelName = payload.label?.name;
     if (!labelName) return NOT_TERMINAL;
@@ -584,18 +600,36 @@ export async function handlePullRequestEvent(
             labelEvaluate: true,
             labelStagingIgnore: true,
             labelStagingRepoint: true,
+            labelGuardUnlock: true,
           },
         },
       },
     });
     if (!repoForLabelGate) return NOT_TERMINAL;
-    const { labelEvaluate, labelStagingIgnore, labelStagingRepoint } =
-      repoForLabelGate.project;
+    const {
+      labelEvaluate,
+      labelStagingIgnore,
+      labelStagingRepoint,
+      labelGuardUnlock,
+    } = repoForLabelGate.project;
     if (isUnlabeled || labelEvaluate !== labelName) {
-      if (labelStagingIgnore !== labelName && labelStagingRepoint !== labelName) {
+      // The guard's unlock label routes nowhere and gates nothing: it is a
+      // maintainer signing off on a file list, which says nothing about the
+      // contributor. Recognized here for the same reason the staging labels
+      // are, so adding or removing it takes effect on the spot rather than at
+      // the PR's next push.
+      if (labelGuardUnlock === labelName) {
+        guardLabelOnly = true;
+        if (isUnlabeled) guardLabelRemoved = true;
+        else guardLabelAppliedBy = payload.sender?.login ?? null;
+      } else if (
+        labelStagingIgnore !== labelName &&
+        labelStagingRepoint !== labelName
+      ) {
         return NOT_TERMINAL;
+      } else {
+        stagingLabelOnly = true;
       }
-      stagingLabelOnly = true;
     }
   }
 
@@ -645,6 +679,12 @@ export async function handlePullRequestEvent(
       installationId: payload.installation.id,
       headSha: payload.pull_request.head?.sha ?? null,
     });
+    // The gate exemption does NOT extend to the path guard. The release PR has
+    // no application, which is why the contributor gate cannot speak for it, but
+    // it is also the one PR that merges every migration in a batch into the
+    // default branch. That is precisely where a human sign-off is worth having,
+    // so it is guarded like anything else aimed there.
+    await runGuard(payload, ghRepoId, { labelAppliedBy: null, labelRemoved: false });
     return notTerminal(staging);
   }
 
@@ -663,11 +703,28 @@ export async function handlePullRequestEvent(
     });
   }
 
+  // The path guard runs on every event that gets this far, and against the base
+  // routing has just settled: a PR retargeted onto staging is no longer aimed at
+  // the default branch, so the guard republishes as a pass on the spot rather
+  // than leaving a red required check on a PR it no longer has a say over.
+  //
+  // A body or title edit is skipped. Neither can change which files a PR
+  // touches, and the file list is the only thing the guard reads; a base change
+  // can, and does not skip.
+  if (!isEdited || payload.changes?.base) {
+    await runGuard(payload, ghRepoId, {
+      labelAppliedBy: guardLabelAppliedBy,
+      labelRemoved: guardLabelRemoved,
+    });
+  }
+
   // A title edit changes nothing the gate cares about: the batch manifest was
   // already refreshed above, so stop before the decision pipeline. The staging
   // labels are the same story: routing has had its say, and a label only a
-  // maintainer can set carries no information about the contributor.
-  if (isEdited || stagingLabelOnly) return notTerminal(staging);
+  // maintainer can set carries no information about the contributor. The guard's
+  // unlock label is the same argument again, and it has already had its say
+  // immediately above.
+  if (isEdited || stagingLabelOnly || guardLabelOnly) return notTerminal(staging);
 
   await convergePr({
     ghRepoId,
@@ -682,6 +739,62 @@ export async function handlePullRequestEvent(
     isReEval: isReEvalLabel,
   });
   return notTerminal(staging);
+}
+
+/**
+ * Run the path guard for the PR in this payload.
+ *
+ * A thin adapter so the three call sites (the aggregate PR branch, the ordinary
+ * PR path and the review handler) read the same. `runGuardForPr` swallows its
+ * own failures, so this never throws into the gate.
+ */
+async function runGuard(
+  payload: WebhookPayload,
+  ghRepoId: number,
+  opts: { labelAppliedBy: string | null; labelRemoved: boolean },
+): Promise<void> {
+  const pr = payload.pull_request;
+  if (!pr || !payload.repository || !payload.installation) return;
+  await runGuardForPr({
+    ghRepoId,
+    repoFullName: payload.repository.full_name,
+    installationId: payload.installation.id,
+    prNumber: pr.number,
+    headSha: pr.head?.sha ?? null,
+    baseRef: pr.base?.ref ?? null,
+    labelJustAppliedBy: opts.labelAppliedBy,
+    labelJustRemoved: opts.labelRemoved,
+  });
+}
+
+/**
+ * GitHub `pull_request_review`.
+ *
+ * The only event that says an approval arrived. Without it, approving a PR to
+ * clear the guard would do nothing visible until somebody pushed again, which
+ * reads as the check being broken.
+ *
+ * It reaches the same per-PR entity workflow as the `pull_request` events
+ * (`dispatchPullRequestEvent` keys on `pull_request.user.id`, the PR's author,
+ * which this payload also carries), so a review and a push cannot be processed
+ * against the PR at the same time.
+ *
+ * Only the guard cares. A review says nothing about whether the author has an
+ * application, so the gate is deliberately not re-run here: that would be a full
+ * decision pipeline and a Check Run rewrite every time somebody left a comment.
+ */
+export async function handlePullRequestReviewEvent(
+  payload: WebhookPayload,
+): Promise<void> {
+  const action = payload.action ?? "";
+  if (!["submitted", "dismissed", "edited"].includes(action)) return;
+  if (!payload.pull_request || !payload.repository || !payload.installation) {
+    return;
+  }
+  await runGuard(payload, payload.repository.id, {
+    labelAppliedBy: null,
+    labelRemoved: false,
+  });
 }
 
 /**
@@ -1428,6 +1541,92 @@ async function publishMergeGroupQaCheck(args: {
 }
 
 /**
+ * Answer `contribution-checker / guard` for a merge group.
+ *
+ * Same problem the QA check has, and the same two branches. The queue builds a
+ * throwaway commit and requires every protected-branch check to report against
+ * THAT SHA, while the guard otherwise only ever publishes on a PR head. Where it
+ * is required on the default branch, a queue there never drains without this.
+ *
+ *  - A group queueing into something other than the default branch (most often
+ *    the staging branch) is outside the guard's remit entirely, exactly as a PR
+ *    based there is. It passes as "does not apply".
+ *  - A group queueing into the default branch republishes each member's real
+ *    verdict, most-blocking-wins, so a PR whose guarded files nobody signed off
+ *    still holds the queue.
+ *
+ * The member verdicts come from the stored sign-off, not from a fresh
+ * evaluation: the files and reviews were read on the PR path and written to
+ * `PrCheck`, and re-reading them would cost two calls per queue entry to
+ * re-derive an answer we already hold. A PR with no row at all has never been
+ * through the guard, so it cannot be holding an unlock, and it blocks.
+ */
+async function publishMergeGroupGuardCheck(args: {
+  ghRepoId: number;
+  installationId: number;
+  repoFullName: string;
+  headSha: string;
+  prNumbers: number[];
+  baseRef: string;
+}): Promise<void> {
+  const repo = await prisma.repo.findUnique({
+    where: { ghRepoId: args.ghRepoId },
+    select: {
+      id: true,
+      defaultBranch: true,
+      stagingBatchPrNumber: true,
+      project: { select: { id: true, checksEnabled: true, ...guardProjectSelect } },
+    },
+  });
+  if (!repo) return;
+  const project = repo.project;
+  const cfg = resolveGuardConfig(project);
+  if (!cfg.enabled) return;
+
+  const checkProject = { checksEnabled: project.checksEnabled };
+  const defaultBranch = repo.defaultBranch ?? "";
+  const baseRef = shortBranchName(args.baseRef);
+
+  const publish = (state: MergeGroupGuardState) =>
+    publishStandaloneGuardCheck({
+      installationId: args.installationId,
+      repoFullName: args.repoFullName,
+      headSha: args.headSha,
+      project: checkProject,
+      payload: buildMergeGroupGuardPayload(state),
+    });
+
+  if (!defaultBranch || baseRef !== defaultBranch) {
+    await publish({ kind: "not_applicable", baseRef, defaultBranch });
+    return;
+  }
+
+  const rows = await prisma.prCheck.findMany({
+    where: { repoId: repo.id, prNumber: { in: args.prNumbers } },
+    select: { prNumber: true, guardLabelApplied: true },
+  });
+  const blockedByNumber = new Map(
+    rows.map((r) => [r.prNumber, r.guardLabelApplied]),
+  );
+
+  // `guardLabelApplied` is the bot's own record of "this PR's guard check is
+  // currently red", written by the same pass that published it, so it answers
+  // the queue's question without re-deriving anything.
+  //
+  // The aggregate staging PR is excluded: it is guarded on its own head like
+  // any other PR into the default branch, and it is that check, not this one,
+  // that speaks for the release.
+  const aggregate = repo.stagingBatchPrNumber;
+  const blocked = args.prNumbers.filter(
+    (n) => n !== aggregate && blockedByNumber.get(n) === true,
+  );
+
+  await publish(
+    blocked.length > 0 ? { kind: "blocked", prNumbers: blocked } : { kind: "clear" },
+  );
+}
+
+/**
  * GitHub `merge_group` event (merge queue). When a PR enters the queue GitHub
  * builds a temporary `gh-readonly-queue/...` branch with a fresh head commit and
  * asks (action `checks_requested`) for required checks to be reported against
@@ -1496,6 +1695,20 @@ export async function handleMergeGroupEvent(payload: MergeGroupPayload) {
     baseRef: payload.merge_group?.base_ref ?? "",
   }).catch((e) =>
     logger.warn({ err: e, repoFullName }, "merge_group qa check failed"),
+  );
+
+  // Independent of the gate for the same reason QA is: the guard is a question
+  // about the files, not about the contributor, so it is answered even when no
+  // member PR is gateable.
+  await publishMergeGroupGuardCheck({
+    ghRepoId,
+    installationId,
+    repoFullName,
+    headSha,
+    prNumbers,
+    baseRef: payload.merge_group?.base_ref ?? "",
+  }).catch((e) =>
+    logger.warn({ err: e, repoFullName }, "merge_group guard check failed"),
   );
 
   const applyUrl = `${env.PUBLIC_BASE_URL.replace(/\/$/, "")}/p/${project.slug}`;

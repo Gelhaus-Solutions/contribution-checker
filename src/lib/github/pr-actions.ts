@@ -212,45 +212,146 @@ export async function getPullRequest(
  *
  * Patches are dropped on purpose. The consumer summarises a change for a human
  * reviewer, and filenames plus line counts carry most of that signal at a
- * fraction of the tokens. One page: past a hundred files nobody is reading a
- * generated test plan anyway, and `truncated` says so.
+ * fraction of the tokens. One page by default: past a hundred files nobody is
+ * reading a generated test plan anyway, and `truncated` says so. The path guard
+ * asks for more (`pageLimit`), because it has to fail closed on a diff it could
+ * not read whole rather than shrug at it.
  */
 export type PrFileSummary = {
   filename: string;
   status: string;
   additions: number;
   deletions: number;
+  /** Blob SHA of the file at the PR head. Identifies the content, which is what
+   * the path guard's stored sign-off is actually about. */
+  sha: string;
 };
 
 export async function listPullRequestFiles(
   ref: RepoRef,
   prNumber: number,
+  opts?: { pageLimit?: number },
 ): Promise<{ files: PrFileSummary[]; truncated: boolean } | null> {
   const octokit = await getInstallationOctokit(ref.installationId);
+  const pageLimit = Math.max(1, opts?.pageLimit ?? 1);
+  const out: PrFileSummary[] = [];
   try {
-    const res = await octokit.request(
-      "GET /repos/{owner}/{repo}/pulls/{pull_number}/files",
-      { owner: ref.owner, repo: ref.repo, pull_number: prNumber, per_page: 100 },
-    );
+    for (let page = 1; page <= pageLimit; page++) {
+      const res = await octokit.request(
+        "GET /repos/{owner}/{repo}/pulls/{pull_number}/files",
+        {
+          owner: ref.owner,
+          repo: ref.repo,
+          pull_number: prNumber,
+          per_page: 100,
+          page,
+        },
+      );
+      const raw = res.data as Array<{
+        filename: string;
+        status: string;
+        additions: number;
+        deletions: number;
+        sha: string;
+      }>;
+      for (const f of raw) {
+        out.push({
+          filename: f.filename,
+          status: f.status,
+          additions: f.additions,
+          deletions: f.deletions,
+          sha: f.sha,
+        });
+      }
+      // A short page is the last page. A full one on the final iteration means
+      // there may be more we did not read, which is what `truncated` reports.
+      if (raw.length < 100) {
+        recordGithubMetric("pr.files", "ok", ref);
+        return { files: out, truncated: false };
+      }
+    }
     recordGithubMetric("pr.files", "ok", ref);
-    const raw = res.data as Array<{
-      filename: string;
-      status: string;
-      additions: number;
-      deletions: number;
-    }>;
-    return {
-      files: raw.map((f) => ({
-        filename: f.filename,
-        status: f.status,
-        additions: f.additions,
-        deletions: f.deletions,
-      })),
-      truncated: raw.length === 100,
-    };
+    return { files: out, truncated: true };
   } catch (e) {
     recordGithubMetric("pr.files", "error", ref, statusOf(e));
     if (statusOf(e) === 404) return null;
+    throw e;
+  }
+}
+
+/** A review reduced to what callers ask of it. `state` is GitHub's, uppercased. */
+export type PrReviewSummary = {
+  login: string;
+  state: string;
+  submittedAt: string | null;
+};
+
+/**
+ * The effective review state per user, newest decision wins.
+ *
+ * GitHub returns every review ever left, in submission order, and the same
+ * person may appear many times. Only three states change whether somebody is
+ * currently approving: APPROVED, CHANGES_REQUESTED and DISMISSED. A COMMENTED
+ * review is a remark, not a verdict, and letting one overwrite an approval
+ * would silently un-approve a PR the moment its approver replied to a thread.
+ * PENDING is an unsubmitted draft that only its author can see.
+ *
+ * Returned in the order each user's decision was made, so a caller taking the
+ * first match gets the earliest approver rather than an arbitrary one.
+ */
+export async function listPullRequestReviews(
+  ref: RepoRef,
+  prNumber: number,
+): Promise<PrReviewSummary[]> {
+  const octokit = await getInstallationOctokit(ref.installationId);
+  const effective = new Map<string, PrReviewSummary>();
+  try {
+    for (let page = 1; page <= PR_PAGE_LIMIT; page++) {
+      const res = await octokit.request(
+        "GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews",
+        {
+          owner: ref.owner,
+          repo: ref.repo,
+          pull_number: prNumber,
+          per_page: PR_PAGE_SIZE,
+          page,
+        },
+      );
+      const raw = res.data as Array<{
+        user?: { login?: string } | null;
+        state?: string;
+        submitted_at?: string | null;
+      }>;
+      for (const review of raw) {
+        const login = review.user?.login;
+        const state = (review.state ?? "").toUpperCase();
+        if (!login) continue;
+        if (
+          state !== "APPROVED" &&
+          state !== "CHANGES_REQUESTED" &&
+          state !== "DISMISSED"
+        ) {
+          continue;
+        }
+        const key = login.toLowerCase();
+        // Delete before set so a later decision keeps the user's *original*
+        // position in the map only when it is their first: re-inserting moves
+        // them to the end, which is the order their current verdict was formed.
+        effective.delete(key);
+        effective.set(key, {
+          login,
+          state,
+          submittedAt: review.submitted_at ?? null,
+        });
+      }
+      if (raw.length < PR_PAGE_SIZE) break;
+    }
+    recordGithubMetric("pr.reviews", "ok", ref);
+    return [...effective.values()];
+  } catch (e) {
+    recordGithubMetric("pr.reviews", "error", ref, statusOf(e));
+    // A guard that cannot read reviews must not conclude "nobody approved" and
+    // silently block; the caller distinguishes an empty list from a failure.
     throw e;
   }
 }
@@ -789,6 +890,114 @@ export async function prHasCommentContaining(
     logger.warn({ err: e, prNumber }, "prHasCommentContaining failed");
     return false;
   }
+}
+
+/**
+ * One comment on a PR, created once and edited afterwards.
+ *
+ * `commentOnPr` only ever appends, which is right for the gate's one-shot
+ * "here is why this PR was closed". It is wrong for anything that re-evaluates
+ * on every push: the path guard would leave a fresh copy of the same paragraph
+ * on the PR each time somebody pushed, and notify everyone watching for it.
+ *
+ * The comment is found by an invisible HTML marker rather than by author, so it
+ * works without knowing the App's own bot login, and the body is compared
+ * before it is written: an unchanged comment costs one read and no edit, no
+ * notification and no entry in the PR's timeline.
+ *
+ * Returns the comment id, or null when nothing was written. Best-effort like
+ * every other side effect here; a failure is logged and swallowed.
+ */
+export async function upsertPrComment(
+  ref: RepoRef,
+  prNumber: number,
+  marker: string,
+  body: string,
+): Promise<string | null> {
+  try {
+    const existing = await findMarkedComment(ref, prNumber, marker);
+    const octokit = await getInstallationOctokit(ref.installationId);
+    if (existing) {
+      if (existing.body === body) return existing.id;
+      const res = await octokit.request(
+        "PATCH /repos/{owner}/{repo}/issues/comments/{comment_id}",
+        {
+          owner: ref.owner,
+          repo: ref.repo,
+          comment_id: Number(existing.id),
+          body,
+        },
+      );
+      recordGithubMetric("comment.update", "ok", ref, res.status);
+      return existing.id;
+    }
+    const res = await octokit.request(
+      "POST /repos/{owner}/{repo}/issues/{issue_number}/comments",
+      { owner: ref.owner, repo: ref.repo, issue_number: prNumber, body },
+    );
+    recordGithubMetric("comment.create", "ok", ref, res.status);
+    return String((res.data as { id: number }).id);
+  } catch (e) {
+    recordGithubMetric("comment.upsert", "error", ref, statusOf(e));
+    logger.warn({ err: e, prNumber }, "upsertPrComment failed");
+    return null;
+  }
+}
+
+/**
+ * Remove a marked comment if it is there.
+ *
+ * Deleting rather than editing to "never mind" is deliberate: once the thing the
+ * comment asked for has happened, the comment is noise in a thread people still
+ * have to read. A 404 means somebody deleted it by hand, which is the outcome
+ * we wanted anyway.
+ */
+export async function deletePrCommentIfPresent(
+  ref: RepoRef,
+  prNumber: number,
+  marker: string,
+): Promise<void> {
+  try {
+    const existing = await findMarkedComment(ref, prNumber, marker);
+    if (!existing) return;
+    const octokit = await getInstallationOctokit(ref.installationId);
+    await octokit
+      .request("DELETE /repos/{owner}/{repo}/issues/comments/{comment_id}", {
+        owner: ref.owner,
+        repo: ref.repo,
+        comment_id: Number(existing.id),
+      })
+      .catch((e: unknown) => {
+        if (statusOf(e) !== 404) throw e;
+      });
+    recordGithubMetric("comment.delete", "ok", ref);
+  } catch (e) {
+    recordGithubMetric("comment.delete", "error", ref, statusOf(e));
+    logger.warn({ err: e, prNumber }, "deletePrCommentIfPresent failed");
+  }
+}
+
+/** Newest marked comment wins, so a duplicate left behind by an older version
+ * does not pin the bot to editing the stale one forever. */
+async function findMarkedComment(
+  ref: RepoRef,
+  prNumber: number,
+  marker: string,
+): Promise<{ id: string; body: string } | null> {
+  const octokit = await getInstallationOctokit(ref.installationId);
+  const res = await octokit.request(
+    "GET /repos/{owner}/{repo}/issues/{issue_number}/comments",
+    { owner: ref.owner, repo: ref.repo, issue_number: prNumber, per_page: 100 },
+  );
+  recordGithubMetric("list_comments", "ok", ref, res.status);
+  const comments = res.data as Array<{ id: number; body?: string | null }>;
+  for (let i = comments.length - 1; i >= 0; i--) {
+    const c = comments[i];
+    if (typeof c.body === "string" && c.body.includes(marker)) {
+      return { id: String(c.id), body: c.body };
+    }
+  }
+  return null;
 }
 
 // ----- Check Runs -----
