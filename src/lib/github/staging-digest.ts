@@ -25,6 +25,8 @@
  * further UI work and no migration.
  */
 
+import { FILE_GROUPS, isEnvDeclarationFile } from "@/lib/github/file-groups";
+
 /** One file in a compare, as GitHub reports it. */
 export type CompareFile = {
   filename: string;
@@ -206,88 +208,21 @@ const SUBJECT_MAX = 80;
 
 // --- path classification -----------------------------------------------------
 
-const basename = (p: string): string => p.slice(p.lastIndexOf("/") + 1);
-
-/** Does this file declare environment variables by name? `.env` examples and
- * the typed env schema modules people write next to them (`env.ts` with a Zod
- * object) both spell one variable per line, starting with its name. */
-function isEnvDeclarationFile(path: string): boolean {
-  const base = basename(path).toLowerCase();
-  if (base.startsWith(".env") || base.endsWith(".env")) return true;
-  if (/^env\.(ts|tsx|js|mjs|cjs|py|rb|go)$/.test(base)) return true;
-  return /(^|\/)(env|environment)\.example($|\.)/.test(path.toLowerCase());
-}
-
 /**
  * The groups, in the order a release reviewer cares about them. First match
  * wins, so a file is only ever counted once: `prisma/migrations/...` is a
  * migration, not "other config".
+ *
+ * The predicates live in `file-groups.ts` because the path guard classifies the
+ * same paths for a different purpose. Every `FileGroupId` is also a
+ * `DigestSectionId`, which is what makes a group's checkbox work with no extra
+ * wiring, and this annotation is what fails the build if that stops being true.
  */
 const GROUPS: Array<{
   id: DigestSectionId;
   label: string;
   matches: (path: string) => boolean;
-}> = [
-  {
-    id: "migrations",
-    label: "Database migrations",
-    matches: (p) =>
-      /(^|\/)(prisma\/migrations|migrations|migrate|db\/migrate|alembic\/versions)\//i.test(
-        p,
-      ) || /(^|\/)migration\.sql$/i.test(p),
-  },
-  {
-    id: "schema",
-    label: "Database schema",
-    matches: (p) =>
-      /(^|\/)schema\.prisma$/i.test(p) ||
-      /(^|\/)(schema|structure)\.(sql|rb)$/i.test(p),
-  },
-  {
-    id: "dependencies",
-    label: "Dependencies",
-    matches: (p) =>
-      /(^|\/)(package\.json|package-lock\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lockb?|requirements(-\w+)?\.txt|pyproject\.toml|poetry\.lock|uv\.lock|go\.mod|go\.sum|Cargo\.toml|Cargo\.lock|Gemfile|Gemfile\.lock|composer\.json|composer\.lock)$/i.test(
-        p,
-      ),
-  },
-  {
-    id: "workflows",
-    label: "CI workflows",
-    matches: (p) =>
-      /^\.github\/(workflows|actions)\//i.test(p) ||
-      /(^|\/)(\.gitlab-ci\.yml|\.circleci\/config\.yml|azure-pipelines\.yml|Jenkinsfile)$/i.test(
-        p,
-      ),
-  },
-  {
-    id: "infra",
-    label: "Infrastructure and deploy config",
-    matches: (p) =>
-      /(^|\/)(Dockerfile|Containerfile)(\.|$)/i.test(p) ||
-      /(^|\/)docker-compose[\w.-]*\.ya?ml$/i.test(p) ||
-      /\.(tf|tfvars)$/i.test(p) ||
-      /(^|\/)(helm|charts|k8s|kubernetes|deploy|terraform|ansible)\//i.test(p) ||
-      /(^|\/)(fly\.toml|vercel\.json|render\.yaml|Procfile|nginx\.conf)$/i.test(
-        p,
-      ),
-  },
-  {
-    id: "tooling",
-    label: "Build and tooling config",
-    // Deliberately after `dependencies` and `infra`: `package.json` is a
-    // dependency manifest first, and a Dockerfile is deploy config, not build
-    // tooling, however much it also builds.
-    matches: (p) =>
-      /(^|\/)(next|vite|webpack|rollup|esbuild|babel|tailwind|postcss|vitest|jest|playwright|cypress|svelte|nuxt|astro|metro|craco)\.config\.[cm]?[jt]s(x)?$/i.test(
-        p,
-      ) ||
-      /(^|\/)(tsconfig|jsconfig)([\w.-]*)\.json$/i.test(p) ||
-      /(^|\/)(\.?eslint[\w.-]*|\.?prettier[\w.-]*|\.editorconfig|\.babelrc[\w.-]*|\.npmrc|\.nvmrc|\.node-version|\.tool-versions|pnpm-workspace\.yaml|turbo\.json|nx\.json|lerna\.json|Makefile|justfile|Rakefile)$/i.test(
-        p,
-      ),
-  },
-];
+}> = FILE_GROUPS;
 
 // --- patch reading -----------------------------------------------------------
 
