@@ -1187,10 +1187,21 @@ export async function convergePr(ctx: {
   // Always strip the evaluate trigger label after a re-eval, regardless of
   // labelsEnabled. The admin added it to fire this run; leaving it on would
   // re-trigger on every subsequent webhook touch.
+  //
+  // The failure is logged rather than swallowed. A silent catch here is how a
+  // label that never came off looks identical to one that did: there is no
+  // comment, no check and no audit row for this step, so the log line is the
+  // only evidence it ever ran. It names the label it tried to remove, because
+  // the likeliest cause is that `Project.labelEvaluate` and the label actually
+  // sitting on the PR are not the same string.
   const removeEvaluateLabel = async () => {
     if (!isReEvalLabel) return;
     await removeLabelIfPresent(ref, prNumber, project.labelEvaluate).catch(
-      () => undefined,
+      (e: unknown) =>
+        logger.warn(
+          { err: e, repoFullName, prNumber, label: project.labelEvaluate },
+          "failed to strip the evaluate label after a re-eval",
+        ),
     );
   };
 
