@@ -55,7 +55,7 @@ LABEL org.opencontainers.image.title="contribution-checker" \
       org.opencontainers.image.vendor="Gelhaus Solutions" \
       org.opencontainers.image.authors="Enno Gelhaus <egelhaus@ennogelhaus.de>" \
       org.opencontainers.image.url="https://ennogelhaus.de" \
-      org.opencontainers.image.source="https://gitlab.ennogelhaus.de/gelhaus-corp/contribution-checker" \
+      org.opencontainers.image.source="https://github.com/Gelhaus-Solutions/contribution-checker" \
       org.opencontainers.image.licenses="AGPL-3.0-or-later"
 # openssl + ca-certificates for Prisma (and outbound TLS); procps so
 # `concurrently -k` can `ps` the process tree on shutdown (node:slim omits it).

@@ -1,0 +1,101 @@
+# Build the container image and publish it to GHCR.
+#
+# This replaces nothing: the image at reg.ennogelhaus.de was built by hand, and
+# the repository has never carried a pipeline. It exists because gitlab is being
+# decommissioned and the running production container
+# (contribute-checker-app-1 on docker-prod) is the ONLY thing left that pulls
+# from that registry.
+#
+# ubuntu-latest and NOT the self-hosted runner, deliberately. This repository is
+# public, so a pull request from a fork can run whatever it likes in the job it
+# triggers. A self-hosted runner would put that on the LAN, next to Proxmox.
+# GitHub-hosted runners are disposable and outside the network.
+name: publish image
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: publish-image-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE: ghcr.io/gelhaus-solutions/contribution-checker
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # prisma generate first: typecheck reads the generated client.
+      - run: pnpm run db:generate
+      - run: pnpm run typecheck
+      - run: pnpm run lint
+      - run: pnpm run test
+
+  image:
+    needs: verify
+    runs-on: ubuntu-latest
+    # A fork's pull request has no write access to the registry, and pushing an
+    # image built from unreviewed code would be the point of the exercise for an
+    # attacker. Build on PRs to prove the Dockerfile still works; push only from
+    # this repository's own main and tags.
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The Dockerfile derives its Temporal Build ID from `git rev-parse` in
+          # the build context, so the checkout needs to be a real repository.
+          fetch-depth: 0
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: log in to ghcr
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          # The short sha stays the primary tag: production runs
+          # contribution-checker:<short-sha> today and the compose file names it
+          # that way, so the convention is load-bearing rather than cosmetic.
+          tags: |
+            type=sha,format=short,prefix=
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=ref,event=tag
+
+      - name: build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            BUILD_ID=${{ github.sha }}
+          # The Dockerfile's `--mount=type=cache` layers (pnpm store, Next
+          # webpack cache) are BuildKit caches and do not survive a fresh
+          # runner. gha cache carries them between runs instead; without it
+          # every build re-downloads the @temporalio native core-bridge.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

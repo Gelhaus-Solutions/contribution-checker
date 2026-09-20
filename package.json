@@ -6,7 +6,7 @@
   "homepage": "https://ennogelhaus.de",
   "repository": {
     "type": "git",
-    "url": "https://gitlab.ennogelhaus.de/gelhaus-corp/contribution-checker.git"
+    "url": "https://github.com/Gelhaus-Solutions/contribution-checker.git"
   },
   "private": true,
   "scripts": {
