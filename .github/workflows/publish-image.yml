@@ -40,7 +40,11 @@ jobs:
       # prisma generate first: typecheck reads the generated client.
       - run: pnpm run db:generate
       - run: pnpm run typecheck
-      - run: pnpm run lint
+      # `pnpm run lint` is deliberately NOT here. The script exists but no
+      # ESLint config does, so `next lint` drops into its interactive
+      # "How would you like to configure ESLint?" setup and exits 1. Lint has
+      # therefore never run in this repository, on any CI, and choosing a
+      # baseline for it is a separate decision from keeping the image building.
       - run: pnpm run test
 
   image:
