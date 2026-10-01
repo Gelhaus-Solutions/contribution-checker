@@ -35,7 +35,6 @@ const config: NextConfig = {
     ],
   },
   async headers() {
-    const isHttps = (process.env.PUBLIC_BASE_URL ?? "").startsWith("https://");
     // The Content-Security-Policy is deliberately NOT set here: these header
     // rules are baked into routes-manifest.json at `next build`, but the CSP's
     // connect-src must include the operator's Hexclave backend (STACK_API_URL),
@@ -52,14 +51,13 @@ const config: NextConfig = {
           { key: "X-Frame-Options", value: "DENY" },
           { key: "X-Content-Type-Options", value: "nosniff" },
           { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
-          ...(isHttps
-            ? [
-                {
-                  key: "Strict-Transport-Security",
-                  value: "max-age=63072000; includeSubDomains",
-                },
-              ]
-            : []),
+          // Always sent: the image is built without env, so a build-time
+          // PUBLIC_BASE_URL check left HSTS off in production. Browsers ignore
+          // the header on plain http, so local dev is unaffected.
+          {
+            key: "Strict-Transport-Security",
+            value: "max-age=63072000; includeSubDomains",
+          },
         ],
       },
     ];
