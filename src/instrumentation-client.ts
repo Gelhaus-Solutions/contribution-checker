@@ -1,4 +1,5 @@
 import * as Sentry from "@sentry/nextjs";
+import { scrubSensitive } from "@/lib/observability/scrub";
 
 // Read from the runtime-injected window.__ENV__ first (set by the
 // RuntimeEnvScript in the root layout from server-side process.env at request
@@ -18,10 +19,14 @@ Sentry.init({
   dsn,
   environment,
   integrations: [
+    // Replay is recorded only around an error and with everything masked:
+    // the public application form and the CLA page carry names, signatures
+    // and free-text answers, none of which may leave the browser as clear
+    // text (GDPR Art. 5(1)(c), Art. 32).
     Sentry.replayIntegration({
-      maskAllText: false,
-      blockAllMedia: false,
-      maskAllInputs: false,
+      maskAllText: true,
+      blockAllMedia: true,
+      maskAllInputs: true,
     }),
     Sentry.browserProfilingIntegration(),
     // Capture browser console.error/warn as Sentry events. Most React/Next
@@ -32,13 +37,21 @@ Sentry.init({
     }),
   ],
   tracesSampleRate: 1.0,
-  replaysSessionSampleRate: 1.0,
+  replaysSessionSampleRate: 0,
   replaysOnErrorSampleRate: 1.0,
   profilesSampleRate: 1.0,
-  sendDefaultPii: true,
+  // No IP address, cookies or request bodies: the internal user id set in
+  // sentry-user-client.tsx is enough to find an affected account.
+  sendDefaultPii: false,
   enableLogs: true,
   _experiments: {
     enableLogs: true,
+  },
+  beforeSend(event) {
+    return scrubSensitive(event);
+  },
+  beforeBreadcrumb(crumb) {
+    return scrubSensitive(crumb);
   },
 });
 

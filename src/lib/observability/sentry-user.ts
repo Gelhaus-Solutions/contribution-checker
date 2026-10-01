@@ -21,9 +21,6 @@ export function setSentryUser(user: SentryUser | null): void {
     Sentry.setUser(null);
     return;
   }
-  Sentry.setUser({
-    id: user.id,
-    username: user.ghLogin ?? undefined,
-    email: user.email ?? undefined,
-  });
+  // Internal id only: email and GitHub login stay out of Sentry.
+  Sentry.setUser({ id: user.id });
 }

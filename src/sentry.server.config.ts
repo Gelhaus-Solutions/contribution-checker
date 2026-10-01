@@ -20,7 +20,8 @@ Sentry.init({
   ],
   tracesSampleRate: 1.0,
   profilesSampleRate: 1.0,
-  sendDefaultPii: true,
+  // No IP address, cookies or request bodies (GDPR Art. 5(1)(c)).
+  sendDefaultPii: false,
   enableLogs: true,
   // Ship console.log/info/warn/error as Sentry log entries too, so structured
   // logs and framework console output share one timeline.

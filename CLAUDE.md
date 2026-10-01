@@ -658,13 +658,16 @@ by a cache and per-request work is paid on every page view. Two rules follow:
 - **Session and membership reads are memoized, not repeated.** See the
   `auth()` / `getProjectMembership` note under Auth & roles.
 
-The Sentry sample rates are a deliberate exception: traces, node profiling,
-browser profiling and Session Replay all stay hardcoded at 1.0 in
-`src/sentry.*.config.ts` and `src/instrumentation-client.ts`. That is real
-per-request and per-page-view cost (the V8 CPU profiler on every sampled
-transaction; rrweb serializing and uploading the DOM of every page for every
-visitor, with masking off), and it is accepted in exchange for full-fidelity
-observability. Do not sample it down without asking.
+The Sentry sample rates are a deliberate exception: traces, node profiling and
+browser profiling stay hardcoded at 1.0 in `src/sentry.*.config.ts` and
+`src/instrumentation-client.ts`, accepted in exchange for full-fidelity
+observability. Session Replay is the exception to the exception, for privacy
+reasons (decided 2026-10-01): it records only around an error
+(`replaysSessionSampleRate: 0`, `replaysOnErrorSampleRate: 1.0`) and with
+`maskAllText`, `maskAllInputs` and `blockAllMedia` on, because the public
+application form and the CLA page carry names, signatures and free-text
+answers. `sendDefaultPii` is false everywhere and `Sentry.setUser` carries the
+internal id only. Do not loosen any of this without asking.
 
 ## Auth & roles
 

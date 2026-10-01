@@ -13,7 +13,8 @@ Sentry.init({
     }),
   ],
   tracesSampleRate: 1.0,
-  sendDefaultPii: true,
+  // No IP address, cookies or request bodies (GDPR Art. 5(1)(c)).
+  sendDefaultPii: false,
   enableLogs: true,
   _experiments: {
     enableLogs: true,
