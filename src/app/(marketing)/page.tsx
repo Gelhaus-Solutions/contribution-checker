@@ -227,7 +227,9 @@ export default async function Home() {
               {ALL_HEURISTICS.length} heuristics that read the diff, the
               commits, the pull request body, and the author&apos;s public
               profile. They are ordinary functions. There is no API key, no
-              inference, no third party, and no per-pull-request cost. The same
+              inference, no third party, and no per-pull-request cost. The one
+              exception is optional: a project that turned on AI assistance can
+              add the stored AI verdict on the description as one more signal. The same
               pull request scores the same number every time.
             </p>
             <p>
@@ -306,7 +308,7 @@ export default async function Home() {
             ],
             [
               "Data",
-              "Applications, decisions, the audit log and PR scores stay in your database. Nothing is sent anywhere else.",
+              "Applications, decisions, the audit log and PR scores stay in your database. Optional AI tasks send the text being judged to OpenRouter, and error reports go to Sentry if you configure a DSN.",
             ],
             ["Licence", "AGPL-3.0-or-later."],
           ].map(([term, def]) => (

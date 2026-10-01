@@ -161,11 +161,14 @@ export default function ForContributorsPage() {
         <Note>
           <div className="space-y-3">
             <p>
-              No language model reads your code, your commits, or your
-              application. The gate is a lookup on your GitHub account. The
-              quality score, if the project uses one, is a fixed set of pattern
-              checks with fixed weights. Nothing you write is sent to a third
-              party.
+              The gate is a lookup on your GitHub account. The quality score,
+              if the project uses one, is a fixed set of pattern checks with
+              fixed weights. A project can also switch on AI assistance: your
+              application answers and your pull request title and description
+              are then sent to a language model through OpenRouter to help the
+              maintainers triage. It only advises. Error reports go to Sentry
+              with page content masked. The privacy notice of the instance you
+              use lists every recipient and how long data is kept.
             </p>
             <p>
               The project&apos;s maintainers decide who is approved. This
