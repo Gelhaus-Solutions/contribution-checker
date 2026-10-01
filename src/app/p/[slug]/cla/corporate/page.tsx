@@ -19,6 +19,7 @@ import { signCcla, addRosterMembers, revokeRosterMember } from "../actions";
 import { parseFormSchema, type FormSchema } from "@/lib/applications/schema";
 import { formatDate } from "@/lib/ui/format";
 import { SHELL_NARROW } from "@/lib/ui/layout";
+import { requireTermsStanding } from "@/lib/authz";
 
 export default async function CorporateClaPage({
   params,
@@ -44,6 +45,9 @@ export default async function CorporateClaPage({
   if (!project.claEnabled || !project.claCorporateEnabled) notFound();
 
   const session = await auth();
+  if (session?.user && !session.user.restricted && session.user.ghId) {
+    await requireTermsStanding(session, `/p/${slug}/cla/corporate`);
+  }
 
   return (
     <>

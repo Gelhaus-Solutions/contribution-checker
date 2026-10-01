@@ -719,6 +719,21 @@ internal id only. Do not loosen any of this without asking.
   ADMIN. Project deletion requires OWNER.
 - The bot's GitHub App installation (`getInstallationOctokit`,
   `Repo.installationId`) is independent of login and unchanged.
+- **Terms acceptance** (`src/lib/terms.ts`, hosted instance only). The account
+  accepts Contribution Checker's terms and Gelhaus Solutions' general terms,
+  recorded in `TermsAcceptance` as archived version ids from
+  gplatform.org/legal, never URLs. `auth()` puts the standing on
+  `session.user.terms`; `requireSession()` (and `requireTermsStanding()` on the
+  pages that resolve the session themselves) sends a new account to
+  `/accept-terms` before anything else, asks once per browser session while a
+  new version is announced, and once it binds refuses server actions until the
+  account accepts. The public apply, appeal and CLA actions refuse through
+  `termsRefuseWrite()`. On while `LEGAL_TERMS_URL` is Gelhaus Solutions';
+  `TERMS_ACCEPT_STEP` overrides. A new version's dates are
+  `TERMS_2026_10_01_ANNOUNCED_AT` and `_IN_FORCE_FROM`, set the day its notice
+  mail goes out, six weeks and a day apart. An account older than the step
+  with no record is not asked about the versions it used the service under,
+  only about the next one. GPlatform Terms will take this over.
 
 ## Adding a new quality heuristic
 

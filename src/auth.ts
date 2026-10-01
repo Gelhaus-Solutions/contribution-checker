@@ -12,7 +12,8 @@ import {
   resolveOrgRoles,
 } from "@/lib/auth/sync-user";
 import { setSentryUser } from "@/lib/observability/sentry-user";
-import type { Session } from "@/lib/auth-types";
+import type { Session, SessionUser } from "@/lib/auth-types";
+import { standingAt, termsVersions, TERMS_STEP_SINCE } from "@/lib/terms";
 
 export type { Session } from "@/lib/auth-types";
 
@@ -109,8 +110,9 @@ async function resolveSession(): Promise<Session | null> {
       );
     }
 
-    // Resolve org roles live, then keep the local cache columns in sync.
-    const roles = await resolveOrgRoles(stackUser);
+    // Resolve org roles live, then keep the local cache columns in sync. The
+    // terms standing is read beside it rather than after it.
+    const [roles, terms] = await Promise.all([resolveOrgRoles(stackUser), termsOf(u)]);
     if (
       roles.isSuperAdmin !== u.isSuperAdmin ||
       roles.canCreateProj !== u.canCreateProj
@@ -144,11 +146,43 @@ async function resolveSession(): Promise<Session | null> {
         country: null,
         isSuperAdmin: roles.isSuperAdmin,
         canCreateProj: roles.canCreateProj,
+        terms,
       },
     };
   } catch (e) {
     logger.error({ err: e }, "auth: failed to resolve session");
     return null;
+  }
+}
+
+/**
+ * Where an account stands with the terms, from every acceptance it recorded.
+ * Undefined when the step is off, and when the read fails: the standing gates
+ * writes, and a failed read must not stop a signed-in person from reading.
+ */
+async function termsOf(u: { id: string; createdAt: Date }): Promise<SessionUser["terms"]> {
+  if (env.termsAcceptStep !== "on") return undefined;
+  try {
+    const rows = await prisma.termsAcceptance.findMany({
+      where: { userId: u.id },
+      orderBy: { acceptedAt: "asc" },
+      select: { version: true },
+    });
+    const standing = standingAt({
+      now: new Date(),
+      createdAt: u.createdAt,
+      stepSince: TERMS_STEP_SINCE,
+      accepted: rows.map((r) => r.version),
+      versions: termsVersions(env.termsRollout),
+    });
+    return {
+      kind: standing.kind,
+      inForceFrom: standing.inForceFrom?.toISOString() ?? null,
+      record: standing.record,
+    };
+  } catch (e) {
+    logger.warn({ err: e, "auth.user_id": u.id }, "auth: reading the terms standing failed");
+    return undefined;
   }
 }
 

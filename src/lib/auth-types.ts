@@ -1,3 +1,5 @@
+import type { TermsKind } from "@/lib/terms";
+
 /**
  * Local session shape. Previously this came from the `next-auth` module
  * augmentation in src/auth.ts; after the Hexclave migration the `auth()` shim
@@ -23,6 +25,16 @@ export type SessionUser = {
    * /restricted. NOTE: this is the human-readable text, not the SDK's
    * `restrictedReason: { type }` discriminator. May be null even when restricted. */
   restrictionReason?: string | null;
+  /** Where the account stands with the terms (src/lib/terms.ts). Absent when
+   * the step is off, and when the standing could not be read: a database
+   * hiccup must not lock anybody out. */
+  terms?: {
+    kind: TermsKind;
+    /** ISO instant; for `asked`, when the first unaccepted version binds. */
+    inForceFrom: string | null;
+    /** What accepting now records. */
+    record: string;
+  };
 };
 
 export type Session = {

@@ -31,6 +31,8 @@ import { notifyApplicantClaRequired } from "@/lib/cla/notify";
 import { getClientIp, getClientUserAgent } from "@/lib/http/client";
 import type { ApplyState } from "./apply-form";
 import type { AppealState } from "./appeal-form";
+import { termsRefuseWrite } from "@/lib/authz";
+import { TERMS_REFUSAL } from "@/lib/terms";
 
 // Verbatim affirmation snapshotted onto the immutable click-wrap signature.
 const CLA_EMBED_AFFIRMATION =
@@ -63,6 +65,9 @@ export async function applyAction(
   }
   if (session.user.restricted) {
     return { status: "error", reason: "Your account is restricted." };
+  }
+  if (termsRefuseWrite(session)) {
+    return { status: "error", reason: TERMS_REFUSAL };
   }
 
   const projectId = String(formData.get("projectId") ?? "");
@@ -303,6 +308,9 @@ export async function appealAction(
   }
   if (session.user.restricted) {
     return { status: "error", reason: "Your account is restricted." };
+  }
+  if (termsRefuseWrite(session)) {
+    return { status: "error", reason: TERMS_REFUSAL };
   }
 
   const applicationId = String(formData.get("applicationId") ?? "");

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { rolloutFrom } from "@/lib/terms";
 import { getVaultPathFor } from "@/lib/vault/config";
 
 // A secret is "configured" if it's set in process.env OR has a VAULT_<name>_PATH
@@ -21,6 +22,15 @@ const optionalUrl = z.preprocess(
   z.string().url().optional(),
 );
 
+// Gelhaus Solutions' terms for Contribution Checker, linked by the hosted instance.
+const GS_CC_TERMS_URL = "https://gplatform.org/apps/contribution-checker/terms";
+
+// An instant with its zone, so a server set to another zone cannot move it.
+const optionalInstant = z.preprocess(
+  (v) => (v === "" ? undefined : v),
+  z.string().datetime({ offset: true }).optional(),
+);
+
 const schema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
 
@@ -32,10 +42,21 @@ const schema = z.object({
   LEGAL_PRIVACY_URL: optionalUrl.default(
     "https://gplatform.org/apps/contribution-checker/privacy",
   ),
-  LEGAL_TERMS_URL: optionalUrl.default(
-    "https://gplatform.org/apps/contribution-checker/terms",
-  ),
+  LEGAL_TERMS_URL: optionalUrl.default(GS_CC_TERMS_URL),
   LEGAL_IMPRINT_URL: optionalUrl.default("https://gplatform.org/impressum"),
+
+  // The terms acceptance step (src/lib/terms.ts). Unset, it follows the terms
+  // this instance links: on while they are Gelhaus Solutions' (the hosted
+  // instance, LEGAL_TERMS_URL at its default), off once a self-hoster names
+  // their own, because the step asks people to accept Gelhaus Solutions'
+  // documents and nobody else's.
+  TERMS_ACCEPT_STEP: z.enum(["on", "off"]).optional(),
+  // When the 2026-10-01 versions of Contribution Checker's terms and the
+  // general terms are announced, and when they bind. Set both on the day their
+  // notice mail goes out, at least six weeks and a day apart; unset, nobody is
+  // asked about them yet.
+  TERMS_2026_10_01_ANNOUNCED_AT: optionalInstant,
+  TERMS_2026_10_01_IN_FORCE_FROM: optionalInstant,
 
   // Legacy NextAuth vars. No longer used after the Hexclave migration (login is
   // handled by Hexclave); kept optional for backward compat and removed in the
@@ -222,6 +243,16 @@ const schema = z.object({
     .enum(["true", "false"])
     .default("false")
     .transform((v) => v === "true"),
+}).superRefine((value, ctx) => {
+  try {
+    rolloutFrom(value.TERMS_2026_10_01_ANNOUNCED_AT, value.TERMS_2026_10_01_IN_FORCE_FROM);
+  } catch (e) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["TERMS_2026_10_01_IN_FORCE_FROM"],
+      message: (e as Error).message,
+    });
+  }
 });
 
 // During `next build`, Next.js executes server modules to collect page data
@@ -276,6 +307,14 @@ const oauthConfigured =
 
 export const env = {
   ...raw,
+  termsAcceptStep:
+    raw.TERMS_ACCEPT_STEP ??
+    (raw.LEGAL_TERMS_URL === GS_CC_TERMS_URL ? "on" : "off"),
+  // The rollout of the 2026-10-01 terms, already validated by the schema.
+  termsRollout: rolloutFrom(
+    raw.TERMS_2026_10_01_ANNOUNCED_AT,
+    raw.TERMS_2026_10_01_IN_FORCE_FROM,
+  ),
   oauthClientId,
   oauthClientSecret,
   oauthConfigured,

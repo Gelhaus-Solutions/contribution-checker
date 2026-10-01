@@ -1,7 +1,13 @@
 import { cache } from "react";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/db";
+import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
+import {
+  acceptTermsPath,
+  TERMS_ANSWER_COOKIE,
+  termsRefusesWrites,
+} from "@/lib/terms";
 import {
   parseLeafPermissions,
   permissionsForRole,
@@ -34,7 +40,47 @@ export async function requireSession(): Promise<Session> {
   // middleware) because it depends on DB/Hexclave state. The /welcome flow uses
   // auth() directly, so it never re-enters this gate (no redirect loop).
   if (!session.user.ghId) redirect("/welcome");
+  await requireTermsStanding(session);
   return session;
+}
+
+/**
+ * The terms gate (src/lib/terms.ts), for every surface behind
+ * requireSession() and for the pages that resolve the session themselves.
+ *
+ * - Nothing accepted yet (`first`): the accept page, always.
+ * - A newer version announced (`asked`) or binding (`restricted`): the accept
+ *   page once per browser session, then not again until the versions change.
+ * - `restricted` and the request is a server action: the accept page. A
+ *   restricted account may read, and a server action is a write.
+ *
+ * `next` is where the accept page sends the person back to.
+ */
+export async function requireTermsStanding(
+  session: Session,
+  next = "/dashboard",
+): Promise<void> {
+  const terms = session.user.terms;
+  if (!terms) return;
+  if (terms.kind === "first") redirect(acceptTermsPath(next));
+  if (terms.kind !== "asked" && terms.kind !== "restricted") return;
+  const [h, c] = await Promise.all([headers(), cookies()]);
+  const isAction = h.has("next-action");
+  if (isAction) {
+    if (terms.kind === "restricted") redirect(acceptTermsPath(next));
+    return;
+  }
+  if (c.get(TERMS_ANSWER_COOKIE)?.value !== terms.record) {
+    redirect(acceptTermsPath(next));
+  }
+}
+
+/**
+ * Whether the terms refuse a write, for entry points that answer with a typed
+ * error instead of a redirect (the public apply, appeal and CLA actions).
+ */
+export function termsRefuseWrite(session: Session | null): boolean {
+  return termsRefusesWrites(session?.user.terms?.kind);
 }
 
 /**

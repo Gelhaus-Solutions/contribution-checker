@@ -6,6 +6,8 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/db";
 import { createProject } from "@/lib/projects";
 import { slugSchema, slugify } from "@/lib/slug";
+import { termsRefuseWrite } from "@/lib/authz";
+import { acceptTermsPath } from "@/lib/terms";
 
 const inputSchema = z.object({
   name: z.string().min(2).max(80),
@@ -25,6 +27,7 @@ export async function createProjectAction(
   const session = await auth();
   if (!session?.user) return { error: "Not signed in" };
   if (session.user.restricted) redirect("/restricted");
+  if (termsRefuseWrite(session)) redirect(acceptTermsPath("/dashboard/projects/new"));
   if (!session.user.canCreateProj) return { error: "Not authorized to create projects" };
 
   const raw = {

@@ -56,6 +56,23 @@ model User {
   claSignatures   ClaSignature[]
   qaVerdicts      StagingBatchItem[]
   aiRuns          AiResult[]
+  termsAccepted   TermsAcceptance[]
+}
+
+// One acceptance of the terms (src/lib/terms.ts): the archived version ids the
+// person was shown, joined with "+", and when. Never updated: a later
+// acceptance is a new row, so the history of what somebody agreed to stays
+// readable. Deleted with the account.
+model TermsAcceptance {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  version    String
+  // "first-sign-in" or "accept-screen".
+  source     String
+  acceptedAt DateTime @default(now())
+
+  @@index([userId, acceptedAt])
 }
 
 model Project {

@@ -33,6 +33,8 @@ import {
   disputeRosterMembership,
 } from "@/lib/cla/mutations";
 import { onClaCoverageChanged } from "@/lib/cla/post-sign";
+import { termsRefuseWrite } from "@/lib/authz";
+import { TERMS_REFUSAL } from "@/lib/terms";
 
 // ---------------------------------------------------------------------------
 // Public, GitHub-sign-in-gated CLA actions. Mirrors `applyAction`:
@@ -80,6 +82,9 @@ async function gate(): Promise<RateLimited> {
   }
   if (user.restricted) {
     return { ok: false, reason: "Your account is restricted." };
+  }
+  if (termsRefuseWrite(session)) {
+    return { ok: false, reason: TERMS_REFUSAL };
   }
   if (typeof user.ghId !== "number" || !user.ghLogin) {
     return {

@@ -28,6 +28,7 @@ export type AuditKind =
   | "bypass.added"
   | "bypass.removed"
   | "webhook.test_sent"
+  | "terms.accepted"
   | "user.allowlisted"
   | "user.deallowlisted"
   | "settings.gating_changed"

@@ -18,6 +18,7 @@ import {
 import { SignForm, DisputeForm } from "./sign-form";
 import { CollectionNotice } from "@/components/legal-notice";
 import { signIcla, disputeMembership } from "./actions";
+import { requireTermsStanding } from "@/lib/authz";
 
 export default async function ClaSignPage({
   params,
@@ -42,6 +43,9 @@ export default async function ClaSignPage({
   if (!project) notFound();
 
   const session = await auth();
+  if (session?.user && !session.user.restricted && session.user.ghId) {
+    await requireTermsStanding(session, `/p/${slug}/cla`);
+  }
 
   return (
     <>

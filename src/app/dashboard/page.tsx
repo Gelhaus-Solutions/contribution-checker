@@ -20,6 +20,7 @@ import {
   listAppliedProjectsForUser,
   listProjectsForUser,
 } from "@/lib/projects";
+import { requireTermsStanding } from "@/lib/authz";
 
 
 export default async function DashboardHome() {
@@ -28,6 +29,7 @@ export default async function DashboardHome() {
     redirect("/handler/sign-in?after_auth_return_to=/dashboard");
   if (session.user.restricted) redirect("/restricted");
   if (!session.user.ghId) redirect("/welcome");
+  await requireTermsStanding(session);
 
   const [memberships, applications] = await Promise.all([
     listProjectsForUser(session.user.id),

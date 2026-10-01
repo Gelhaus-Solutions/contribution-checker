@@ -26,6 +26,7 @@ import { replyToCommentAction } from "@/app/dashboard/projects/[id]/applications
 import { StatusBadge } from "@/components/status-badge";
 import { formatDate } from "@/lib/ui/format";
 import { SHELL_NARROW } from "@/lib/ui/layout";
+import { requireTermsStanding } from "@/lib/authz";
 
 
 export default async function PublicProjectPage({
@@ -59,6 +60,9 @@ export default async function PublicProjectPage({
   if (!project) notFound();
 
   const session = await auth();
+  if (session?.user && !session.user.restricted && session.user.ghId) {
+    await requireTermsStanding(session, `/p/${slug}`);
+  }
   const fields = parseFormSchema(project.formSchema);
 
   // Embedded CLA: when the project requires a CLA in the application form and
