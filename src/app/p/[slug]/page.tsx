@@ -16,6 +16,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { ApplyForm, type ClaEmbed } from "./apply-form";
+import { CollectionNotice } from "@/components/legal-notice";
 import { AppealForm } from "./appeal-form";
 import { applyAction, appealAction } from "./actions";
 import { isManuallyBlocked } from "@/lib/applications/lifecycle";
@@ -444,12 +445,15 @@ function ApplicantSurface({
 }) {
   if (!existing) {
     return (
-      <ApplyForm
-        projectId={projectId}
-        fields={fields}
-        action={applyAction}
-        claEmbed={claEmbed}
-      />
+      <div className="space-y-3">
+        <ApplyForm
+          projectId={projectId}
+          fields={fields}
+          action={applyAction}
+          claEmbed={claEmbed}
+        />
+        <CollectionNotice what="Your answers and your GitHub identity" />
+      </div>
     );
   }
   const view = deriveApplicantView(existing, allowAppeals);
@@ -474,12 +478,15 @@ function ApplicantSurface({
         </div>
       )}
       {view.canApply && (
-        <ApplyForm
-          projectId={projectId}
-          fields={fields}
-          action={applyAction}
-          claEmbed={claEmbed}
-        />
+        <>
+          <ApplyForm
+            projectId={projectId}
+            fields={fields}
+            action={applyAction}
+            claEmbed={claEmbed}
+          />
+          <CollectionNotice what="Your answers and your GitHub identity" />
+        </>
       )}
     </div>
   );

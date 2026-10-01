@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { BrandMark } from "@/components/brand-mark";
+import { legalLinks } from "@/components/legal-notice";
 
 const COLUMNS: { title: string; links: { href: string; label: string }[] }[] = [
   {
@@ -79,7 +80,18 @@ export function MarketingFooter() {
               Gelhaus Solutions
             </a>
           </p>
-          <p className="font-mono">AGPL-3.0-or-later</p>
+          <div className="flex flex-wrap items-center gap-4">
+            {legalLinks().map((l) => (
+              <a
+                key={l.href}
+                href={l.href}
+                className="transition-colors hover:text-foreground"
+              >
+                {l.label}
+              </a>
+            ))}
+            <p className="font-mono">AGPL-3.0-or-later</p>
+          </div>
         </div>
       </div>
     </footer>

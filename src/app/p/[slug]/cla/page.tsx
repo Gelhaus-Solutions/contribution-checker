@@ -16,6 +16,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { SignForm, DisputeForm } from "./sign-form";
+import { CollectionNotice } from "@/components/legal-notice";
 import { signIcla, disputeMembership } from "./actions";
 
 export default async function ClaSignPage({
@@ -275,6 +276,9 @@ async function ClaSurface({
           customFields={parseFormSchema(project.claIclaCustomFields)}
           action={signIcla}
         />
+        <div className="mt-4">
+          <CollectionNotice what="Your legal name, signature, email address, IP address and browser user agent" />
+        </div>
         {project.claCorporateEnabled && (
           <p className="mt-4 text-xs text-muted-foreground">
             Signing on behalf of a company?{" "}

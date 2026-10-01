@@ -14,11 +14,24 @@ const csv = (v: string | undefined) =>
     .map((s) => s.trim())
     .filter(Boolean);
 
+// An empty value means "not set", so a blank line in .env leaves the link out
+// instead of failing the URL check.
+const optionalUrl = z.preprocess(
+  (v) => (v === "" ? undefined : v),
+  z.string().url().optional(),
+);
+
 const schema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
 
   DATABASE_URL: z.string().min(1),
   PUBLIC_BASE_URL: z.string().url().default("http://localhost:3000"),
+
+  // The operator's own legal documents. Each instance names its own operator,
+  // so nothing is hardcoded: an unset URL simply leaves that link out.
+  LEGAL_PRIVACY_URL: optionalUrl,
+  LEGAL_TERMS_URL: optionalUrl,
+  LEGAL_IMPRINT_URL: optionalUrl,
 
   // Legacy NextAuth vars. No longer used after the Hexclave migration (login is
   // handled by Hexclave); kept optional for backward compat and removed in the
