@@ -338,11 +338,17 @@ async function postQualityWarningComment(args: {
   config: Record<string, HeuristicSetting>;
 }): Promise<void> {
   const ref = repoRef(args.repoFullName, args.installationId);
+  // Only signals about the pull request itself are named in public. Signals
+  // about the author's account (username, profile, email) and the AI verdict
+  // are profiling outputs about a person and stay on the maintainers'
+  // dashboard; a public comment labelling someone is a different act from
+  // scoring a diff.
   const failed = args.summary.failedIds
     .map((id) => {
       const h = ALL_HEURISTICS.find((x) => x.id === id);
+      if (!h || h.group === "account" || h.id === "pr.ai_assessment") return null;
       const sig = args.signals[id];
-      return h ? `- **${h.label}**${sig?.reason ? `: ${sig.reason}` : ""}` : null;
+      return `- **${h.label}**${sig?.reason ? `: ${sig.reason}` : ""}`;
     })
     .filter(Boolean);
   const body = [

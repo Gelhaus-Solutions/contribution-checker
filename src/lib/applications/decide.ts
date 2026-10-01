@@ -239,10 +239,12 @@ export async function denyApplication(args: {
   await enqueueProjectWebhook({
     projectId: app.projectId,
     event: "application.denied",
+    // The denial reason stays inside the app (the applicant reads it on their
+    // status page). Outbound webhooks often end in third-party chat tools, so
+    // the reason is not carried there.
     payload: {
       applicationId: app.id,
       ghLogin: app.user.ghLogin,
-      reason: args.reason ?? null,
     },
     triggeredById: args.decidedById,
   });
