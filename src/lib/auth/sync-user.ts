@@ -10,7 +10,6 @@ import {
   SUPER_ADMIN_PERMISSION,
 } from "@/lib/stack";
 import { isInstanceAdminTeam } from "@/lib/stack-provisioning";
-import { isValidCountryCode } from "@/lib/countries";
 
 type GithubUser = {
   id: number;
@@ -245,28 +244,21 @@ export async function reconcileOrgPermissions(
 }
 
 /**
- * Capture the country code in the background (no user prompt): use Hexclave's
- * best-effort geo `countryCode` (captured from request geo headers at sign-up).
- * When it resolves to a valid ISO 3166-1 alpha-2 code, write it to Hexclave
- * clientReadOnlyMetadata (canonical) and mirror it to User.country. When geo is
- * unavailable/invalid we leave it unset rather than asking the user.
+ * Remove a country code written by the old geo capture from the user's
+ * Hexclave clientReadOnlyMetadata. Nothing ever read it, so it was collected
+ * without a purpose (GDPR Art. 5(1)(c)); the local column was emptied by the
+ * 20261001120000_privacy_minimisation migration and this clears the canonical
+ * copy. A no-op once the key is gone, so the steady state costs no write.
  */
-export async function captureGeoCountry(
-  stackUser: ServerUser,
-  localUserId: string,
-): Promise<string | null> {
-  const code = (stackUser.countryCode ?? "").trim().toUpperCase();
-  if (!isValidCountryCode(code)) return null;
+export async function clearGeoCountry(stackUser: ServerUser): Promise<void> {
   const existing =
     (stackUser.clientReadOnlyMetadata as Record<string, unknown> | null) ?? {};
+  if (!("country" in existing)) return;
+  const rest = { ...existing };
+  delete rest.country;
   await stackUser.update({
-    clientReadOnlyMetadata: { ...existing, country: code },
+    clientReadOnlyMetadata: rest as typeof stackUser.clientReadOnlyMetadata,
   });
-  await prisma.user.update({
-    where: { id: localUserId },
-    data: { country: code },
-  });
-  return code;
 }
 
 /** Emit the auth.signin metric (preserved from the old NextAuth signIn event). */

@@ -7,7 +7,7 @@ import { logger } from "@/lib/logger";
 import { getStackServerApp } from "@/lib/stack";
 import { resolveLocalUserFromStack } from "@/lib/auth/resolve-user";
 import {
-  captureGeoCountry,
+  clearGeoCountry,
   recordSignOutMetric,
   resolveOrgRoles,
 } from "@/lib/auth/sync-user";
@@ -97,20 +97,16 @@ async function resolveSession(): Promise<Session | null> {
       profileImageUrl: stackUser.profileImageUrl,
     });
 
-    // Capture the country in the background (no prompt) when it's still unset:
-    // a one-time, bounded write from Hexclave's geo signal. This also covers
-    // backfilled users who skip /welcome (they already have ghId). It's a sync
-    // no-op when geo is unavailable, so the steady state costs nothing.
-    let country = u.country;
-    if (!country) {
-      try {
-        country = await captureGeoCountry(stackUser, u.id);
-      } catch (e) {
-        logger.warn(
-          { err: e, "stack.user_id": stackUser.id },
-          "auth: geo country capture failed",
-        );
-      }
+    // Country is no longer captured. Any code the old capture left in Hexclave
+    // metadata is removed on the user's next request: one bounded write, then
+    // a no-op.
+    try {
+      await clearGeoCountry(stackUser);
+    } catch (e) {
+      logger.warn(
+        { err: e, "stack.user_id": stackUser.id },
+        "auth: clearing the old geo country failed",
+      );
     }
 
     // Resolve org roles live, then keep the local cache columns in sync.
@@ -145,7 +141,7 @@ async function resolveSession(): Promise<Session | null> {
         image: u.image,
         ghId: u.ghId,
         ghLogin: u.ghLogin,
-        country,
+        country: null,
         isSuperAdmin: roles.isSuperAdmin,
         canCreateProj: roles.canCreateProj,
       },
