@@ -2,7 +2,7 @@ import { env } from "@/lib/env";
 
 type LegalLink = { href: string; label: string };
 
-/** The operator's legal documents, from LEGAL_*_URL. Empty when none is set. */
+/** The operator's legal documents, from LEGAL_*_URL (Gelhaus Solutions' by default). */
 export function legalLinks(): LegalLink[] {
   return [
     env.LEGAL_PRIVACY_URL && { href: env.LEGAL_PRIVACY_URL, label: "Privacy" },

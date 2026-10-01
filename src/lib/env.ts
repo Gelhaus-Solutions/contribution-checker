@@ -27,11 +27,15 @@ const schema = z.object({
   DATABASE_URL: z.string().min(1),
   PUBLIC_BASE_URL: z.string().url().default("http://localhost:3000"),
 
-  // The operator's own legal documents. Each instance names its own operator,
-  // so nothing is hardcoded: an unset URL simply leaves that link out.
-  LEGAL_PRIVACY_URL: optionalUrl,
-  LEGAL_TERMS_URL: optionalUrl,
-  LEGAL_IMPRINT_URL: optionalUrl,
+  // The operator's legal documents. The defaults are Gelhaus Solutions', which
+  // runs the hosted instance; a self-hoster sets their own.
+  LEGAL_PRIVACY_URL: optionalUrl.default(
+    "https://gplatform.org/apps/contribution-checker/privacy",
+  ),
+  LEGAL_TERMS_URL: optionalUrl.default(
+    "https://gplatform.org/apps/contribution-checker/terms",
+  ),
+  LEGAL_IMPRINT_URL: optionalUrl.default("https://gplatform.org/impressum"),
 
   // Legacy NextAuth vars. No longer used after the Hexclave migration (login is
   // handled by Hexclave); kept optional for backward compat and removed in the
