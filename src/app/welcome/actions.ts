@@ -5,7 +5,6 @@ import { auth } from "@/auth";
 import { getStackServerApp } from "@/lib/stack";
 import { logger } from "@/lib/logger";
 import {
-  captureGeoCountry,
   reconcileOrgPermissions,
   syncGitHubIdentity,
 } from "@/lib/auth/sync-user";
@@ -42,8 +41,8 @@ export async function finishOnboarding(_formData: FormData): Promise<void> {
     // 2. Org roles (Instance Admin team membership / global permissions) mirrored
     //    to the local cache columns.
     await reconcileOrgPermissions(stackUser, userId);
-    // 3. Country (background, best-effort) -> Hexclave metadata + User.country.
-    await captureGeoCountry(stackUser, userId);
+    // Country is no longer captured: nothing used it, and collecting it
+    // without a purpose is not data minimisation (GDPR Art. 5(1)(c)).
   } catch (e) {
     logger.error(
       { err: e, "stack.user_id": stackUser.id },

@@ -10,7 +10,6 @@ import { getStackServerApp } from "@/lib/stack";
 import { isInstanceAdminTeam } from "@/lib/stack-provisioning";
 import { readTeamMemberships } from "@/lib/stack-teams";
 import { logger } from "@/lib/logger";
-import { isValidCountryCode } from "@/lib/countries";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -242,24 +241,29 @@ export async function POST(req: Request) {
     const stackUserId = data.id;
 
     if (stackUserId && type === "user.updated") {
-      const country =
-        typeof data.client_read_only_metadata?.country === "string"
-          ? (data.client_read_only_metadata.country as string).toUpperCase()
-          : null;
+      // Country is no longer mirrored: nothing used it (data minimisation).
       await prisma.user.updateMany({
         where: { stackUserId },
         data: {
           ...(data.display_name !== undefined ? { name: data.display_name } : {}),
-          ...(country && isValidCountryCode(country) ? { country } : {}),
         },
       });
     } else if (stackUserId && type === "user.deleted") {
-      // Keep the local row (FKs / audit), just unlink the identity.
+      // Keep the local row (FKs, the record of applications and decisions the
+      // project relies on), but erase what identifies the person beyond their
+      // public GitHub identity: name, email, avatar and country (GDPR Art. 17).
       await prisma.user.updateMany({
         where: { stackUserId },
-        data: { stackUserId: null },
+        data: {
+          stackUserId: null,
+          name: null,
+          email: null,
+          emailVerified: null,
+          image: null,
+          country: null,
+        },
       });
-      logger.info({ "stack.user_id": stackUserId }, "stack webhook: user.deleted, unlinked local row");
+      logger.info({ "stack.user_id": stackUserId }, "stack webhook: user.deleted, unlinked and erased local row");
     } else if (type.startsWith("team")) {
       // team.created/updated/deleted -> the team is data.id;
       // team_membership.* / team_permission.* -> data.team_id.
