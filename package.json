@@ -103,6 +103,9 @@
     "onlyBuiltDependencies": [
       "@sentry-internal/node-cpu-profiler",
       "@sentry/cli"
-    ]
+    ],
+    "patchedDependencies": {
+      "@hexclave/next@1.0.24": "patches/@hexclave__next@1.0.24.patch"
+    }
   }
 }

@@ -4,6 +4,11 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+patchedDependencies:
+  '@hexclave/next@1.0.24':
+    hash: 4556e334d3f3173cbadfd461c6f8d44176b5a7e5e1ad9c18de71a48a3a690bba
+    path: patches/@hexclave__next@1.0.24.patch
+
 importers:
 
   .:
@@ -13,7 +18,7 @@ importers:
         version: 2.11.2(@prisma/client@6.19.3(prisma@6.19.3(typescript@5.9.3))(typescript@5.9.3))(nodemailer@6.10.1)
       '@hexclave/next':
         specifier: 1.0.24
-        version: 1.0.24(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(next@15.1.4(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@playwright/test@1.59.1)(react-dom@19.2.5(react@19.2.5))(react@19.2.5))(react-dom@19.2.5(react@19.2.5))(react@19.2.5)(tailwindcss@4.2.4)(zod@3.25.76)
+        version: 1.0.24(patch_hash=4556e334d3f3173cbadfd461c6f8d44176b5a7e5e1ad9c18de71a48a3a690bba)(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(next@15.1.4(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@playwright/test@1.59.1)(react-dom@19.2.5(react@19.2.5))(react@19.2.5))(react-dom@19.2.5(react@19.2.5))(react@19.2.5)(tailwindcss@4.2.4)(zod@3.25.76)
       '@octokit/app':
         specifier: ^15.1.4
         version: 15.1.6
@@ -7200,7 +7205,7 @@ snapshots:
       protobufjs: 7.6.4
       yargs: 17.7.3
 
-  '@hexclave/next@1.0.24(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(next@15.1.4(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@playwright/test@1.59.1)(react-dom@19.2.5(react@19.2.5))(react@19.2.5))(react-dom@19.2.5(react@19.2.5))(react@19.2.5)(tailwindcss@4.2.4)(zod@3.25.76)':
+  '@hexclave/next@1.0.24(patch_hash=4556e334d3f3173cbadfd461c6f8d44176b5a7e5e1ad9c18de71a48a3a690bba)(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(next@15.1.4(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@playwright/test@1.59.1)(react-dom@19.2.5(react@19.2.5))(react@19.2.5))(react-dom@19.2.5(react@19.2.5))(react@19.2.5)(tailwindcss@4.2.4)(zod@3.25.76)':
     dependencies:
       '@ai-sdk/react': 3.0.210(react@19.2.5)(zod@3.25.76)
       '@hexclave/sc': 1.0.24(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(next@15.1.4(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@playwright/test@1.59.1)(react-dom@19.2.5(react@19.2.5))(react@19.2.5))(react-dom@19.2.5(react@19.2.5))(react@19.2.5)

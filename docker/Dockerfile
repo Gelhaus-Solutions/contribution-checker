@@ -20,6 +20,8 @@ FROM base AS build
 RUN apt-get update && apt-get install -y --no-install-recommends git \
     && rm -rf /var/lib/apt/lists/*
 COPY package.json pnpm-lock.yaml .npmrc ./
+# pnpm applies patches/ during install (package.json pnpm.patchedDependencies).
+COPY patches ./patches
 RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
     pnpm install --frozen-lockfile
 COPY . .
@@ -44,6 +46,8 @@ RUN --mount=type=cache,id=next-cache,target=/app/.next/cache \
 #     tsx is needed at runtime. The Prisma client is generated here. ---
 FROM base AS prod-deps
 COPY package.json pnpm-lock.yaml .npmrc ./
+# pnpm applies patches/ during install (package.json pnpm.patchedDependencies).
+COPY patches ./patches
 RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
     pnpm install --prod --frozen-lockfile
 COPY prisma ./prisma

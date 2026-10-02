@@ -1,0 +1,26 @@
+diff --git a/dist/components-page/account-settings/payments/payments-panel.js b/dist/components-page/account-settings/payments/payments-panel.js
+index f7a07ecf5370a0823d8817908b5be7c325b9cc31..d6e2637ee7a929f13b346f6023d304f629b48480 100644
+--- a/dist/components-page/account-settings/payments/payments-panel.js
++++ b/dist/components-page/account-settings/payments/payments-panel.js
+@@ -12,7 +12,7 @@ let _________lib_translations_js = require("../../../lib/translations.js");
+ let _________index_js = require("../../../index.js");
+ let ___section_js = require("../section.js");
+ let _stripe_react_stripe_js = require("@stripe/react-stripe-js");
+-let _stripe_stripe_js = require("@stripe/stripe-js");
++let _stripe_stripe_js = require("@stripe/stripe-js/pure");
+ let _________generated_env_js = require("../../../generated/env.js");
+ 
+ //#region src/components-page/account-settings/payments/payments-panel.tsx
+diff --git a/dist/esm/components-page/account-settings/payments/payments-panel.js b/dist/esm/components-page/account-settings/payments/payments-panel.js
+index 0892becf141363e8f4409b045a698f94c68f646e..b8291c9bcab2b7c3e2fe87e5fc3d77406d71fe76 100644
+--- a/dist/esm/components-page/account-settings/payments/payments-panel.js
++++ b/dist/esm/components-page/account-settings/payments/payments-panel.js
+@@ -10,7 +10,7 @@ import { useTranslation } from "../../../lib/translations.js";
+ import { useStackApp } from "../../../index.js";
+ import { Section } from "../section.js";
+ import { CardElement, Elements, useElements, useStripe } from "@stripe/react-stripe-js";
+-import { loadStripe } from "@stripe/stripe-js";
++import { loadStripe } from "@stripe/stripe-js/pure";
+ import { envVars } from "../../../generated/env.js";
+ 
+ //#region src/components-page/account-settings/payments/payments-panel.tsx
