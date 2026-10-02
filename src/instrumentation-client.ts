@@ -19,14 +19,14 @@ Sentry.init({
   dsn,
   environment,
   integrations: [
-    // Replay is recorded only around an error and with everything masked:
-    // the public application form and the CLA page carry names, signatures
-    // and free-text answers, none of which may leave the browser as clear
-    // text (GDPR Art. 5(1)(c), Art. 32).
+    // Replay is recorded only around an error, unmasked: a masked replay
+    // cannot show what went wrong on a form, which is what replays are for
+    // here (the operator's decision, 2026-10-02). The privacy notice says
+    // replays show the page as it was, typed text included.
     Sentry.replayIntegration({
-      maskAllText: true,
-      blockAllMedia: true,
-      maskAllInputs: true,
+      maskAllText: false,
+      blockAllMedia: false,
+      maskAllInputs: false,
     }),
     Sentry.browserProfilingIntegration(),
     // Capture browser console.error/warn as Sentry events. Most React/Next

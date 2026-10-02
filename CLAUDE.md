@@ -661,13 +661,13 @@ by a cache and per-request work is paid on every page view. Two rules follow:
 The Sentry sample rates are a deliberate exception: traces, node profiling and
 browser profiling stay hardcoded at 1.0 in `src/sentry.*.config.ts` and
 `src/instrumentation-client.ts`, accepted in exchange for full-fidelity
-observability. Session Replay is the exception to the exception, for privacy
-reasons (decided 2026-10-01): it records only around an error
-(`replaysSessionSampleRate: 0`, `replaysOnErrorSampleRate: 1.0`) and with
-`maskAllText`, `maskAllInputs` and `blockAllMedia` on, because the public
-application form and the CLA page carry names, signatures and free-text
-answers. `sendDefaultPii` is false everywhere and `Sentry.setUser` carries the
-internal id only. Do not loosen any of this without asking.
+observability. Session Replay records only around an error
+(`replaysSessionSampleRate: 0`, `replaysOnErrorSampleRate: 1.0`) and is
+**unmasked** (`maskAllText`, `maskAllInputs` and `blockAllMedia` off): a masked
+replay cannot be debugged, and that is the operator's decision of 2026-10-02.
+The privacy notice says so, so any change here changes the notice too.
+`sendDefaultPii` is false everywhere and `Sentry.setUser` carries the internal
+id only.
 
 ## Auth & roles
 
