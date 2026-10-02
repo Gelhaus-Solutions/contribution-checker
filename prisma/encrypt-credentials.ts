@@ -10,6 +10,9 @@
  *   pnpm db:encrypt-credentials            # apply
  *   DRY_RUN=1 pnpm db:encrypt-credentials  # count what would change, no writes
  *
+ * Run by Node's own type stripping rather than tsx, because the production
+ * image ships prisma/ without dev dependencies; hence the `.ts` in the import.
+ *
  * Idempotent and re-runnable. Needs VAULT_ADDR and either VAULT_TOKEN or
  * VAULT_APPROLE_ROLE_ID + VAULT_APPROLE_SECRET_ID (VAULT_APPROLE_MOUNT, default
  * approle), optionally VAULT_NAMESPACE, and the same VAULT_TRANSIT_MOUNT /
@@ -21,7 +24,7 @@ import {
   TRANSIT_CONTEXT,
   encryptPlaintextCredentials,
   type EncryptCredentialsDeps,
-} from "./encrypt-credentials-core";
+} from "./encrypt-credentials-core.ts";
 
 const DRY_RUN = process.env.DRY_RUN === "1";
 
