@@ -27,6 +27,20 @@ export class VaultNetworkError extends VaultError {
 
 type Token = { value: string; expiresAt: number };
 
+/**
+ * The Transit derivation context, base64 as Vault wants it.
+ *
+ * Production's key was created with `derived=true`, and a derived key refuses
+ * any encrypt or decrypt without a context. One fixed context for every
+ * credential, so a value encrypted by the app, by `db:encrypt-credentials` or by
+ * a later version decrypts the same way. A key without derivation ignores it.
+ * Changing this string makes every stored value undecryptable.
+ */
+export const TRANSIT_CONTEXT = Buffer.from(
+  "contribution-checker/credentials",
+  "utf8"
+).toString("base64");
+
 const DEFAULT_TIMEOUT_MS = 5000;
 // Renew tokens this many ms before they expire to avoid 403-on-boundary races.
 const TOKEN_REFRESH_LEEWAY_MS = 30_000;
@@ -140,6 +154,7 @@ export class VaultClient {
     const res = await this.withRetries(() =>
       this.transitCall("encrypt", {
         plaintext: Buffer.from(plaintext, "utf8").toString("base64"),
+        context: TRANSIT_CONTEXT,
       })
     );
     const ct = (res as { data?: { ciphertext?: string } }).data?.ciphertext;
@@ -152,7 +167,10 @@ export class VaultClient {
     if (ciphertexts.length === 0) return [];
     const res = await this.withRetries(() =>
       this.transitCall("decrypt", {
-        batch_input: ciphertexts.map((ciphertext) => ({ ciphertext })),
+        batch_input: ciphertexts.map((ciphertext) => ({
+          ciphertext,
+          context: TRANSIT_CONTEXT,
+        })),
       })
     );
     const results = (

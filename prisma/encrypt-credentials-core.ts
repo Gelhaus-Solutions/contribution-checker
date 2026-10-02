@@ -8,6 +8,16 @@
 
 const TRANSIT_RE = /^vault:v\d+:/;
 
+/**
+ * The Transit derivation context, the same one `src/lib/vault/client.ts` sends
+ * (a test holds the two together). Repeated here because this file cannot
+ * import from src/.
+ */
+export const TRANSIT_CONTEXT = Buffer.from(
+  "contribution-checker/credentials",
+  "utf8"
+).toString("base64");
+
 export const CREDENTIAL_COLUMNS = [
   { model: "qaBoardLink", fields: ["token", "apiKey"] },
   { model: "projectWebhook", fields: ["secret"] },

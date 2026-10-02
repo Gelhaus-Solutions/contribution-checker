@@ -93,3 +93,11 @@ describe("db:encrypt-credentials", () => {
     expect(links.rows[0]!.token).toBe("tok1-edited");
   });
 });
+
+describe("the Transit derivation context", () => {
+  it("is the same in the app and in the script, or the script writes what the app cannot read", async () => {
+    const { TRANSIT_CONTEXT: script } = await import("../../prisma/encrypt-credentials-core");
+    const { TRANSIT_CONTEXT: app } = await import("../../src/lib/vault/client");
+    expect(script).toBe(app);
+  });
+});

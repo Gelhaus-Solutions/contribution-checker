@@ -18,6 +18,7 @@
  */
 import { PrismaClient } from "@prisma/client";
 import {
+  TRANSIT_CONTEXT,
   encryptPlaintextCredentials,
   type EncryptCredentialsDeps,
 } from "./encrypt-credentials-core";
@@ -73,6 +74,7 @@ function transitEncryptBatch(): EncryptCredentialsDeps["encryptBatch"] {
         body: JSON.stringify({
           batch_input: plaintexts.map((p) => ({
             plaintext: Buffer.from(p, "utf8").toString("base64"),
+            context: TRANSIT_CONTEXT,
           })),
         }),
       },

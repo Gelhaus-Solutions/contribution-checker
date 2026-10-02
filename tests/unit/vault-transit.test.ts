@@ -52,6 +52,7 @@ describe("VaultClient transit", () => {
     expect((init as RequestInit).method).toBe("POST");
     expect(JSON.parse((init as RequestInit).body as string)).toEqual({
       plaintext: b64("s3cret"),
+      context: b64("contribution-checker/credentials"),
     });
     expect(((init as RequestInit).headers as Headers).get("x-vault-token")).toBe("s.test");
   });
@@ -77,7 +78,10 @@ describe("VaultClient transit", () => {
       "https://vault.example.com/v1/transit/decrypt/contribution-checker",
     );
     expect(JSON.parse((fetchMock.mock.calls[0]![1] as RequestInit).body as string)).toEqual({
-      batch_input: [{ ciphertext: "vault:v1:a" }, { ciphertext: "vault:v1:b" }],
+      batch_input: [
+        { ciphertext: "vault:v1:a", context: b64("contribution-checker/credentials") },
+        { ciphertext: "vault:v1:b", context: b64("contribution-checker/credentials") },
+      ],
     });
   });
 
