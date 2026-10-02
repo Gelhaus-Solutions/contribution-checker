@@ -30,6 +30,7 @@
     "db:backfill:stack": "tsx prisma/backfill-stack-users.ts",
     "db:backfill:stack-teams": "tsx prisma/backfill-stack-teams.ts",
     "db:reconcile:github": "tsx prisma/reconcile-github-identity.ts",
+    "db:encrypt-credentials": "tsx prisma/encrypt-credentials.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",

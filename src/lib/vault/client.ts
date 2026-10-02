@@ -131,6 +131,90 @@ export class VaultClient {
     }
   }
 
+  /**
+   * Encrypt with the configured Transit key. Returns Vault's native
+   * `vault:v<N>:...` envelope, which callers store verbatim. Transient errors
+   * are retried like KV reads; a 403 (policy) or 404 (no such key) is not.
+   */
+  async transitEncrypt(plaintext: string): Promise<string> {
+    const res = await this.withRetries(() =>
+      this.transitCall("encrypt", {
+        plaintext: Buffer.from(plaintext, "utf8").toString("base64"),
+      })
+    );
+    const ct = (res as { data?: { ciphertext?: string } }).data?.ciphertext;
+    if (!ct) throw new VaultError("Vault transit encrypt returned no ciphertext");
+    return ct;
+  }
+
+  /** Decrypt many ciphertexts in one request. Order is preserved. */
+  async transitDecryptBatch(ciphertexts: string[]): Promise<string[]> {
+    if (ciphertexts.length === 0) return [];
+    const res = await this.withRetries(() =>
+      this.transitCall("decrypt", {
+        batch_input: ciphertexts.map((ciphertext) => ({ ciphertext })),
+      })
+    );
+    const results = (
+      res as {
+        data?: { batch_results?: { plaintext?: string; error?: string }[] };
+      }
+    ).data?.batch_results;
+    if (!results || results.length !== ciphertexts.length) {
+      throw new VaultError("Vault transit decrypt returned a malformed batch");
+    }
+    return results.map((r) => {
+      // The per-item error is deliberately not echoed: it can name the key.
+      if (r.error || r.plaintext === undefined) {
+        throw new VaultError("Vault transit decrypt failed for one value", 400);
+      }
+      return Buffer.from(r.plaintext, "base64").toString("utf8");
+    });
+  }
+
+  async transitDecrypt(ciphertext: string): Promise<string> {
+    const [plaintext] = await this.transitDecryptBatch([ciphertext]);
+    return plaintext as string;
+  }
+
+  private async transitCall(
+    op: "encrypt" | "decrypt",
+    body: unknown
+  ): Promise<unknown> {
+    const mount = this.config.transitMount
+      .split("/")
+      .map(encodeURIComponent)
+      .join("/");
+    const key = encodeURIComponent(this.config.transitKey);
+    const res = await this.request(
+      `/v1/${mount}/${op}/${key}`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      },
+      true
+    );
+    return res.json();
+  }
+
+  private async withRetries<T>(fn: () => Promise<T>): Promise<T> {
+    const maxRetries = this.config.maxRetries ?? 0;
+    let attempt = 0;
+    for (;;) {
+      try {
+        return await fn();
+      } catch (e) {
+        if (attempt >= maxRetries || !isTransient(e)) throw e;
+        const expo = RETRY_BASE_DELAY_MS * 2 ** attempt;
+        await this.sleepImpl(
+          Math.random() * Math.min(RETRY_MAX_DELAY_MS, expo)
+        );
+        attempt += 1;
+      }
+    }
+  }
+
   private async readKvV2Once(
     fullPath: string
   ): Promise<Record<string, string>> {

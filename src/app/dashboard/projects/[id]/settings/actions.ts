@@ -8,6 +8,7 @@ import { recordAudit } from "@/lib/audit";
 import { assertLabelsUnique } from "@/lib/labels";
 import { slugSchema } from "@/lib/slug";
 import { enqueueProjectWebhook } from "@/lib/notifications/webhooks";
+import { encryptCredential } from "@/lib/vault/transit";
 import { reGateProjectPrs } from "@/lib/temporal/start";
 import { ALL_AI_TASKS } from "@/lib/ai/registry";
 import { serializeAiConfig } from "@/lib/ai/config";
@@ -253,8 +254,10 @@ export async function addProjectWebhook(formData: FormData) {
       name: parsed.name ?? null,
       kind: parsed.kind,
       url: parsed.url,
-      // Secret is meaningless for Discord, so drop it.
-      secret: parsed.kind === "discord" ? null : parsed.secret,
+      // Secret is meaningless for Discord, so drop it. Rests encrypted (Vault
+      // Transit); decrypted where it signs a delivery.
+      secret:
+        parsed.kind === "discord" ? null : await encryptCredential(parsed.secret),
       enabled: true,
     },
   });
@@ -314,7 +317,8 @@ export async function updateProjectWebhook(formData: FormData) {
       name: parsed.name ?? null,
       kind: parsed.kind,
       url: parsed.url,
-      secret: parsed.kind === "discord" ? null : parsed.secret,
+      secret:
+        parsed.kind === "discord" ? null : await encryptCredential(parsed.secret),
       enabled: !!parsed.enabled,
     },
   });

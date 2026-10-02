@@ -19,6 +19,7 @@ import {
 import { notifyProjectReviewers } from "@/lib/notifications/inbox";
 import { countQa, isGreen, parseQaStatus, QA_STATUSES } from "@/lib/qa/types";
 import { adapterFor, boardCallbackUrl } from "@/lib/qa/board/sync";
+import { decryptCredentials, encryptCredential } from "@/lib/vault/transit";
 import {
   DEFAULT_STATUS_LABELS,
   parseStatusMap,
@@ -255,6 +256,11 @@ export async function linkQaBoard(args: {
   const verified = await adapter.verify(candidate);
   if (!verified.ok) return { ok: false, error: verified.error };
 
+  // Credentials rest encrypted (Vault Transit). `candidate` keeps the plaintext
+  // for the verify and hook calls above and below; only the row is encrypted.
+  const storedToken = (await encryptCredential(candidate.token)) as string;
+  const storedApiKey = await encryptCredential(candidate.apiKey);
+
   const link = await prisma.qaBoardLink.upsert({
     where: {
       repoId_provider: { repoId: parsed.repoId, provider: parsed.provider },
@@ -263,15 +269,15 @@ export async function linkQaBoard(args: {
       repoId: parsed.repoId,
       provider: parsed.provider,
       targetId: candidate.targetId,
-      token: candidate.token,
-      apiKey: candidate.apiKey,
+      token: storedToken,
+      apiKey: storedApiKey,
       statusMap: serializeStatusMap(DEFAULT_STATUS_LABELS),
       enabled: true,
     },
     update: {
       targetId: candidate.targetId,
-      token: candidate.token,
-      apiKey: candidate.apiKey,
+      token: storedToken,
+      apiKey: storedApiKey,
       enabled: true,
       lastError: null,
       lastErrorAt: null,
@@ -334,14 +340,15 @@ export async function unlinkQaBoard(args: {
 
   const adapter = adapterFor(link.provider);
   if (adapter && link.hookId) {
+    const [token, apiKey] = await decryptCredentials([link.token, link.apiKey]);
     await adapter
       .unregisterHook({
         id: link.id,
         repoId: link.repoId,
         provider: link.provider,
         targetId: link.targetId,
-        token: link.token,
-        apiKey: link.apiKey,
+        token: token as string,
+        apiKey,
         statusMap: parseStatusMap(link.statusMap),
       })
       .catch((e) =>

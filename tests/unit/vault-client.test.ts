@@ -17,6 +17,8 @@ function makeConfig(over: Partial<VaultConfig> = {}): VaultConfig {
     maxRetries: 0,
     breakerThreshold: 5,
     breakerCooldownMs: 30000,
+    transitMount: "transit",
+    transitKey: "contribution-checker",
     ...over,
   };
 }

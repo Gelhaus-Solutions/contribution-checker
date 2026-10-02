@@ -99,6 +99,11 @@ let sharedClient: VaultClient | null = null;
 // flood the issue stream.
 const WARN_THROTTLE_MS = 5 * 60 * 1000;
 
+/** The shared client, for modules that need more than KV reads (Transit). */
+export function getVaultClient(): VaultClient {
+  return getClient();
+}
+
 function getClient(): VaultClient {
   if (sharedClient) return sharedClient;
   const cfg = getVaultConfig();

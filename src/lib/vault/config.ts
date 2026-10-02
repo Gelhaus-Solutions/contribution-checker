@@ -33,6 +33,11 @@ const baseSchema = z.object({
   // path, then skip Vault for the cooldown window and serve last-known-good.
   VAULT_BREAKER_THRESHOLD: z.coerce.number().int().positive().default(5),
   VAULT_BREAKER_COOLDOWN_MS: z.coerce.number().int().positive().default(30000),
+  // Transit engine used to encrypt credentials stored in Postgres (QaBoardLink
+  // token/apiKey, ProjectWebhook secret). The key must exist in Vault: this app
+  // never creates or rotates it.
+  VAULT_TRANSIT_MOUNT: z.string().min(1).default("transit"),
+  VAULT_TRANSIT_KEY: z.string().min(1).default("contribution-checker"),
 });
 
 export type VaultAuthConfig =
@@ -54,6 +59,8 @@ export type VaultConfig = {
   maxRetries: number;
   breakerThreshold: number;
   breakerCooldownMs: number;
+  transitMount: string;
+  transitKey: string;
 };
 
 let cached: VaultConfig | null = null;
@@ -113,6 +120,8 @@ export function getVaultConfig(): VaultConfig {
     maxRetries: raw.VAULT_MAX_RETRIES,
     breakerThreshold: raw.VAULT_BREAKER_THRESHOLD,
     breakerCooldownMs: raw.VAULT_BREAKER_COOLDOWN_MS,
+    transitMount: raw.VAULT_TRANSIT_MOUNT.replace(/^\/+|\/+$/g, ""),
+    transitKey: raw.VAULT_TRANSIT_KEY,
   };
   return cached;
 }

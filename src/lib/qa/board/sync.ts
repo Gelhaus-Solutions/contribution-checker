@@ -2,6 +2,7 @@ import { prisma } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { recordAudit } from "@/lib/audit";
 import { env } from "@/lib/env";
+import { decryptCredentials } from "@/lib/vault/transit";
 import { parseQaStatus } from "@/lib/qa/types";
 import { notionAdapter } from "@/lib/qa/board/notion";
 import { trelloAdapter } from "@/lib/qa/board/trello";
@@ -51,7 +52,7 @@ export type QaBoardSyncResult = {
 
 const NOTHING: QaBoardSyncResult = { applied: 0, pushed: 0, failed: 0 };
 
-function toLink(row: {
+async function toLink(row: {
   id: string;
   repoId: string;
   provider: string;
@@ -59,14 +60,17 @@ function toLink(row: {
   token: string;
   apiKey: string | null;
   statusMap: string;
-}): BoardLink {
+}): Promise<BoardLink> {
+  // The credentials rest encrypted (Vault Transit) and are decrypted here, in
+  // the sync activity, which is the only place they are used.
+  const [token, apiKey] = await decryptCredentials([row.token, row.apiKey]);
   return {
     id: row.id,
     repoId: row.repoId,
     provider: row.provider,
     targetId: row.targetId,
-    token: row.token,
-    apiKey: row.apiKey,
+    token: token as string,
+    apiKey,
     statusMap: parseStatusMap(row.statusMap),
   };
 }
@@ -126,8 +130,9 @@ export async function syncQaBoards(args: {
       );
       continue;
     }
-    const link = toLink(row);
+    let link: BoardLink;
     try {
+      link = await toLink(row);
       await archiveShippedCards(link, adapter, args.repoId);
       if (batch) {
         total.applied += await pullInto({

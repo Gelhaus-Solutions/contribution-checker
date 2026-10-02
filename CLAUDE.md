@@ -367,9 +367,21 @@ External QA boards (`src/lib/qa/board/`, Notion and Trello, two-way):
 - Conflicts are last-writer-wins on timestamp, and a tie goes to us: local is
   the side with an audit trail and a named user. An externally-sourced verdict
   is audited with `actorId: null` and lands in `qaByExternal`, never in `qaById`.
-- Credentials are plain columns on `QaBoardLink` (the `ProjectWebhook.secret`
-  precedent) read only inside the sync, so they never enter workflow history and
-  never reach a client component.
+- Credentials (`QaBoardLink.token`, `QaBoardLink.apiKey`, and
+  `ProjectWebhook.secret`) are encrypted at rest with Vault Transit
+  (`src/lib/vault/transit.ts`): stored as `vault:v<N>:...`, encrypted on write
+  with `encryptCredential`, decrypted on read with `decryptCredential(s)`. A
+  write fails closed (Vault down means nothing is saved, never plaintext). A
+  value without the prefix is a legacy plaintext row and is returned as is, so
+  rows saved before this existed keep working until `pnpm db:encrypt-credentials`
+  (or their next save) encrypts them. Without `VAULT_ADDR` they stay plain, as
+  before. They are decrypted only where used: inside the sync, the outbound
+  webhook delivery activity, and the board callback route (one batched decrypt),
+  so they never enter workflow history, and never reach a client component. The
+  one exception is the webhook endpoint form on the settings page, which has
+  always shown the secret to the admins who edit it and now decrypts it
+  server-side for that field. A new column of this kind goes through the same
+  two helpers, and its reader goes in the list above.
 - Trello models status as **list membership**, not labels, because dragging a
   card between columns is what people actually do on a QA board. `targetId` is
   the board id and the status map holds list names, which are created on demand.

@@ -1,6 +1,7 @@
 import { createHmac } from "node:crypto";
 import { prisma } from "@/lib/db";
 import { logger } from "@/lib/logger";
+import { decryptCredential } from "@/lib/vault/transit";
 import {
   assertSafeOutboundUrl,
   UnsafeOutboundUrlError,
@@ -50,7 +51,8 @@ export async function deliverOutboundAttempt(
       where: { id: input.endpointId },
       select: { secret: true },
     });
-    secret = ep?.secret ?? null;
+    // Rests encrypted (Vault Transit); decrypted only here, never in history.
+    secret = await decryptCredential(ep?.secret);
   }
   const signature = secret ? signPayload(secret, input.body) : null;
 

@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { signalQaBoardSync } from "@/lib/temporal/start";
 import { boardCallbackUrl } from "@/lib/qa/board/sync";
+import { decryptCredentials } from "@/lib/vault/transit";
 import {
   BodyTooLargeError,
   readLimitedBody,
@@ -120,13 +121,28 @@ export async function POST(
   const trelloSig = req.headers.get("x-trello-webhook");
   const notionSig = req.headers.get("x-notion-signature");
 
-  const matched = links.filter((link) =>
-    provider === "trello"
+  // The credentials rest encrypted (Vault Transit): one batched decrypt for
+  // every candidate. If Vault cannot answer, say so with a 503 so the provider
+  // retries, rather than reporting a genuine callback as badly signed.
+  let creds: (string | null)[];
+  try {
+    creds = await decryptCredentials(
+      links.flatMap((link) => [link.token, link.apiKey]),
+    );
+  } catch (e) {
+    logger.error({ err: e, provider }, "qa board callback could not decrypt credentials");
+    return NextResponse.json({ error: "Temporarily unavailable" }, { status: 503 });
+  }
+
+  const matched = links.filter((link, i) => {
+    const token = creds[i * 2] ?? "";
+    const apiKey = creds[i * 2 + 1] ?? "";
+    return provider === "trello"
       ? // Trello signs with the application secret, which for this integration
         // is the API key stored alongside the token.
-        verifyTrello(rawBody, trelloSig, link.apiKey ?? "")
-      : verifyNotion(rawBody, notionSig, link.token),
-  );
+        verifyTrello(rawBody, trelloSig, apiKey)
+      : verifyNotion(rawBody, notionSig, token);
+  });
 
   if (matched.length === 0) {
     logger.warn({ provider }, "qa board callback signature did not verify");

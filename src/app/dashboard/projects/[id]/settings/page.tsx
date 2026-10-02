@@ -13,6 +13,7 @@ import { env } from "@/lib/env";
 import { ALL_AI_TASKS, isAiTaskEnabled } from "@/lib/ai/registry";
 import { parseAiConfig } from "@/lib/ai/config";
 import { GUARD_RULES, parseGuardRules } from "@/lib/guard/rules";
+import { decryptCredentials } from "@/lib/vault/transit";
 import {
   parseGuardApprovers,
   parseGuardGlobs,
@@ -44,10 +45,21 @@ export default async function ProjectSettings({
   // Outbound delivery status now lives in Temporal (each delivery is a durable
   // `outboundWebhookDelivery` workflow). The per-row history table was dropped;
   // operators inspect deliveries in the Temporal UI.
-  const webhookEndpoints = await prisma.projectWebhook.findMany({
+  const storedEndpoints = await prisma.projectWebhook.findMany({
     where: { projectId: id },
     orderBy: { createdAt: "asc" },
   });
+  // The secret rests encrypted (Vault Transit). The form has always shown it to
+  // the admins who may edit it, so it is decrypted here, on the server, for that
+  // one field. A Vault failure raises rather than rendering an empty box that a
+  // Save would then write back as "no secret".
+  const endpointSecrets = await decryptCredentials(
+    storedEndpoints.map((ep) => ep.secret),
+  );
+  const webhookEndpoints = storedEndpoints.map((ep, i) => ({
+    ...ep,
+    secret: endpointSecrets[i] ?? null,
+  }));
 
   const aiConfig = parseAiConfig(project.aiConfig);
 
