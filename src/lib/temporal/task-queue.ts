@@ -52,4 +52,5 @@ export const scheduleIds = {
   claSweep: "schedule:cla-sweep",
   ensureProjectGates: "schedule:ensure-project-gates",
   pruneProcessedDeliveries: "schedule:prune-processed-deliveries",
+  pruneRetainedRecords: "schedule:prune-retained-records",
 } as const;

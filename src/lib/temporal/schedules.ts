@@ -33,6 +33,12 @@ const SCHEDULES: ScheduleSpec[] = [
     workflowType: WF.pruneProcessedDeliveries,
     cron: "0 3 * * *",
   },
+  // Delete records past their retention period, daily at 03:30 UTC.
+  {
+    id: scheduleIds.pruneRetainedRecords,
+    workflowType: WF.pruneRetainedRecords,
+    cron: "30 3 * * *",
+  },
 ];
 
 /** Schedules retired by the projectGate migration, actively deleted on startup

@@ -9,6 +9,26 @@ import { signalPrReGate, signalProjectSweepTick } from "@/lib/temporal/start";
 
 const PROCESSED_DELIVERY_RETENTION_MS = 24 * 60 * 60 * 1000;
 
+/**
+ * How long audit events and AI results are kept, as the records of processing
+ * state it. Both name people (an actor, an applicant's answers judged), so they
+ * go once the period is over. The CLA ledger is evidence with its own rule and
+ * is never pruned here.
+ */
+export const OPERATIONAL_RECORD_RETENTION_MONTHS = 24;
+
+/** A rate-limit bucket is deleted this long after its window ended. The grace
+ * keeps the sweep clear of a request that read the bucket just before it
+ * expired and is about to increment it. */
+const RATE_LIMIT_BUCKET_GRACE_MS = 60 * 1000;
+
+/** The instant `months` calendar months before `now`, in UTC. */
+export function retentionCutoff(now: Date, months: number): Date {
+  const cutoff = new Date(now);
+  cutoff.setUTCMonth(cutoff.getUTCMonth() - months);
+  return cutoff;
+}
+
 /** Work-list for the reconcile sweeps (projects with App-mode repos). Used by
  * the ensureProjectGates keepalive to bootstrap/nudge project entities. */
 export async function listReconcileProjects(): Promise<string[]> {
@@ -153,4 +173,37 @@ export async function pruneProcessedDeliveries(): Promise<number> {
   });
   logger.info({ deleted: res.count }, "pruned processed webhook deliveries");
   return res.count;
+}
+
+/**
+ * Deletes what is past its retention period: rate-limit buckets whose window
+ * has ended (a key can name an IP address, and an expired bucket limits
+ * nothing), and audit events and AI results older than
+ * OPERATIONAL_RECORD_RETENTION_MONTHS.
+ */
+export async function pruneRetainedRecords(): Promise<{
+  rateLimitBuckets: number;
+  auditEvents: number;
+  aiResults: number;
+}> {
+  const now = new Date();
+  const cutoff = retentionCutoff(now, OPERATIONAL_RECORD_RETENTION_MONTHS);
+
+  const buckets = await prisma.rateLimitBucket.deleteMany({
+    where: { windowEnd: { lt: new Date(now.getTime() - RATE_LIMIT_BUCKET_GRACE_MS) } },
+  });
+  const audits = await prisma.auditEvent.deleteMany({
+    where: { createdAt: { lt: cutoff } },
+  });
+  const ai = await prisma.aiResult.deleteMany({
+    where: { createdAt: { lt: cutoff } },
+  });
+
+  const counts = {
+    rateLimitBuckets: buckets.count,
+    auditEvents: audits.count,
+    aiResults: ai.count,
+  };
+  logger.info(counts, "pruned records past their retention period");
+  return counts;
 }

@@ -47,3 +47,12 @@ export async function pruneProcessedDeliveries(): Promise<{ deleted: number }> {
   const deleted = await acts.pruneProcessedDeliveries();
   return { deleted };
 }
+
+/** Scheduled deletion of records past their retention period. */
+export async function pruneRetainedRecords(): Promise<{
+  rateLimitBuckets: number;
+  auditEvents: number;
+  aiResults: number;
+}> {
+  return acts.pruneRetainedRecords();
+}
