@@ -42,6 +42,14 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+describe("the retention period", () => {
+  it("is the 24 months the records of processing give audit events and AI results", () => {
+    // Decided by the operator on 2026-10-02. Changing it changes what the
+    // privacy notice has to say, so it has to fail here first.
+    expect(OPERATIONAL_RECORD_RETENTION_MONTHS).toBe(24);
+  });
+});
+
 describe("retentionCutoff", () => {
   it("goes back whole calendar months in UTC", () => {
     expect(retentionCutoff(NOW, 24).toISOString()).toBe("2024-10-02T03:30:00.000Z");
