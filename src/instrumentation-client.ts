@@ -19,10 +19,11 @@ Sentry.init({
   dsn,
   environment,
   integrations: [
-    // Replay is recorded only around an error, unmasked: a masked replay
-    // cannot show what went wrong on a form, which is what replays are for
-    // here (the operator's decision, 2026-10-02). The privacy notice says
-    // replays show the page as it was, typed text included.
+    // Replay records whole sessions, unmasked: a masked replay cannot show
+    // what went wrong on a form, and one recorded only around an error misses
+    // how the person got there (the operator's decisions, 2026-10-02). The
+    // privacy notice says replays record whole sessions and show the page as
+    // it was, typed text included.
     Sentry.replayIntegration({
       maskAllText: false,
       blockAllMedia: false,
@@ -37,7 +38,7 @@ Sentry.init({
     }),
   ],
   tracesSampleRate: 1.0,
-  replaysSessionSampleRate: 0,
+  replaysSessionSampleRate: 1.0,
   replaysOnErrorSampleRate: 1.0,
   profilesSampleRate: 1.0,
   // No IP address, cookies or request bodies: the internal user id set in
