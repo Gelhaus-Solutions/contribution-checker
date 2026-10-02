@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { Shield } from "lucide-react";
+import { Download, Shield } from "lucide-react";
 import { UserButton } from "@hexclave/next";
 import { NotificationBell } from "@/components/notification-bell";
 
@@ -25,15 +25,27 @@ export function UserCluster({
   const router = useRouter();
   if (!stackConfigured) return null;
 
-  const extraItems = isSuperAdmin
-    ? [
-        {
-          text: "Admin",
-          icon: <Shield className="h-4 w-4" />,
-          onClick: () => router.push("/admin"),
-        },
-      ]
-    : [];
+  // Self-service data export (GDPR Art. 15 and 20). A plain navigation: the
+  // route answers with Content-Disposition: attachment, so the browser
+  // downloads the file and stays on the page.
+  const extraItems = [
+    {
+      text: "Download my data",
+      icon: <Download className="h-4 w-4" />,
+      onClick: () => {
+        window.location.assign("/api/account/export");
+      },
+    },
+    ...(isSuperAdmin
+      ? [
+          {
+            text: "Admin",
+            icon: <Shield className="h-4 w-4" />,
+            onClick: () => router.push("/admin"),
+          },
+        ]
+      : []),
+  ];
 
   return (
     <div className="flex items-center gap-2">
