@@ -677,10 +677,10 @@ internal id only. Do not loosen any of this without asking.
   consumers and `requireSession()`/`requireProjectRole()` are unchanged.
 - Onboarding gate: `requireSession()` redirects to `/welcome` until the user
   has a linked GitHub identity (`ghId`); `/welcome` forces a GitHub connect for
-  non-GitHub signups. The `country` code is captured automatically in the
-  background (Hexclave's best-effort geo `countryCode`, mirrored to
-  `User.country` by `captureGeoCountry`) — the user is never prompted, and it is
-  not gated on. Edge `middleware.ts` does a fast cookie-presence gate for
+  non-GitHub signups. No country is collected: the geo capture was removed on
+  2026-10-01 because nothing used it (GDPR Art. 5(1)(c)) and the stored values
+  were cleared. Do not bring it back without a purpose and a privacy notice
+  that names it. Edge `middleware.ts` does a fast cookie-presence gate for
   `/dashboard` and `/admin`.
 - **Onboarding must never require a connected-account OAuth token.** Hexclave
   issues none when its GitHub provider runs on shared OAuth keys: the
@@ -696,8 +696,8 @@ internal id only. Do not loosen any of this without asking.
   shows up as a client-side "Something went wrong" with **no digest**.
 - `auth()` is memoized per request with React `cache()`. A page calls it from
   the root layout, `SiteHeader`, `requireSession()` and again from the page's
-  `requireProjectRole()`; unmemoized, each call repeated the local-user lookup,
-  the country capture and the role mirror write, and the Hexclave SDK only
+  `requireProjectRole()`; unmemoized, each call repeated the local-user lookup
+  and the role mirror write, and the Hexclave SDK only
   holds its own reads for ~5s. `getProjectMembership` is memoized for the same
   reason. `cookies()` inside a `cache()` scope is fine: Next only rejects it
   under `"use cache"` / `unstable_cache(...)`, which is a different scope
