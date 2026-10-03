@@ -30,6 +30,7 @@ export type AuditKind =
   | "webhook.test_sent"
   | "terms.accepted"
   | "account.exported"
+  | "privacy.erasure"
   | "user.allowlisted"
   | "user.deallowlisted"
   | "settings.gating_changed"

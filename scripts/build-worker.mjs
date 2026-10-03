@@ -23,9 +23,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
  * source at runtime via workflowsPath (see run.ts), so src/worker/workflows must
  * still ship with the image.
  */
-await build({
-  entryPoints: [path.join(root, "src/worker/index.ts")],
-  outfile: path.join(root, "dist/worker.mjs"),
+const shared = {
   bundle: true,
   platform: "node",
   format: "esm",
@@ -55,4 +53,18 @@ await build({
     ].join("\n"),
   },
   logLevel: "info",
+};
+
+await build({
+  ...shared,
+  entryPoints: [path.join(root, "src/worker/index.ts")],
+  outfile: path.join(root, "dist/worker.mjs"),
+});
+
+// Erasure on request (src/cli/erase-subject.ts), run with node in the container.
+// Same bundle settings, so it imports the app's server libs the way the worker does.
+await build({
+  ...shared,
+  entryPoints: [path.join(root, "src/cli/erase-subject.ts")],
+  outfile: path.join(root, "dist/erase-subject.mjs"),
 });

@@ -509,6 +509,18 @@ Application lifecycle:
 - `src/lib/applications/decide.ts`: approve/deny/revoke + audit + notifications
 - `src/lib/applications/schema.ts`: form-field schema + Zod validators
 
+Erasure on request (GDPR Art. 17, Art. 21 after an objection):
+- `src/lib/account-erasure.ts`: one person's data by category (`account`,
+  `applications`, `prChecks`, `aiResults`, `auditEvents`), dry run unless
+  `execute`, one transaction, then the Hexclave identities and Terms'
+  `closeSubject`. CLA signatures and manual decisions are never erased here.
+  `keepDenialRecords` leaves a manual DENIED decision only for a denial that
+  still binds (no re-applying, or a cooldown still running).
+- Run it in the container: `node dist/erase-subject.mjs --gh-login <login>
+  --categories ... --request-ref <ref> [--keep-denial-records] [--execute]`
+  (bundled by `scripts/build-worker.mjs`). The audit entry `privacy.erasure`
+  carries the reference and counts, never the person.
+
 Audit, notifications, jobs:
 - `src/lib/audit.ts`: `recordAudit` + `AuditKind` union (extend here when
   adding new audit kinds)
