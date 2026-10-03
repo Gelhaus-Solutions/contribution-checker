@@ -1,0 +1,176 @@
+{
+ "format": 1,
+ "generatedAt": "2026-10-03T17:33:37.960Z",
+ "serial": 225,
+ "documents": [
+  {
+   "key": "page:gs:terms",
+   "kind": "consent",
+   "liveUrl": {
+    "de": "https://gplatform.org/de/terms",
+    "en": "https://gplatform.org/terms"
+   },
+   "product": "gs"
+  },
+  {
+   "key": "project:contribution-checker:terms",
+   "kind": "consent",
+   "liveUrl": {
+    "de": "https://gplatform.org/de/apps/contribution-checker/terms",
+    "en": "https://gplatform.org/apps/contribution-checker/terms"
+   },
+   "product": "contribution-checker"
+  }
+ ],
+ "versions": [
+  {
+   "archiveUrl": {
+    "de": "https://gplatform.org/de/legal/contribution-checker-terms-2026-09-06",
+    "en": "https://gplatform.org/legal/contribution-checker-terms-2026-09-06"
+   },
+   "contentHash": "4d147e153d56f5c90789be1c131ec1b4a98c0791c138e7e56d9e74375ae03d52",
+   "document": "project:contribution-checker:terms",
+   "frozenAt": "2026-09-06T18:40:41.000Z",
+   "title": {
+    "de": "Contribution-Checker-Nutzungsbedingungen",
+    "en": "Contribution Checker terms"
+   },
+   "version": "2026-09-06",
+   "versionId": "contribution-checker-terms-2026-09-06"
+  },
+  {
+   "archiveUrl": {
+    "de": "https://gplatform.org/de/legal/contribution-checker-terms-2026-10-01",
+    "en": "https://gplatform.org/legal/contribution-checker-terms-2026-10-01"
+   },
+   "contentHash": "b3be6dbf9996e9b73732979f79fbc82da0a9e83acaa1dc79f71f28086cdafd5b",
+   "document": "project:contribution-checker:terms",
+   "frozenAt": "2026-10-01T16:12:13.000Z",
+   "title": {
+    "de": "Contribution-Checker-Nutzungsbedingungen",
+    "en": "Contribution Checker terms"
+   },
+   "version": "2026-10-01",
+   "versionId": "contribution-checker-terms-2026-10-01"
+  },
+  {
+   "archiveUrl": {
+    "de": "https://gplatform.org/de/legal/contribution-checker-terms-2026-10-03",
+    "en": "https://gplatform.org/legal/contribution-checker-terms-2026-10-03"
+   },
+   "contentHash": "ae0875949a027aa15a022384d8c76bfda2280fbac7442be43dbc86249732cb1f",
+   "document": "project:contribution-checker:terms",
+   "frozenAt": "2026-10-03T00:44:44.186Z",
+   "title": {
+    "de": "Contribution-Checker-Nutzungsbedingungen",
+    "en": "Contribution Checker terms"
+   },
+   "version": "2026-10-03",
+   "versionId": "contribution-checker-terms-2026-10-03"
+  },
+  {
+   "archiveUrl": {
+    "de": "https://gplatform.org/de/legal/contribution-checker-terms-2026-10-03.2",
+    "en": "https://gplatform.org/legal/contribution-checker-terms-2026-10-03.2"
+   },
+   "contentHash": "90746526889a57a743eb80aa1df0644e9e478c87d60ba5cfaf37daf520593600",
+   "document": "project:contribution-checker:terms",
+   "frozenAt": "2026-10-03T01:10:05.025Z",
+   "title": {
+    "de": "Contribution-Checker-Nutzungsbedingungen",
+    "en": "Contribution Checker terms"
+   },
+   "version": "2026-10-03.2",
+   "versionId": "contribution-checker-terms-2026-10-03.2"
+  },
+  {
+   "archiveUrl": {
+    "de": "https://gplatform.org/de/legal/gs-terms-2026-09-06",
+    "en": "https://gplatform.org/legal/gs-terms-2026-09-06"
+   },
+   "contentHash": "c0001c79df9c3598d7b0228bdf5f8de94a9e8bc259c14ecb551cbb284a72e596",
+   "document": "page:gs:terms",
+   "frozenAt": "2026-09-06T18:40:41.000Z",
+   "title": {
+    "de": "Nutzungsbedingungen",
+    "en": "Terms of service"
+   },
+   "version": "2026-09-06",
+   "versionId": "gs-terms-2026-09-06"
+  },
+  {
+   "archiveUrl": {
+    "de": "https://gplatform.org/de/legal/gs-terms-2026-10-01",
+    "en": "https://gplatform.org/legal/gs-terms-2026-10-01"
+   },
+   "contentHash": "9268392771e2f85e55c0354d1c261d26c77fc9b42fba87d6a796e02a2b593bad",
+   "document": "page:gs:terms",
+   "frozenAt": "2026-10-01T16:01:29.000Z",
+   "title": {
+    "de": "Nutzungsbedingungen",
+    "en": "Terms of service"
+   },
+   "version": "2026-10-01",
+   "versionId": "gs-terms-2026-10-01"
+  },
+  {
+   "archiveUrl": {
+    "de": "https://gplatform.org/de/legal/gs-terms-2026-10-03",
+    "en": "https://gplatform.org/legal/gs-terms-2026-10-03"
+   },
+   "contentHash": "9d3dd64812479871e54203b71c52ebfc13724c66c963ed9471bcfa292a7f88c5",
+   "document": "page:gs:terms",
+   "frozenAt": "2026-10-03T00:44:44.059Z",
+   "title": {
+    "de": "Nutzungsbedingungen",
+    "en": "Terms of service"
+   },
+   "version": "2026-10-03",
+   "versionId": "gs-terms-2026-10-03"
+  }
+ ],
+ "surfaces": [
+  {
+   "covers": [
+    "project:contribution-checker:terms",
+    "page:gs:terms"
+   ],
+   "id": "contribution-checker",
+   "liveLinks": {}
+  }
+ ],
+ "rollouts": [
+  {
+   "announcedAt": "2026-09-06T18:40:41.000Z",
+   "inForceFrom": "2026-09-06T18:40:41.000Z",
+   "surface": null,
+   "versionId": "contribution-checker-terms-2026-09-06"
+  },
+  {
+   "announcedAt": "2026-10-03T17:33:37.960Z",
+   "inForceFrom": "2026-11-19T23:00:00.000Z",
+   "summary": {
+    "de": "Diese Fassung ersetzt die Contribution-Checker-Nutzungsbedingungen vom 6. September 2026. Die wesentlichen Änderungen:\n- Die Bedingungen sagen, dass KI neben den eigenen Projekten von Gelhaus Solutions auch für Postiz eingeschaltet ist.\n- Ein neuer Abschnitt führt abschließend auf, was Sie mitnehmen können, wenn Sie nach den allgemeinen Nutzungsbedingungen zu einem anderen Anbieter wechseln, wie Sie es erhalten, in welchen Formaten, und das Wenige, das zurückbleibt.\n\nSie können dieser Änderung vor dem 20. November 2026 per E-Mail an contact@gplatform.org widersprechen. Widersprechen Sie, wird die neue Fassung nicht Teil Ihres Vertrages, und jede Seite kann den Vertrag aus diesem Grund zu diesem Datum beenden.",
+    "en": "This version replaces the Contribution Checker terms of 6 September 2026. The main changes:\n- The terms say AI is on for Postiz as well as for Gelhaus Solutions' own projects.\n- A new section lists, exhaustively, what you can take with you when you switch to another provider under the general terms, how you get it, in which formats, and the few things that stay behind.\n\nYou may object to this change by email to contact@gplatform.org before 20 November 2026. If you object, the new version does not become part of your agreement, and either of us may end the agreement for that reason from that date."
+   },
+   "surface": "contribution-checker",
+   "versionId": "contribution-checker-terms-2026-10-03.2"
+  },
+  {
+   "announcedAt": "2026-09-06T18:40:41.000Z",
+   "inForceFrom": "2026-09-06T18:40:41.000Z",
+   "surface": null,
+   "versionId": "gs-terms-2026-09-06"
+  },
+  {
+   "announcedAt": "2026-10-03T17:33:37.960Z",
+   "inForceFrom": "2026-11-19T23:00:00.000Z",
+   "summary": {
+    "de": "Diese Fassung ersetzt die allgemeinen Nutzungsbedingungen vom 6. September 2026. Die wesentlichen Änderungen:\n- Ihre Inhalte: Sie behalten alle Rechte daran und räumen uns ein Nutzungsrecht ein, das auf den Betrieb des Dienstes beschränkt ist, in dem Sie sie eingereicht haben. Weiter einräumen dürfen wir es nur den in den Bedingungen genannten Gruppen (unseren Dienstleistern und Produkten, den Betreibern, die die Inhalte weitertragen, den Empfängern von Advisories, einem Rechtsnachfolger, verbundenen Unternehmen), nie zu deren eigenen Zwecken. Es endet, wenn Sie die Inhalte löschen; ausgenommen sind Sicherungen (bis zu 90 Tage) und dauerhafte öffentliche Aufzeichnungen, auf die Sie vor dem Einreichen hingewiesen werden.\n- Wir können Ihr Konto mit einer Frist von 30 Tagen per E-Mail zu einem anderen Anmeldedienst umziehen, den wir betreiben, etwa GPlatform SSO.\n- Neue Fassungen: Ankündigung mindestens sechs Wochen vorher per E-Mail, danach werden Sie bei Ihrer nächsten Anmeldung um Zustimmung gebeten. Eine neue Fassung gilt für Sie erst, wenn Sie ihr zustimmen. Ein kostenloses Konto, das nach Ablauf der sechs Wochen nicht zugestimmt hat, ist auf Anmelden, Lesen, Exportieren, Datenschutzanliegen, das Schließen des Kontos und die Zustimmung beschränkt. Entgeltliche Dienste werden nie eingeschränkt.\n- Wir beschränken nur aus genannten Gründen und mit Begründung, und bevor wir ein Konto sperren oder beenden, hören wir Sie an, außer in einer abschließenden Liste dringender Fälle.\n- Einen Dienst ändern wir nur aus genannten Gründen und ohne Mehrkosten, und einen kostenlosen Dienst stellen wir mit einer Frist von mindestens 60 Tagen ein. Den Vertrag über einen kostenlosen Dienst kann jede Seite mit einer Frist von vier Wochen kündigen. Nach Vertragsende können Sie Ihre Daten 30 Tage lang exportieren.\n- Einen entgeltlichen Dienst setzen wir wegen ausbleibender Zahlung nur nach einer Mahnung und 14 Tagen aus, nie wegen eines Betrags, den Sie mit Gründen bestritten haben.\n- Neue Klauseln zu Registrierung, Sanktionen, Unterauftragnehmern, Mitteilungen per E-Mail, Aufrechnung, dem Ausschluss eigener Bedingungen von Geschäftskunden und zum Gerichtsstand. Verbraucher behalten den zwingenden Schutz ihres Wohnsitzlandes.\n- Sie erhalten ausdrücklich ein Recht zur Nutzung der gehosteten Dienste. Software, die Sie selbst betreiben, bleibt unter ihrer eigenen Lizenz.\n- Wechsel zu einem anderen Anbieter (EU-Datenverordnung): Sie können jederzeit verlangen, dass wir Ihre Daten zu einem anderen Anbieter oder in Ihre eigene Infrastruktur übertragen oder sie löschen. Nach einer Kündigungsfrist von einem Monat erfolgt der Wechsel innerhalb von 30 Tagen und kostenlos, und danach können Sie Ihre Daten mindestens 30 Tage lang abrufen. Ein Wechsel beendet einen entgeltlichen Vertrag vorzeitig, mit anteiliger Erstattung. Unsere Wechselseite (https://gplatform.org/de/legal/switching) erklärt, wie das für jeden Dienst funktioniert.\n- Sie müssen mindestens 16 Jahre alt sein, um unsere Dienste zu nutzen. Sind Sie jünger als 18, muss ein Elternteil oder Vormund zustimmen, und wir können einen Nachweis verlangen.\n\nSie können dieser Änderung vor dem 20. November 2026 per E-Mail an contact@gplatform.org widersprechen. Widersprechen Sie, wird die neue Fassung nicht Teil Ihres Vertrages, und jede Seite kann den Vertrag aus diesem Grund zu diesem Datum beenden.",
+    "en": "This version replaces the general terms of 6 September 2026. The main changes:\n- Your content: you keep all rights in it and give us a licence limited to running the service you submitted it to. We may pass it on only to the groups the terms name (our providers and products, the operators who carry it, the recipients of advisories, a successor, affiliated companies), never for their own purposes. It ends when you delete the content, except backups (kept up to 90 days) and permanent public records, which you are told about before you submit.\n- We may move your account to another sign-in service we run, such as GPlatform SSO, with 30 days' notice by email.\n- New versions: six weeks' notice by email, then you are asked to accept at your next sign-in. A new version applies to you only once you accept it. A free account that has not accepted after the six weeks is restricted to signing in, reading, exporting, data-protection requests, closing the account and accepting. Paid services are never restricted.\n- We restrict only on stated grounds and with a statement of reasons, and we hear you before suspending or ending an account, except in a closed list of urgent cases.\n- We change a service only for stated reasons and at no extra cost, and end a free service with at least 60 days' notice. Either of us may end a contract for a free service with four weeks' notice. After a contract ends you can export your data for 30 days.\n- A paid service is suspended for non-payment only after a reminder and 14 days, never for an amount you have properly disputed.\n- New clauses on signing up, sanctions, subcontractors, notices by email, set-off, a business customer's own terms not applying, and jurisdiction. Consumers keep their home country's mandatory protection.\n- You get an express right to use the hosted services. Software you run yourself stays under its own licence.\n- Switching to another provider (EU Data Act): you may ask at any time to move your data to another provider or to your own infrastructure, or to have it erased. After one month's notice the switch happens within 30 days, free of charge, and you can retrieve your data for at least 30 days afterwards. A switch ends a paid contract early, with a pro rata refund. Our switching page (https://gplatform.org/legal/switching) describes how it works for each service.\n- You must be at least 16 to use our services. If you are under 18, a parent or guardian must agree, and we may ask for proof.\n\nYou may object to this change by email to contact@gplatform.org before 20 November 2026. If you object, the new version does not become part of your agreement, and either of us may end the agreement for that reason from that date."
+   },
+   "surface": "contribution-checker",
+   "versionId": "gs-terms-2026-10-03"
+  }
+ ]
+}

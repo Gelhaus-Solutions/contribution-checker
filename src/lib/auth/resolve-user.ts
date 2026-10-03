@@ -3,6 +3,7 @@ import type { User } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { recordSignInMetric } from "@/lib/auth/sync-user";
+import { pushAccount } from "@/lib/gpterms";
 
 /**
  * The subset of a Hexclave server user we read on the hot path. Kept narrow so
@@ -77,6 +78,9 @@ export async function resolveLocalUserFromStack(
       },
     });
     recordSignInMetric(true);
+    // Terms is told about every account from its first day, so its notices
+    // reach it; the push waits in the outbox when the service is away.
+    await pushAccount(created);
     return created;
   } catch (e) {
     // Unique race on stackUserId: another request created it first.

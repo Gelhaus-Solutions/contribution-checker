@@ -39,6 +39,13 @@ const SCHEDULES: ScheduleSpec[] = [
     workflowType: WF.pruneRetainedRecords,
     cron: "30 3 * * *",
   },
+  // GPlatform Terms' outbox: pushes and acceptances that did not reach the
+  // service at once, every minute. A no-op where Terms is not configured.
+  {
+    id: scheduleIds.flushTermsOutbox,
+    workflowType: WF.flushTermsOutbox,
+    cron: "* * * * *",
+  },
 ];
 
 /** Schedules retired by the projectGate migration, actively deleted on startup

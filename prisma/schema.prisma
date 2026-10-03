@@ -75,6 +75,25 @@ model TermsAcceptance {
   @@index([userId, acceptedAt])
 }
 
+/// GPlatform Terms' outbox (@ghub/terms-client): pushes and acceptances wait
+/// here until the service has them. Written and read only by the client.
+model TermsOutbox {
+  seq           BigInt    @id @default(autoincrement())
+  id            String    @unique
+  kind          String
+  surface       String
+  accountId     String    @map("account_id")
+  body          String
+  createdAt     DateTime  @map("created_at") @db.Timestamptz(3)
+  attempts      Int       @default(0)
+  nextAttemptAt DateTime? @map("next_attempt_at") @db.Timestamptz(3)
+  lastError     String?   @map("last_error")
+
+  @@index([surface, accountId, seq], map: "terms_outbox_account")
+  @@index([nextAttemptAt], map: "terms_outbox_due")
+  @@map("terms_outbox")
+}
+
 model Project {
   id          String  @id @default(cuid())
   slug        String  @unique

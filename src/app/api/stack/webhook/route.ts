@@ -9,6 +9,7 @@ import { getSecret } from "@/lib/vault/resolver";
 import { getStackServerApp } from "@/lib/stack";
 import { isInstanceAdminTeam } from "@/lib/stack-provisioning";
 import { readTeamMemberships } from "@/lib/stack-teams";
+import { closeAccount } from "@/lib/gpterms";
 import { logger } from "@/lib/logger";
 
 export const runtime = "nodejs";
@@ -249,6 +250,14 @@ export async function POST(req: Request) {
         },
       });
     } else if (stackUserId && type === "user.deleted") {
+      // GPlatform Terms is told first, while the address is still known, so
+      // the account is never sent a notice again.
+      for (const gone of await prisma.user.findMany({
+        where: { stackUserId },
+        select: { id: true, email: true },
+      })) {
+        await closeAccount(gone);
+      }
       // Keep the local row (FKs, the record of applications and decisions the
       // project relies on), but erase what identifies the person beyond their
       // public GitHub identity: name, email, avatar and country (GDPR Art. 17).

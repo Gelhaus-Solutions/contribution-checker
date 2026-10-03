@@ -6,6 +6,7 @@ import { auth } from "@/auth";
 import { recordAudit } from "@/lib/audit";
 import { prisma } from "@/lib/db";
 import { env } from "@/lib/env";
+import { recordAcceptance } from "@/lib/gpterms";
 import { acceptTermsPath, safeNext, TERMS_ANSWER_COOKIE } from "@/lib/terms";
 
 /**
@@ -14,6 +15,9 @@ import { acceptTermsPath, safeNext, TERMS_ANSWER_COOKIE } from "@/lib/terms";
  * The page posts the identifier it rendered. If the versions moved on between
  * the render and the click (a rollout date passed), the person is shown the
  * page again rather than recorded against text they did not see.
+ *
+ * The row here is written first; GPlatform Terms' ledger gets the same
+ * acceptance through the outbox, so a Terms that is away loses nothing.
  */
 export async function acceptTermsAction(formData: FormData): Promise<void> {
   const session = await auth();
@@ -26,7 +30,7 @@ export async function acceptTermsAction(formData: FormData): Promise<void> {
   const shown = String(formData.get("record") ?? "");
   if (shown !== terms.record) redirect(acceptTermsPath(next));
 
-  await prisma.termsAcceptance.create({
+  const row = await prisma.termsAcceptance.create({
     data: {
       userId: session.user.id,
       version: terms.record,
@@ -38,6 +42,13 @@ export async function acceptTermsAction(formData: FormData): Promise<void> {
     actorId: session.user.id,
     kind: "terms.accepted",
     payload: { version: terms.record, from: terms.kind },
+  });
+  await recordAcceptance({
+    userId: session.user.id,
+    email: session.user.email || null,
+    recorded: terms.record,
+    acceptedAt: row.acceptedAt,
+    first: terms.kind === "first",
   });
   redirect(next);
 }

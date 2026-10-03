@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { rolloutFrom } from "@/lib/terms";
 import { getVaultPathFor } from "@/lib/vault/config";
 
 // A secret is "configured" if it's set in process.env OR has a VAULT_<name>_PATH
@@ -25,12 +24,6 @@ const optionalUrl = z.preprocess(
 // Gelhaus Solutions' terms for Contribution Checker, linked by the hosted instance.
 const GS_CC_TERMS_URL = "https://gplatform.org/apps/contribution-checker/terms";
 
-// An instant with its zone, so a server set to another zone cannot move it.
-const optionalInstant = z.preprocess(
-  (v) => (v === "" ? undefined : v),
-  z.string().datetime({ offset: true }).optional(),
-);
-
 const schema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
 
@@ -51,12 +44,13 @@ const schema = z.object({
   // their own, because the step asks people to accept Gelhaus Solutions'
   // documents and nobody else's.
   TERMS_ACCEPT_STEP: z.enum(["on", "off"]).optional(),
-  // When the 2026-10-01 versions of Contribution Checker's terms and the
-  // general terms are announced, and when they bind. Set both on the day their
-  // notice mail goes out, at least six weeks and a day apart; unset, nobody is
-  // asked about them yet.
-  TERMS_2026_10_01_ANNOUNCED_AT: optionalInstant,
-  TERMS_2026_10_01_IN_FORCE_FROM: optionalInstant,
+  // GPlatform Terms (GPLATTERMS-43), where the hosted instance's acceptances
+  // are recorded and which versions and dates it asks about: its origin
+  // (https://terms.gplatform.org) and this product's key (gpt_prod_..., or a
+  // VAULT_GPTERMS_API_KEY_PATH). Without them the step decides from the
+  // snapshot @ghub/terms-rules carries and records acceptances here only.
+  GPTERMS_URL: optionalUrl,
+  GPTERMS_API_KEY: z.string().optional(),
 
   // Legacy NextAuth vars. No longer used after the Hexclave migration (login is
   // handled by Hexclave); kept optional for backward compat and removed in the
@@ -243,16 +237,6 @@ const schema = z.object({
     .enum(["true", "false"])
     .default("false")
     .transform((v) => v === "true"),
-}).superRefine((value, ctx) => {
-  try {
-    rolloutFrom(value.TERMS_2026_10_01_ANNOUNCED_AT, value.TERMS_2026_10_01_IN_FORCE_FROM);
-  } catch (e) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ["TERMS_2026_10_01_IN_FORCE_FROM"],
-      message: (e as Error).message,
-    });
-  }
 });
 
 // During `next build`, Next.js executes server modules to collect page data
@@ -310,11 +294,9 @@ export const env = {
   termsAcceptStep:
     raw.TERMS_ACCEPT_STEP ??
     (raw.LEGAL_TERMS_URL === GS_CC_TERMS_URL ? "on" : "off"),
-  // The rollout of the 2026-10-01 terms, already validated by the schema.
-  termsRollout: rolloutFrom(
-    raw.TERMS_2026_10_01_ANNOUNCED_AT,
-    raw.TERMS_2026_10_01_IN_FORCE_FROM,
-  ),
+  // GPlatform Terms is used where its address is set and its key is in the
+  // environment or in Vault.
+  gptermsConfigured: !!raw.GPTERMS_URL && presentInEnvOrVault("GPTERMS_API_KEY"),
   oauthClientId,
   oauthClientSecret,
   oauthConfigured,

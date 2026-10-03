@@ -10,5 +10,6 @@ export * from "./webhook-delivery";
 export * from "./quality";
 export * from "./qa";
 export * from "./sweeps";
+export * from "./terms";
 export * from "./ci";
 export * from "./ai";

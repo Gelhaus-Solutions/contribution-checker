@@ -27,6 +27,12 @@ importers:
       '@auth/prisma-adapter':
         specifier: ^2.7.4
         version: 2.11.2(@prisma/client@6.19.3(prisma@6.19.3(typescript@5.9.3))(typescript@5.9.3))(nodemailer@10.0.13)
+      '@ghub/terms-client':
+        specifier: ^0.1.0
+        version: 0.1.0
+      '@ghub/terms-rules':
+        specifier: ^0.1.3
+        version: 0.1.3
       '@hexclave/next':
         specifier: 1.0.101
         version: 1.0.101(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(next@15.5.27(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@playwright/test@1.59.1)(@types/node@22.19.17)(react-dom@19.2.5(react@19.2.5))(react@19.2.5))(react-dom@19.2.5(react@19.2.5))(react@19.2.5)(tailwindcss@4.2.4)(zod@3.25.76)
@@ -786,6 +792,14 @@ packages:
 
   '@floating-ui/utils@0.2.11':
     resolution: {integrity: sha512-RiB/yIh78pcIxl6lLMG0CgBXAZ2Y0eVHqMPYugu+9U0AeT6YBeiJpf7lbdJNIugFP5SIjwNRgo4DhR1Qxi26Gg==}
+
+  '@ghub/terms-client@0.1.0':
+    resolution: {integrity: sha512-p91TrGoc0CbiZV+X97hYvZICUz9fCXsTTYtbh7PCh/hWuva+xbF22DrardrWrU9d36VRxTkbb6CC5bsNOylIMw==}
+    engines: {node: '>=22.3.0'}
+
+  '@ghub/terms-rules@0.1.3':
+    resolution: {integrity: sha512-jxGl1lgMXaA3TNZMgTG06jkPIMk5YwU6MF9ATdNLiHY/RLf7QNt5MNeZGhzoLmxft6J6+EPjaOSE0b1FkV7opg==}
+    engines: {node: '>=22.3.0'}
 
   '@grpc/grpc-js@1.14.5':
     resolution: {integrity: sha512-7VZM+SVdEcUUqSQeNI3zM8Qs/BhQKZndPo2h5VkYkAM8Iz0wJIa8mKV5ekQGqG8UUsnkQ0NMxIxwkIHYvj0qOw==}
@@ -7033,6 +7047,12 @@ snapshots:
       react-dom: 19.2.5(react@19.2.5)
 
   '@floating-ui/utils@0.2.11': {}
+
+  '@ghub/terms-client@0.1.0':
+    dependencies:
+      '@ghub/terms-rules': 0.1.3
+
+  '@ghub/terms-rules@0.1.3': {}
 
   '@grpc/grpc-js@1.14.5':
     dependencies:

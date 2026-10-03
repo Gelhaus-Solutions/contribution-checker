@@ -13,7 +13,7 @@ import {
 } from "@/lib/auth/sync-user";
 import { setSentryUser } from "@/lib/observability/sentry-user";
 import type { Session, SessionUser } from "@/lib/auth-types";
-import { standingAt, termsVersions, TERMS_STEP_SINCE } from "@/lib/terms";
+import { standingOf } from "@/lib/gpterms";
 
 export type { Session } from "@/lib/auth-types";
 
@@ -156,25 +156,15 @@ async function resolveSession(): Promise<Session | null> {
 }
 
 /**
- * Where an account stands with the terms, from every acceptance it recorded.
+ * Where an account stands with the terms: asked of GPlatform Terms where it is
+ * used, weighed against every acceptance recorded here (src/lib/gpterms.ts).
  * Undefined when the step is off, and when the read fails: the standing gates
  * writes, and a failed read must not stop a signed-in person from reading.
  */
 async function termsOf(u: { id: string; createdAt: Date }): Promise<SessionUser["terms"]> {
   if (env.termsAcceptStep !== "on") return undefined;
   try {
-    const rows = await prisma.termsAcceptance.findMany({
-      where: { userId: u.id },
-      orderBy: { acceptedAt: "asc" },
-      select: { version: true },
-    });
-    const standing = standingAt({
-      now: new Date(),
-      createdAt: u.createdAt,
-      stepSince: TERMS_STEP_SINCE,
-      accepted: rows.map((r) => r.version),
-      versions: termsVersions(env.termsRollout),
-    });
+    const standing = await standingOf(u);
     return {
       kind: standing.kind,
       inForceFrom: standing.inForceFrom?.toISOString() ?? null,

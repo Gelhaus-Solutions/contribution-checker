@@ -10,12 +10,13 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { env } from "@/lib/env";
-import { documentsToAccept, safeNext, termsVersions } from "@/lib/terms";
+import { termsToAccept } from "@/lib/gpterms";
+import { safeNext } from "@/lib/terms";
 import { formatDate } from "@/lib/ui/format";
 import { acceptTermsAction, deferTermsAction } from "./actions";
 
 /**
- * The terms acceptance step (src/lib/terms.ts). Uses auth() directly, never
+ * The terms acceptance step (src/lib/terms.ts, src/lib/gpterms.ts). Uses auth() directly, never
  * requireSession(), because requireSession() sends people here and would loop.
  *
  * Three texts, one screen: a new account accepts before it uses anything; an
@@ -46,7 +47,7 @@ export default async function AcceptTermsPage({
     redirect(next);
   }
 
-  const documents = documentsToAccept(termsVersions(env.termsRollout), new Date());
+  const documents = await termsToAccept();
   const binds = formatDate(terms.inForceFrom);
 
   const heading =

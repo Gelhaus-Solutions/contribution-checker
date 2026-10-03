@@ -48,6 +48,18 @@ export async function pruneProcessedDeliveries(): Promise<{ deleted: number }> {
   return { deleted };
 }
 
+/**
+ * Every minute: GPlatform Terms' outbox, flushed once (GPLATTERMS-43). A
+ * failed flush is not retried here; the next minute takes up where it stopped.
+ */
+export async function flushTermsOutbox(): Promise<{
+  delivered: number;
+  retrying: number;
+  parked: number;
+} | null> {
+  return acts.flushTermsOutbox();
+}
+
 /** Scheduled deletion of records past their retention period. */
 export async function pruneRetainedRecords(): Promise<{
   rateLimitBuckets: number;

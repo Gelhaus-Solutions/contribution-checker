@@ -33,6 +33,7 @@ export const WF = {
   claSweep: "claSweep",
   pruneProcessedDeliveries: "pruneProcessedDeliveries",
   pruneRetainedRecords: "pruneRetainedRecords",
+  flushTermsOutbox: "flushTermsOutbox",
 } as const;
 
 /** Signals delivered to entity workflows. `githubEvent` carries a raw GitHub

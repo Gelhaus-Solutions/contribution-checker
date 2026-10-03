@@ -53,4 +53,5 @@ export const scheduleIds = {
   ensureProjectGates: "schedule:ensure-project-gates",
   pruneProcessedDeliveries: "schedule:prune-processed-deliveries",
   pruneRetainedRecords: "schedule:prune-retained-records",
+  flushTermsOutbox: "schedule:flush-terms-outbox",
 } as const;
