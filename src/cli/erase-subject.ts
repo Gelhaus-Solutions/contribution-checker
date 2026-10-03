@@ -1,42 +1,49 @@
 /**
- * Erasure on request, from a shell in the running container:
+ * A privacy plan run by hand, from a shell in the running container, for when
+ * GPlatform Terms cannot be used (the console is the normal way):
  *
- *   node dist/erase-subject.mjs --gh-login <login> [--email <address>] \
- *     --categories account,applications,prChecks,aiResults,auditEvents \
- *     --request-ref <ref> [--keep-denial-records] [--execute]
+ *   node dist/erase-subject.mjs --request-ref DSR-2026-10-03-1 \
+ *     [--email <address>] [--gh-login <login>] [--account-id <User.id>] \
+ *     --plan account=pseudonymise,applications=keep,applicationText=delete,... \
+ *     [--execute]
  *
- * Without --execute it only reports what would go and what would stay. The
- * report is JSON on stdout. Bundled by scripts/build-worker.mjs like the worker,
- * for the same ESM reasons; the logic is src/lib/account-erasure.ts.
+ * Every category of the catalogue needs an action (src/lib/account-erasure.ts).
+ * Without --execute it only counts. The report is JSON on stdout.
  */
 import { parseArgs } from "node:util";
-import { eraseSubject, type ErasureCategory } from "@/lib/account-erasure";
+import { runPrivacyPlan, type PrivacyAction } from "@/lib/account-erasure";
 import { prisma } from "@/lib/db";
 
 const { values } = parseArgs({
   options: {
     "gh-login": { type: "string" },
     email: { type: "string" },
-    categories: { type: "string" },
+    "account-id": { type: "string", multiple: true },
+    plan: { type: "string" },
     "request-ref": { type: "string" },
-    "keep-denial-records": { type: "boolean", default: false },
     execute: { type: "boolean", default: false },
   },
 });
 
 async function main(): Promise<number> {
-  if (!values.categories || !values["request-ref"]) {
-    console.error("--categories and --request-ref are required; see the header of src/cli/erase-subject.ts");
+  if (!values.plan || !values["request-ref"]) {
+    console.error("--plan and --request-ref are required; see the header of src/cli/erase-subject.ts");
     return 2;
   }
-  const report = await eraseSubject(
-    { ghLogin: values["gh-login"] ?? null, email: values.email ?? null },
+  const plan = Object.fromEntries(
+    values.plan.split(",").map((pair) => {
+      const [category, action] = pair.split("=").map((part) => part.trim());
+      return [category, action as PrivacyAction];
+    }),
+  );
+  const report = await runPrivacyPlan(
     {
-      categories: values.categories.split(",").map((c) => c.trim()).filter(Boolean) as ErasureCategory[],
-      keepDenialRecords: values["keep-denial-records"] ?? false,
-      requestRef: values["request-ref"],
-      execute: values.execute ?? false,
+      email: values.email ?? null,
+      identifiers: values["gh-login"] ? { github: values["gh-login"] } : {},
+      accountIds: values["account-id"] ?? [],
     },
+    plan,
+    { execute: values.execute ?? false, requestRef: values["request-ref"] },
   );
   console.log(JSON.stringify(report, null, 2));
   return 0;

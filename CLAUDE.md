@@ -509,17 +509,21 @@ Application lifecycle:
 - `src/lib/applications/decide.ts`: approve/deny/revoke + audit + notifications
 - `src/lib/applications/schema.ts`: form-field schema + Zod validators
 
-Erasure on request (GDPR Art. 17, Art. 21 after an objection):
-- `src/lib/account-erasure.ts`: one person's data by category (`account`,
-  `applications`, `prChecks`, `aiResults`, `auditEvents`), dry run unless
-  `execute`, one transaction, then the Hexclave identities and Terms'
-  `closeSubject`. CLA signatures and manual decisions are never erased here.
-  `keepDenialRecords` leaves a manual DENIED decision only for a denial that
-  still binds (no re-applying, or a cooldown still running).
-- Run it in the container: `node dist/erase-subject.mjs --gh-login <login>
-  --categories ... --request-ref <ref> [--keep-denial-records] [--execute]`
-  (bundled by `scripts/build-worker.mjs`). The audit entry `privacy.erasure`
-  carries the reference and counts, never the person.
+Privacy requests (GDPR Art. 17, Art. 21 after an objection):
+- GPlatform Terms holds the request; staff choose there, per product and per
+  kind of data, keep, pseudonymise or delete. `src/lib/account-erasure.ts` is
+  this product's side: `PRIVACY_CATALOGUE` (what we hold and what we can do
+  with each kind) and `runPrivacyPlan` (dry run unless `execute`, one
+  transaction, then the Hexclave identities and Terms' `closeSubject`).
+- Pseudonymising is a keyed hash (HMAC-SHA256 under `PRIVACY_PSEUDONYM_KEY`),
+  never a plain hash: a login is guessable, so an unkeyed hash of it is not a
+  pseudonym. CLA signatures and manual decisions are never touched here.
+- `src/lib/privacy-runs.ts` publishes the catalogue and takes queued runs
+  every minute inside the `flushTermsOutbox` activity; Terms never calls in.
+- By hand, when Terms cannot be used: `node dist/erase-subject.mjs` in the
+  container (bundled by `scripts/build-worker.mjs`; flags in its header). The
+  audit entry `privacy.erasure` carries the reference, plan and counts, never
+  the person.
 
 Audit, notifications, jobs:
 - `src/lib/audit.ts`: `recordAudit` + `AuditKind` union (extend here when
