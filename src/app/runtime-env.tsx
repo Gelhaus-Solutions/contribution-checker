@@ -20,7 +20,6 @@ export function RuntimeEnvScript() {
   const json = JSON.stringify(payload).replace(/</g, "\\u003c");
   return (
     <script
-      // eslint-disable-next-line react/no-danger
       dangerouslySetInnerHTML={{
         __html: `window.__ENV__=${json};`,
       }}

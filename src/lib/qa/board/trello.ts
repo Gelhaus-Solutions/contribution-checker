@@ -208,7 +208,7 @@ export const trelloAdapter: BoardAdapter = {
     return hook && typeof hook.id === "string" ? hook.id : null;
   },
 
-  async unregisterHook(link) {
+  async unregisterHook() {
     // The caller holds the id; nothing to do when there is none.
     return;
   },

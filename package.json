@@ -81,6 +81,7 @@
     "zod": "^3.24.1"
   },
   "devDependencies": {
+    "@eslint/eslintrc": "^3.3.7",
     "@playwright/test": "^1.49.1",
     "@tailwindcss/postcss": "^4.0.0",
     "@temporalio/testing": "^1.18.1",

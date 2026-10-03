@@ -24,7 +24,6 @@ document.documentElement.classList.toggle("dark",d);
 
 export function ThemeScript() {
   return (
-    // eslint-disable-next-line react/no-danger
     <script dangerouslySetInnerHTML={{ __html: SCRIPT }} />
   );
 }
