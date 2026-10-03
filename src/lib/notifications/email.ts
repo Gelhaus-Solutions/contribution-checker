@@ -1,16 +1,16 @@
-import nodemailer from "nodemailer";
+import nodemailer, { type Transporter } from "nodemailer";
 import { env } from "@/lib/env";
 import { prisma } from "@/lib/db";
 import { getSecret } from "@/lib/vault/resolver";
 import { logger } from "@/lib/logger";
 
-let transporter: nodemailer.Transporter | null = null;
+let transporter: Transporter | null = null;
 let cachedFrom: string | undefined;
-let inflight: Promise<nodemailer.Transporter | null> | null = null;
+let inflight: Promise<Transporter | null> | null = null;
 
 const DEFAULT_SMTP_PORT = 587;
 
-async function getTransporter(): Promise<nodemailer.Transporter | null> {
+async function getTransporter(): Promise<Transporter | null> {
   if (!env.smtpConfigured) return null;
   if (transporter) return transporter;
   if (inflight) return inflight;

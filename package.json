@@ -67,7 +67,7 @@
     "minimatch": "^10.0.1",
     "next": "15.5.27",
     "next-auth": "5.0.0-beta.32",
-    "nodemailer": "^6.9.16",
+    "nodemailer": "^10.0.13",
     "pino": "^9.5.0",
     "pino-pretty": "^13.0.0",
     "prisma": "^6.1.0",
@@ -85,7 +85,7 @@
     "@tailwindcss/postcss": "^4.0.0",
     "@temporalio/testing": "^1.18.1",
     "@types/node": "^22.10.5",
-    "@types/nodemailer": "^6.4.17",
+    "@types/nodemailer": "^8.0.2",
     "@types/react": "^19.0.4",
     "@types/react-dom": "^19.0.2",
     "esbuild": "^0.25.0",
@@ -96,7 +96,7 @@
     "tailwindcss": "^4.0.0",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3",
-    "vitest": "^2.1.8"
+    "vitest": "^3.2.7"
   },
   "packageManager": "pnpm@10.24.0",
   "pnpm": {
@@ -105,6 +105,8 @@
       "@sentry/cli"
     ],
     "overrides": {
+      "deepmerge-ts": "^8.0.2",
+      "vite": "^7.3.6",
       "@auth/core": "^0.41.3",
       "@grpc/grpc-js": "^1.14.5",
       "browserslist": "^4.28.7",
