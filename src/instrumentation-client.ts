@@ -1,4 +1,5 @@
 import * as Sentry from "@sentry/nextjs";
+import { readReplayChoice, startReplay } from "@/lib/observability/replay-consent";
 import { scrubSensitive } from "@/lib/observability/scrub";
 
 // Read from the runtime-injected window.__ENV__ first (set by the
@@ -19,16 +20,8 @@ Sentry.init({
   dsn,
   environment,
   integrations: [
-    // Replay records whole sessions, unmasked: a masked replay cannot show
-    // what went wrong on a form, and one recorded only around an error misses
-    // how the person got there (the operator's decisions, 2026-10-02). The
-    // privacy notice says replays record whole sessions and show the page as
-    // it was, typed text included.
-    Sentry.replayIntegration({
-      maskAllText: false,
-      blockAllMedia: false,
-      maskAllInputs: false,
-    }),
+    // No replay here: it is added by startReplay() below, and only for a
+    // visitor who allowed it (lib/observability/replay-consent.ts).
     Sentry.browserProfilingIntegration(),
     // Capture browser console.error/warn as Sentry events. Most React/Next
     // client-side runtime errors surface as console.error before any error
@@ -38,6 +31,9 @@ Sentry.init({
     }),
   ],
   tracesSampleRate: 1.0,
+  // Apply once replay is added: a visitor who allowed recording is recorded
+  // whole, unmasked, from the page they allowed it on (the operator's
+  // decisions, 2026-10-02 and 2026-10-04).
   replaysSessionSampleRate: 1.0,
   replaysOnErrorSampleRate: 1.0,
   profilesSampleRate: 1.0,
@@ -61,5 +57,9 @@ Sentry.getGlobalScope().setAttributes({
   "service.runtime": "browser",
   "deploy.env": environment ?? "unknown",
 });
+
+// A yes given on an earlier page or visit. A first-time visitor is asked by
+// <ReplayConsent> in the root layout, and nothing is recorded until they answer.
+if (dsn && readReplayChoice() === "granted") startReplay();
 
 export const onRouterTransitionStart = Sentry.captureRouterTransitionStart;

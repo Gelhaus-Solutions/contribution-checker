@@ -673,11 +673,16 @@ by a cache and per-request work is paid on every page view. Two rules follow:
 The Sentry sample rates are a deliberate exception: traces, node profiling and
 browser profiling stay hardcoded at 1.0 in `src/sentry.*.config.ts` and
 `src/instrumentation-client.ts`, accepted in exchange for full-fidelity
-observability. Session Replay records whole sessions
-(`replaysSessionSampleRate: 1.0`, `replaysOnErrorSampleRate: 1.0`) and is
-**unmasked** (`maskAllText`, `maskAllInputs` and `blockAllMedia` off): a masked
-or error-only replay cannot be debugged, and both are the operator's decisions
-of 2026-10-02.
+observability. Session Replay runs **only after the visitor allows it**
+(`src/lib/observability/replay-consent.ts`, asked by `<ReplayConsent>` in the
+root layout, changed under "Session recording" in the footer and the account
+menu; the operator's decision of 2026-10-04, because recording and the replay's
+session-storage id need consent under Section 25 TDDDG). Once allowed it records
+whole sessions (`replaysSessionSampleRate: 1.0`, `replaysOnErrorSampleRate:
+1.0`) and is **unmasked** (`maskAllText`, `maskAllInputs` and `blockAllMedia`
+off): a masked or error-only replay cannot be debugged (decisions of
+2026-10-02). Never add `replayIntegration` to `Sentry.init` directly: that
+records before anyone has answered.
 The privacy notice says so, so any change here changes the notice too.
 `sendDefaultPii` is false everywhere and `Sentry.setUser` carries the internal
 id only.

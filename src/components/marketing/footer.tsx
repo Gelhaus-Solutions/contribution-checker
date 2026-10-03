@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { BrandMark } from "@/components/brand-mark";
 import { legalLinks } from "@/components/legal-notice";
+import { ReplayChoiceLink } from "@/app/replay-consent";
 
 const COLUMNS: { title: string; links: { href: string; label: string }[] }[] = [
   {
@@ -90,6 +91,7 @@ export function MarketingFooter() {
                 {l.label}
               </a>
             ))}
+            <ReplayChoiceLink className="transition-colors hover:text-foreground" />
             <p className="font-mono">AGPL-3.0-or-later</p>
           </div>
         </div>

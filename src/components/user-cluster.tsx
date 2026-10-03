@@ -1,9 +1,10 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { Download, Shield } from "lucide-react";
+import { Download, Shield, Video } from "lucide-react";
 import { UserButton } from "@hexclave/next";
 import { NotificationBell } from "@/components/notification-bell";
+import { reopenReplayChoice } from "@/lib/observability/replay-consent";
 
 /**
  * Right-hand header cluster: the notification bell + Hexclave's UserButton.
@@ -35,6 +36,12 @@ export function UserCluster({
       onClick: () => {
         window.location.assign("/api/account/export");
       },
+    },
+    // Where a yes or no to session recording is changed (see ReplayConsent).
+    {
+      text: "Session recording",
+      icon: <Video className="h-4 w-4" />,
+      onClick: reopenReplayChoice,
     },
     ...(isSuperAdmin
       ? [

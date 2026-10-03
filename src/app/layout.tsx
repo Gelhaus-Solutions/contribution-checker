@@ -12,6 +12,7 @@ import {
   setSentryUser,
   userFromSession,
 } from "@/lib/observability/sentry-user";
+import { ReplayConsent } from "./replay-consent";
 import { RuntimeEnvScript } from "./runtime-env";
 import { SentryUserClient } from "./sentry-user-client";
 import { ThemeScript, THEME_COOKIE } from "./theme-script";
@@ -93,6 +94,7 @@ export default async function RootLayout({
     <>
       <SentryUserClient user={user} />
       {children}
+      <ReplayConsent privacyUrl={env.LEGAL_PRIVACY_URL ?? null} />
     </>
   );
 
