@@ -5,7 +5,7 @@ import { prisma } from "@/lib/db";
 import { env } from "@/lib/env";
 import { closeAccount } from "@/lib/gpterms";
 import { logger } from "@/lib/logger";
-import { getStackServerApp } from "@/lib/stack";
+import { getSecret } from "@/lib/vault/resolver";
 
 /**
  * Erasure on request (GDPR Art. 17, and Art. 21 after an objection): one
@@ -295,25 +295,47 @@ export async function eraseSubject(
  * The person's identities in this instance's Hexclave project: the one each
  * account links to, and any other with the same email address (a second
  * sign-up leaves a second identity that no local row points at).
+ *
+ * Hexclave's REST API rather than `@hexclave/next`: the SDK imports
+ * `next/navigation`, which does not resolve under plain Node, and this also
+ * runs from the bundled CLI.
  */
 async function hexclaveIdentities(
   users: { stackUserId: string | null; email: string | null }[],
   email: string | null,
 ): Promise<{ id: string; delete: () => Promise<void> }[]> {
   if (!env.stackConfigured) return [];
-  const app = await getStackServerApp();
-  const found = new Map<string, { id: string; delete: () => Promise<void> }>();
+  const base = (process.env.STACK_API_URL ?? "https://api.stack-auth.com").replace(/\/+$/, "");
+  const secret = await getSecret("STACK_SECRET_SERVER_KEY");
+  if (!secret) throw new Error("STACK_SECRET_SERVER_KEY is not available, so Hexclave identities cannot be read");
+  const headers = {
+    "x-stack-access-type": "server",
+    "x-stack-project-id": process.env.STACK_PROJECT_ID ?? "",
+    "x-stack-secret-server-key": secret,
+  };
+  const call = async (path: string, method = "GET") => {
+    const response = await fetch(`${base}/api/v1${path}`, { method, headers, cache: "no-store" });
+    if (response.status === 404) return null;
+    if (!response.ok) throw new Error(`Hexclave ${method} ${path.split("?")[0]} answered ${response.status}`);
+    return method === "DELETE" ? {} : ((await response.json()) as Record<string, unknown>);
+  };
+
+  const ids = new Set<string>();
   for (const u of users) {
-    if (!u.stackUserId) continue;
-    const identity = await app.getUser(u.stackUserId);
-    if (identity) found.set(identity.id, identity);
+    if (u.stackUserId && (await call(`/users/${encodeURIComponent(u.stackUserId)}`))) ids.add(u.stackUserId);
   }
   const addresses = new Set([email, ...users.map((u) => u.email?.toLowerCase() ?? null)].filter(Boolean) as string[]);
   for (const address of addresses) {
-    const matches = await app.listUsers({ query: address, limit: 20 });
-    for (const identity of matches) {
-      if (identity.primaryEmail?.toLowerCase() === address) found.set(identity.id, identity);
+    const page = await call(`/users?query=${encodeURIComponent(address)}&limit=20`);
+    const items = (page?.items ?? []) as { id: string; primary_email?: string | null }[];
+    for (const item of items) {
+      if (item.primary_email?.toLowerCase() === address) ids.add(item.id);
     }
   }
-  return [...found.values()];
+  return [...ids].map((id) => ({
+    id,
+    delete: async () => {
+      await call(`/users/${encodeURIComponent(id)}`, "DELETE");
+    },
+  }));
 }

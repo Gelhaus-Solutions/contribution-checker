@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const db = vi.hoisted(() => ({ prisma: {} as Record<string, Record<string, unknown>> }));
 vi.mock("@/lib/db", () => db);
 vi.mock("@/lib/gpterms", () => ({ closeAccount: vi.fn() }));
-vi.mock("@/lib/stack", () => ({ getStackServerApp: vi.fn() }));
+vi.mock("@/lib/vault/resolver", () => ({ getSecret: vi.fn() }));
 vi.mock("@/lib/env", () => ({ env: { stackConfigured: false } }));
 
 import { denialStillBinds, eraseSubject, normaliseCategories } from "@/lib/account-erasure";
