@@ -1,5 +1,6 @@
 import { App } from "@octokit/app";
 import { getSecret } from "@/lib/vault/resolver";
+import { budgetWrapper } from "@/lib/github/budget";
 
 let cached: App | null = null;
 let inflight: Promise<App> | null = null;
@@ -51,10 +52,17 @@ export async function getGitHubApp(): Promise<App> {
 /**
  * Get an Octokit instance authenticated as a specific installation.
  * Use this for any repo-scoped GH API call.
+ *
+ * Every REST and GraphQL request made through it is accounted against the
+ * installation's two-lane budget (see `budget.ts`): production traffic keeps
+ * 75% of the quota, bulk work is held to 25%. Wrap background work in
+ * `inBulkLane` to put it in the small lane.
  */
 export async function getInstallationOctokit(installationId: number) {
   const app = await getGitHubApp();
-  return app.getInstallationOctokit(installationId);
+  const octokit = await app.getInstallationOctokit(installationId);
+  octokit.hook.wrap("request", budgetWrapper(installationId));
+  return octokit;
 }
 
 /** Drop the cached App so the next call re-resolves secrets (e.g. after rotation). */

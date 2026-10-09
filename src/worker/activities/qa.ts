@@ -1,3 +1,4 @@
+import { inBulkLane } from "@/lib/github/budget";
 import { logger } from "@/lib/logger";
 import { syncQaBoards } from "@/lib/qa/board/sync";
 import { signalStagingBatch } from "@/lib/temporal/start";
@@ -40,7 +41,9 @@ export async function syncQaBoard(args: {
   ]);
   if (links === 0) return { applied: 0, pushed: 0, failed: 0, idle: true };
 
-  const result = await syncQaBoards({ repoId: args.repoId });
+  const result = await inBulkLane(() =>
+    syncQaBoards({ repoId: args.repoId })
+  );
   logger.debug(
     { repoId: args.repoId, ...result },
     "qa board sync pass complete",

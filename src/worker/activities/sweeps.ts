@@ -1,3 +1,4 @@
+import { inBulkLane } from "@/lib/github/budget";
 import { prisma } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import {
@@ -49,7 +50,7 @@ export async function reconcileProject(
   active: boolean;
   claEnabled: boolean;
 }> {
-  const base = await reconcileProjectClosedPrs(projectId);
+  const base = await inBulkLane(() => reconcileProjectClosedPrs(projectId));
   const [appRepos, project] = await Promise.all([
     prisma.repo.count({
       where: { projectId, active: true, installationId: { not: null } },

@@ -1,3 +1,4 @@
+import { inBulkLane } from "@/lib/github/budget";
 import { prisma } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { recordAudit } from "@/lib/audit";
@@ -60,14 +61,16 @@ export async function scorePrCheckForBackfill(
     select: PROJECT_QUALITY_SELECT,
   });
   if (!project || !project.qualityEnabled) return false;
-  const res = await runQualityForPrCheck({
-    prCheckId: target.prCheckId,
-    installationId: target.installationId,
-    repoFullName: target.repoFullName,
-    prNumber: target.prNumber,
-    project,
-    skipComment: true,
-  });
+  const res = await inBulkLane(() =>
+    runQualityForPrCheck({
+      prCheckId: target.prCheckId,
+      installationId: target.installationId,
+      repoFullName: target.repoFullName,
+      prNumber: target.prNumber,
+      project,
+      skipComment: true,
+    })
+  );
   return res != null;
 }
 
