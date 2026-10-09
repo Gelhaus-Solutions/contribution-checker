@@ -41,6 +41,23 @@ function statusOf(e: unknown): number | undefined {
   return undefined;
 }
 
+/**
+ * A 403/429 that GitHub sent because the installation ran out of quota, not
+ * because a permission is missing. The 403 body for a rate limit is
+ * indistinguishable by status alone, so look at the rate-limit headers.
+ */
+export function isRateLimitError(e: unknown): boolean {
+  const s = statusOf(e);
+  if (s === 429) return true;
+  if (s !== 403) return false;
+  const headers = (e as { response?: { headers?: Record<string, unknown> } })
+    ?.response?.headers;
+  if (!headers) return false;
+  return (
+    headers["x-ratelimit-remaining"] === "0" || headers["retry-after"] != null
+  );
+}
+
 export async function closePullRequest(
   ref: RepoRef,
   prNumber: number,
@@ -1009,7 +1026,7 @@ export async function upsertCheckRun(
       } catch (e2) {
         const s2 = statusOf(e2);
         recordGithubMetric("check_run.create", "error", ref, s2);
-        if (s2 === 403 || s2 === 404) {
+        if ((s2 === 403 || s2 === 404) && !isRateLimitError(e2)) {
           logger.warn(
             { err: e2, ref, headSha: input.headSha },
             "check-run recreate forbidden: installation likely missing checks:write",
@@ -1026,7 +1043,9 @@ export async function upsertCheckRun(
       ref,
       status,
     );
-    if (status === 403 || status === 404) {
+    // A rate-limited 403 is transient: rethrow so the activity retries with
+    // backoff instead of dropping the check as if checks:write were missing.
+    if ((status === 403 || status === 404) && !isRateLimitError(e)) {
       logger.warn(
         { err: e, ref, headSha: input.headSha },
         "check-run publish forbidden: installation likely missing checks:write",

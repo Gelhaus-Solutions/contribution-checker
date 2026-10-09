@@ -81,6 +81,8 @@ type WebhookPayload = {
     body?: { from?: string };
   };
   label?: { name: string };
+  /** Present on `pull_request_review` events. */
+  review?: { state?: string };
   /** Who caused the event. Read only for the guard's unlock label, where the
    * whole point is that a label is trusted because of who added it. */
   sender?: { login?: string };
@@ -711,10 +713,16 @@ export async function handlePullRequestEvent(
   // A body or title edit is skipped. Neither can change which files a PR
   // touches, and the file list is the only thing the guard reads; a base change
   // can, and does not skip.
+  //
+  // A label, an unlabel and ready-for-review likewise cannot move the head or
+  // the base, so the guard may answer from what it already holds for this SHA
+  // instead of re-reading the file list (`diffUnchanged`).
   if (!isEdited || payload.changes?.base) {
     await runGuard(payload, ghRepoId, {
       labelAppliedBy: guardLabelAppliedBy,
       labelRemoved: guardLabelRemoved,
+      diffUnchanged:
+        isReEvalLabel || isUnlabeled || action === "ready_for_review",
     });
   }
 
@@ -751,7 +759,11 @@ export async function handlePullRequestEvent(
 async function runGuard(
   payload: WebhookPayload,
   ghRepoId: number,
-  opts: { labelAppliedBy: string | null; labelRemoved: boolean },
+  opts: {
+    labelAppliedBy: string | null;
+    labelRemoved: boolean;
+    diffUnchanged?: boolean;
+  },
 ): Promise<void> {
   const pr = payload.pull_request;
   if (!pr || !payload.repository || !payload.installation) return;
@@ -764,6 +776,7 @@ async function runGuard(
     baseRef: pr.base?.ref ?? null,
     labelJustAppliedBy: opts.labelAppliedBy,
     labelJustRemoved: opts.labelRemoved,
+    diffUnchanged: opts.diffUnchanged ?? false,
   });
 }
 
@@ -782,18 +795,32 @@ async function runGuard(
  * Only the guard cares. A review says nothing about whether the author has an
  * application, so the gate is deliberately not re-run here: that would be a full
  * decision pipeline and a Check Run rewrite every time somebody left a comment.
+ *
+ * Only a review that can change who is approving gets that far. The guard reads
+ * APPROVED, CHANGES_REQUESTED and DISMISSED and nothing else
+ * (`listPullRequestReviews`), so a `commented` review, which is what every
+ * review bot and every inline-comment batch submits, and an `edited` review
+ * body (the state cannot change) are dropped here on the payload alone. Each one
+ * used to cost a file list, a review list and a Check Run write on a PR that
+ * nothing about had changed, which on a busy repo is most of the traffic.
  */
 export async function handlePullRequestReviewEvent(
   payload: WebhookPayload,
 ): Promise<void> {
   const action = payload.action ?? "";
-  if (!["submitted", "dismissed", "edited"].includes(action)) return;
+  if (!["submitted", "dismissed"].includes(action)) return;
+  if (action === "submitted") {
+    const state = (payload.review?.state ?? "").toLowerCase();
+    // An absent state is not evidence of a comment: evaluate rather than guess.
+    if (state === "commented") return;
+  }
   if (!payload.pull_request || !payload.repository || !payload.installation) {
     return;
   }
   await runGuard(payload, payload.repository.id, {
     labelAppliedBy: null,
     labelRemoved: false,
+    diffUnchanged: true,
   });
 }
 

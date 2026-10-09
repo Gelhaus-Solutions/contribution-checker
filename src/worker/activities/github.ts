@@ -1,3 +1,4 @@
+import { inBulkLane } from "@/lib/github/budget";
 import {
   handleInstallationEvent,
   handleInstallationReposEvent,
@@ -61,7 +62,10 @@ export async function convergePrReGate(args: {
   reason?: string;
 }): Promise<void> {
   try {
-    await reGatePr({ ghRepoId: Number(args.repoId), prNumber: args.prNumber });
+    // Re-gates arrive in project-wide fan-outs, so they spend the bulk share.
+    await inBulkLane(() =>
+      reGatePr({ ghRepoId: Number(args.repoId), prNumber: args.prNumber })
+    );
   } catch (e) {
     throw classifyGithubError(e);
   }
@@ -76,7 +80,9 @@ export async function convergeStagingBatch(args: {
   repoId: string;
 }): Promise<StagingReconcileResult> {
   try {
-    return await reconcileStagingBatch({ repoId: args.repoId });
+    return await inBulkLane(() =>
+      reconcileStagingBatch({ repoId: args.repoId })
+    );
   } catch (e) {
     throw classifyGithubError(e);
   }

@@ -436,6 +436,21 @@ Path guard (`src/lib/guard/`, App mode only):
   review says nothing about whether the author has an application, and the
   unlock label is a maintainer's opinion about files. Both are routing-free and
   gate-free, the same argument the staging labels already make.
+- **Events that cannot change the diff cost nothing once the guard has settled.**
+  A review, a label and ready-for-review are passed `diffUnchanged`, and
+  `runGuardForPr` returns before any GitHub call when `PrCheck.guardCheckSha`
+  equals the head, nothing is blocked (`guardLabelApplied`) and no unlock is held
+  (`guardUnlockSource`): a blocked PR or one holding an unlock still evaluates,
+  because a new or dismissed review can change its verdict. The unlock label
+  event never skips. `handlePullRequestReviewEvent` also drops `commented`
+  reviews and `edited` review bodies on the payload alone: the guard reads only
+  APPROVED, CHANGES_REQUESTED and DISMISSED, and review bots submit `commented`
+  reviews constantly. This is what blew the installation quota: every review
+  event on every PR paid a three-page file list, a review list and a Check Run
+  write. The file list is also remembered per (PR, head SHA, base) for 10
+  minutes, so an event burst or an activity retry reads it once. Tradeoff: a
+  guard rule changed in settings is applied on the next push or re-gate, not on
+  the next review.
 - **Order of operations is the cost model.** Config and base are database-only;
   the file list is one call, paid by guard-enabled projects on default-branch
   PRs; the reviews call happens only when a guarded file was actually touched
@@ -480,6 +495,40 @@ Guard modules:
 - `src/lib/guard/evaluate.ts`: the pure verdict
 - `src/lib/guard/render.ts`: check payloads and the PR comment
 - `src/lib/guard/run.ts`: the one impure orchestrator
+
+GitHub request budget (`src/lib/github/budget.ts`):
+- An installation has one hourly quota (6850 on large installs) and the loudest
+  spender used to win: a reconcile or sync burned it and every webhook after
+  that failed with "API rate limit exceeded". `getInstallationOctokit` now hooks
+  every request into two lanes: **interactive 75%** (webhooks, gate decisions,
+  check runs, labels, comments) and **bulk 25%** (reconciliation, syncs,
+  backfills, re-gate fan-outs, large reads).
+- **Bulk is capped, interactive is reserved.** Bulk stops at 25% and also stops
+  when GitHub's `remaining` falls to the interactive share it has not used yet;
+  interactive may spill into an idle bulk share and stops only when GitHub says
+  the quota is gone. A refused request is **not sent** (`GithubBudgetError`,
+  status 429 with `retry-after`), because hammering a limit is what GitHub
+  punishes.
+- **Lanes are set by context, not per call site.** Wrap background work in
+  `inBulkLane` at the activity boundary (`convergeStagingBatch`,
+  `convergePrReGate`, `syncQaBoard`, `reconcileProject`,
+  `scorePrCheckForBackfill`). Without a context, `compare` and the repo-wide PR
+  listing are bulk by route (`isLargeRequest`) and everything else is
+  interactive. A new sweep or fan-out activity must wrap itself, or it spends
+  the production share.
+- REST and GraphQL are separate quotas, so each has its own window per
+  installation. Search is not accounted (its own per-minute quota).
+- Counters are in-process; GitHub's `x-ratelimit-*` headers are folded in on
+  every response (success or error) and are the cross-process truth.
+- `classifyGithubError` turns a rate limit or budget refusal into a retryable
+  failure with `nextRetryDelay` (from `retry-after` or `x-ratelimit-reset`,
+  clamped to 30 min), because the SDK's own schedule gives up in minutes on a
+  limit that lasts up to an hour.
+- A loop that catches per-item errors must rethrow `isBudgetError`, or every
+  remaining item is refused and logged one by one (`reconcileProjectClosedPrs`).
+- GraphQL is used where it collapses calls: the quality account snapshot is one
+  query instead of a user lookup plus up to three searches, falling back to REST.
+  A refused request there propagates rather than caching an empty snapshot.
 
 GitHub side effects (all Octokit calls):
 - `src/lib/github/pr-actions.ts`: close/reopen, labels, comments, Check Runs

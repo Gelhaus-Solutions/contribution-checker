@@ -37,6 +37,45 @@ function isRateLimited(e: unknown): boolean {
   );
 }
 
+const MIN_RATE_LIMIT_DELAY_MS = 1_000;
+/** Cap so one attempt never sleeps past what a deploy or a lifted limit makes
+ * pointless; the next attempt re-checks and sleeps again if still limited. */
+const MAX_RATE_LIMIT_DELAY_MS = 30 * 60 * 1000;
+
+/** How long until GitHub (or our own budget) will accept this request again,
+ * from `retry-after` or `x-ratelimit-reset`. Null when the error says nothing. */
+export function rateLimitDelayMs(e: unknown, now = Date.now()): number | null {
+  const headers = (
+    e as { response?: { headers?: Record<string, unknown> } }
+  )?.response?.headers;
+  if (!headers) return null;
+  const retryAfter = Number(headers["retry-after"]);
+  if (headers["retry-after"] != null && Number.isFinite(retryAfter)) {
+    return retryAfter * 1000;
+  }
+  const reset = Number(headers["x-ratelimit-reset"]);
+  if (headers["x-ratelimit-reset"] != null && Number.isFinite(reset)) {
+    return reset * 1000 - now;
+  }
+  return null;
+}
+
+function rateLimitedFailure(e: unknown): unknown {
+  const delay = rateLimitDelayMs(e);
+  if (delay == null) return e;
+  const detail = e instanceof Error ? e.message : String(e);
+  return ApplicationFailure.create({
+    message: `github rate limited: ${detail}`,
+    type: "GithubRateLimited",
+    nonRetryable: false,
+    nextRetryDelay: Math.min(
+      MAX_RATE_LIMIT_DELAY_MS,
+      Math.max(MIN_RATE_LIMIT_DELAY_MS, delay)
+    ),
+    cause: e instanceof Error ? e : undefined,
+  });
+}
+
 /** Statuses where a retry can never succeed: revoked/expired installation
  * token (401), resource gone (404/410), malformed request (422). */
 const PERMANENT_STATUSES = new Set([401, 404, 410, 422]);
@@ -51,7 +90,10 @@ const PERMANENT_STATUSES = new Set([401, 404, 410, 422]);
  */
 export function classifyGithubError(e: unknown): unknown {
   if (e instanceof ApplicationFailure) return e; // already classified upstream
-  if (isRateLimited(e)) return e; // transient: retry with backoff
+  // Transient, and the one case where we know when a retry can work: not
+  // before the window resets. Without this the SDK's own schedule (2s doubling
+  // to 2 minutes, 8 attempts) gives up long before an hourly quota comes back.
+  if (isRateLimited(e)) return rateLimitedFailure(e);
   const s = statusOf(e);
   if (s == null) return e; // network/unknown: retry
   if (s >= 500) return e; // GitHub 5xx: retry

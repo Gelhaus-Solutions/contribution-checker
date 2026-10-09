@@ -1,5 +1,6 @@
 import { getInstallationOctokit } from "@/lib/github/app";
 import { logger } from "@/lib/logger";
+import { isBudgetError } from "@/lib/github/budget";
 import type {
   AccountSnapshot,
   PrCommit,
@@ -214,6 +215,19 @@ async function getAccountSnapshot(args: {
   const now = Date.now();
   if (cached && cached.expiresAt > now) return cached.snapshot;
 
+  // One GraphQL round trip replaces the user lookup plus up to three search
+  // calls, and GraphQL spends its own quota rather than the REST one the gate
+  // runs on. Any failure (a bot login GraphQL cannot resolve, a schema hiccup)
+  // falls through to the REST path below, which is what this always did.
+  const viaGraphql = await getAccountSnapshotGraphql(args);
+  if (viaGraphql) {
+    accountCache.set(args.login.toLowerCase(), {
+      snapshot: viaGraphql,
+      expiresAt: now + ACCOUNT_TTL_MS,
+    });
+    return viaGraphql;
+  }
+
   const snapshot: AccountSnapshot = { login: args.login };
   try {
     const res = await args.octokit.request("GET /users/{username}", {
@@ -270,6 +284,101 @@ async function getAccountSnapshot(args: {
     expiresAt: now + ACCOUNT_TTL_MS,
   });
   return snapshot;
+}
+
+const ACCOUNT_QUERY = `
+  query Account(
+    $login: String!
+    $forkQuery: String!
+    $prQuery: String!
+    $mergedQuery: String!
+    $wantFork: Boolean!
+    $wantMerge: Boolean!
+  ) {
+    user(login: $login) {
+      createdAt
+      bio
+      email
+      avatarUrl
+      followers { totalCount }
+      repositories(privacy: PUBLIC) { totalCount }
+    }
+    forks: search(query: $forkQuery, type: REPOSITORY, first: 1) @include(if: $wantFork) {
+      repositoryCount
+    }
+    prs: search(query: $prQuery, type: ISSUE, first: 1) @include(if: $wantMerge) {
+      issueCount
+    }
+    merged: search(query: $mergedQuery, type: ISSUE, first: 1) @include(if: $wantMerge) {
+      issueCount
+    }
+  }
+`;
+
+type AccountGraphql = {
+  user: {
+    createdAt?: string;
+    bio?: string | null;
+    email?: string | null;
+    avatarUrl?: string | null;
+    followers?: { totalCount?: number };
+    repositories?: { totalCount?: number };
+  } | null;
+  forks?: { repositoryCount?: number };
+  prs?: { issueCount?: number };
+  merged?: { issueCount?: number };
+};
+
+/**
+ * The account snapshot in a single GraphQL query, or null when it cannot be
+ * produced whole (the caller then uses REST). Never throws.
+ */
+async function getAccountSnapshotGraphql(args: {
+  octokit: OctokitLike;
+  login: string;
+  wantForkCount: boolean;
+  wantMergeRatio: boolean;
+}): Promise<AccountSnapshot | null> {
+  try {
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000)
+      .toISOString()
+      .slice(0, 19);
+    const data = (await args.octokit.graphql(ACCOUNT_QUERY, {
+      login: args.login,
+      forkQuery: `user:${args.login} fork:only created:>${since}`,
+      prQuery: `is:pr author:${args.login}`,
+      mergedQuery: `is:pr is:merged author:${args.login}`,
+      wantFork: args.wantForkCount,
+      wantMerge: args.wantMergeRatio,
+    })) as AccountGraphql;
+    const u = data.user;
+    if (!u) return null;
+    return {
+      login: args.login,
+      createdAt: u.createdAt,
+      publicRepos: u.repositories?.totalCount,
+      followers: u.followers?.totalCount,
+      // GraphQL answers "" where REST answers null for an unset field.
+      bio: u.bio || null,
+      email: u.email || null,
+      hasAvatar: Boolean(u.avatarUrl),
+      ...(args.wantForkCount
+        ? { recentForkCount: data.forks?.repositoryCount }
+        : {}),
+      ...(args.wantMergeRatio
+        ? {
+            totalPrCount: data.prs?.issueCount,
+            mergedPrCount: data.merged?.issueCount,
+          }
+        : {}),
+    };
+  } catch (e) {
+    // A refused request says nothing about the account. Propagate it rather
+    // than caching an empty snapshot for a day.
+    if (isBudgetError(e)) throw e;
+    logger.debug({ err: e, login: args.login }, "account graphql failed");
+    return null;
+  }
 }
 
 // ----- Octokit response shape (subset) -----

@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
 import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
+import { isBudgetError } from "@/lib/github/budget";
 import {
   decideForRepo,
   decisionRepoInclude,
@@ -92,6 +93,9 @@ export async function reconcileProjectClosedPrs(
         });
         reopened += 1;
       } catch (e) {
+        // Out of bulk budget: every remaining PR would be refused the same way,
+        // so stop and let the activity retry once the window has moved.
+        if (isBudgetError(e)) throw e;
         logger.warn(
           { err: e, prCheckId: check.id, prNumber: check.prNumber },
           "reconcile: reopen failed"
