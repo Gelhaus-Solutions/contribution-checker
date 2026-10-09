@@ -436,6 +436,21 @@ Path guard (`src/lib/guard/`, App mode only):
   review says nothing about whether the author has an application, and the
   unlock label is a maintainer's opinion about files. Both are routing-free and
   gate-free, the same argument the staging labels already make.
+- **Events that cannot change the diff cost nothing once the guard has settled.**
+  A review, a label and ready-for-review are passed `diffUnchanged`, and
+  `runGuardForPr` returns before any GitHub call when `PrCheck.guardCheckSha`
+  equals the head, nothing is blocked (`guardLabelApplied`) and no unlock is held
+  (`guardUnlockSource`): a blocked PR or one holding an unlock still evaluates,
+  because a new or dismissed review can change its verdict. The unlock label
+  event never skips. `handlePullRequestReviewEvent` also drops `commented`
+  reviews and `edited` review bodies on the payload alone: the guard reads only
+  APPROVED, CHANGES_REQUESTED and DISMISSED, and review bots submit `commented`
+  reviews constantly. This is what blew the installation quota: every review
+  event on every PR paid a three-page file list, a review list and a Check Run
+  write. The file list is also remembered per (PR, head SHA, base) for 10
+  minutes, so an event burst or an activity retry reads it once. Tradeoff: a
+  guard rule changed in settings is applied on the next push or re-gate, not on
+  the next review.
 - **Order of operations is the cost model.** Config and base are database-only;
   the file list is one call, paid by guard-enabled projects on default-branch
   PRs; the reviews call happens only when a guarded file was actually touched

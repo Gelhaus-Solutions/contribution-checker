@@ -209,6 +209,22 @@ describe("the guard on the pull_request path", () => {
     expect(runGuardForPr).toHaveBeenCalledTimes(1);
   });
 
+  // Neither can move the head or the base, so the guard is told it may answer
+  // from what it already holds. A push and an open genuinely can.
+  it("says the diff is unchanged on ready_for_review, but not on a push", async () => {
+    await handlePullRequestEvent(
+      payload({ action: "ready_for_review" }) as never,
+    );
+    expect(runGuardForPr.mock.calls[0][0]).toMatchObject({
+      diffUnchanged: true,
+    });
+    runGuardForPr.mockClear();
+    await handlePullRequestEvent(payload({ action: "synchronize" }) as never);
+    expect(runGuardForPr.mock.calls[0][0]).toMatchObject({
+      diffUnchanged: false,
+    });
+  });
+
   it("does not run for a label it does not recognize", async () => {
     await handlePullRequestEvent(
       payload({
@@ -287,7 +303,7 @@ describe("the aggregate staging PR", () => {
 });
 
 describe("handlePullRequestReviewEvent", () => {
-  it.each(["submitted", "dismissed", "edited"])(
+  it.each(["submitted", "dismissed"])(
     "runs the guard on %s",
     async (action) => {
       await handlePullRequestReviewEvent(payload({ action }) as never);
@@ -295,9 +311,35 @@ describe("handlePullRequestReviewEvent", () => {
       expect(runGuardForPr.mock.calls[0][0]).toMatchObject({
         prNumber: 42,
         baseRef: "main",
+        diffUnchanged: true,
       });
     },
   );
+
+  it.each(["approved", "changes_requested"])(
+    "runs the guard on a submitted %s review",
+    async (state) => {
+      await handlePullRequestReviewEvent(
+        payload({ action: "submitted", review: { state } }) as never,
+      );
+      expect(runGuardForPr).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  // The guard only reads APPROVED, CHANGES_REQUESTED and DISMISSED, so a
+  // comment review (every review bot, every inline-comment batch) and an edited
+  // review body cannot change the verdict and must cost nothing.
+  it("ignores a submitted comment review", async () => {
+    await handlePullRequestReviewEvent(
+      payload({ action: "submitted", review: { state: "commented" } }) as never,
+    );
+    expect(runGuardForPr).not.toHaveBeenCalled();
+  });
+
+  it("ignores an edited review", async () => {
+    await handlePullRequestReviewEvent(payload({ action: "edited" }) as never);
+    expect(runGuardForPr).not.toHaveBeenCalled();
+  });
 
   it("ignores every other action", async () => {
     await handlePullRequestReviewEvent(payload({ action: "deleted" }) as never);

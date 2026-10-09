@@ -27,7 +27,10 @@
  *     touched and the stored sign-off does not already cover the current blobs.
  *
  * So an ordinary contribution costs one request, and a PR sitting green on a
- * previous approval costs one. The reviews call is paid by the PRs that are
+ * previous approval costs one. Events that cannot change the diff (a review, a
+ * label, ready-for-review) cost none at all on a PR the guard already settled at
+ * this head (`diffUnchanged`), and the file list is remembered per head SHA so a
+ * burst of events or an activity retry does not read it twice. The reviews call is paid by the PRs that are
  * actually being gated, which is the small set.
  */
 
@@ -98,6 +101,10 @@ export async function runGuardForPr(args: {
   labelJustAppliedBy?: string | null;
   /** True when this event removed the unlock label. */
   labelJustRemoved?: boolean;
+  /** True when this event cannot have changed the diff (a review, a label,
+   * ready-for-review), so a PR the guard already settled at this head can be
+   * answered without reading anything. */
+  diffUnchanged?: boolean;
 }): Promise<GuardRunResult> {
   try {
     return await runGuardInner(args);
@@ -119,6 +126,7 @@ async function runGuardInner(args: {
   baseRef: string | null;
   labelJustAppliedBy?: string | null;
   labelJustRemoved?: boolean;
+  diffUnchanged?: boolean;
 }): Promise<GuardRunResult> {
   const repo = await prisma.repo.findUnique({
     where: { ghRepoId: args.ghRepoId },
@@ -152,8 +160,28 @@ async function runGuardInner(args: {
       guardUnlockBy: true,
       guardApprovedFiles: true,
       guardLabelApplied: true,
+      guardCheckSha: true,
     },
   });
+
+  // Settled and quiet: the guard already published at this very head, nothing is
+  // blocking, and nobody holds an unlock that a new review could take away. An
+  // event that cannot change the diff then has nothing to decide, and answering
+  // it would cost a file list, a Check Run write and (for a review) a review
+  // list to arrive at the verdict already on the PR. The unlock label is never
+  // skipped: who added it is only knowable on that one event.
+  if (
+    args.diffUnchanged &&
+    !args.labelJustAppliedBy &&
+    !args.labelJustRemoved &&
+    args.headSha &&
+    prCheck &&
+    prCheck.guardCheckSha === args.headSha &&
+    !prCheck.guardLabelApplied &&
+    !prCheck.guardUnlockSource
+  ) {
+    return DID_NOT_RUN;
+  }
 
   const ref = repoRef(args.repoFullName, args.installationId);
 
@@ -195,9 +223,7 @@ async function runGuardInner(args: {
   let hits: GuardHit[] = [];
   let filesTruncated = false;
   if (baseIsDefault) {
-    const listed = await listPullRequestFiles(ref, args.prNumber, {
-      pageLimit: FILE_PAGE_LIMIT,
-    });
+    const listed = await listFilesCached(ref, args, args.headSha, baseRef);
     // A 404 means the PR is gone. Nothing to guard and nothing to publish.
     if (!listed) return DID_NOT_RUN;
     filesTruncated = listed.truncated;
@@ -283,6 +309,58 @@ async function runGuardInner(args: {
   });
 
   return { verdict };
+}
+
+/**
+ * The file list for one (PR, head, base), remembered for a few minutes.
+ *
+ * Content-addressed by the head SHA, so it never answers for a push it has not
+ * seen. What it absorbs is the same diff being read again within moments: the
+ * `opened` / `labeled` / `ready_for_review` burst a new PR produces, and every
+ * retry of an activity that failed after the read (rate-limited retries are the
+ * expensive ones, because they re-spend the quota that failed them). Only a
+ * whole answer is kept; a 404 or an error is never cached.
+ */
+const FILE_CACHE_TTL_MS = 10 * 60 * 1000;
+const FILE_CACHE_MAX = 500;
+type FileListing = Awaited<ReturnType<typeof listPullRequestFiles>>;
+const fileCache = new Map<string, { value: FileListing; expiresAt: number }>();
+
+async function listFilesCached(
+  ref: ReturnType<typeof repoRef>,
+  args: { ghRepoId: number; prNumber: number },
+  headSha: string | null,
+  baseRef: string,
+): Promise<FileListing> {
+  const key = headSha
+    ? `${args.ghRepoId}:${args.prNumber}:${headSha}:${baseRef}`
+    : null;
+  const now = Date.now();
+  if (key) {
+    const hit = fileCache.get(key);
+    if (hit && hit.expiresAt > now) return hit.value;
+  }
+  const listed = await listPullRequestFiles(ref, args.prNumber, {
+    pageLimit: FILE_PAGE_LIMIT,
+  });
+  if (key && listed) {
+    if (fileCache.size >= FILE_CACHE_MAX) {
+      for (const [k, v] of fileCache) {
+        if (v.expiresAt <= now) fileCache.delete(k);
+      }
+      if (fileCache.size >= FILE_CACHE_MAX) {
+        const oldest = fileCache.keys().next().value;
+        if (oldest !== undefined) fileCache.delete(oldest);
+      }
+    }
+    fileCache.set(key, { value: listed, expiresAt: now + FILE_CACHE_TTL_MS });
+  }
+  return listed;
+}
+
+/** Test seam. */
+export function resetGuardFileCacheForTests(): void {
+  fileCache.clear();
 }
 
 function toGuardFile(f: PrFileSummary) {
