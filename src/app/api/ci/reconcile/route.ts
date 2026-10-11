@@ -7,6 +7,7 @@ import {
 } from "@/lib/ci/oidc";
 import { runCiReconcileWorkflow } from "@/lib/temporal/start";
 import { workflowIds } from "@/lib/temporal/task-queue";
+import { botStopped } from "@/lib/lockdown";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -19,6 +20,11 @@ function bearerToken(req: Request): string | null {
 }
 
 export async function POST(req: Request) {
+  // GLockdown's kill switch from AAL phase 2 (src/lib/lockdown.ts): the bot
+  // stops, and no pull request is gated or touched while it holds.
+  if (botStopped()) {
+    return NextResponse.json({ error: "locked down" }, { status: 503 });
+  }
   const token = bearerToken(req);
   if (!token) {
     return NextResponse.json({ error: "missing bearer token" }, { status: 401 });

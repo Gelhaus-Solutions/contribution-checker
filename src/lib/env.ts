@@ -237,6 +237,17 @@ const schema = z.object({
     .enum(["true", "false"])
     .default("false")
     .transform((v) => v === "true"),
+
+  // GLockdown (src/lib/lockdown.ts). CC_LOCKDOWN is a floor nothing in the app
+  // can lower: off, signups, members, admins or full. The stage file comes from
+  // the GLockdown agent on the host, mounted read-only; the edge is the second
+  // source, asked over this app's TLS identity (tls.crt and tls.key in
+  // GLOCKDOWN_IDENTITY_DIR) with the edge's key pins (comma-separated).
+  CC_LOCKDOWN: z.enum(["off", "signups", "members", "admins", "full"]).default("off"),
+  GLOCKDOWN_STAGE_DIR: z.string().default("/run/glockdown/apps"),
+  GLOCKDOWN_EDGE_URL: optionalUrl,
+  GLOCKDOWN_EDGE_PINS: z.string().optional(),
+  GLOCKDOWN_IDENTITY_DIR: z.string().default("/etc/glockdown-app"),
 });
 
 // During `next build`, Next.js executes server modules to collect page data

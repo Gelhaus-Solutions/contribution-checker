@@ -16,6 +16,7 @@ import {
   BodyTooLargeError,
   readLimitedBody,
 } from "@/lib/http/read-limited-body";
+import { botStopped } from "@/lib/lockdown";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -60,6 +61,11 @@ async function verifySignature(
 }
 
 export async function POST(req: Request) {
+  // GLockdown's kill switch from AAL phase 2 (src/lib/lockdown.ts): the bot
+  // stops, and no pull request is gated or touched while it holds.
+  if (botStopped()) {
+    return NextResponse.json({ error: "locked down" }, { status: 503 });
+  }
   if (!env.githubAppConfigured) {
     return NextResponse.json(
       { error: "GitHub App not configured" },

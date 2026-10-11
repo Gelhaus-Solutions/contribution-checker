@@ -14,6 +14,7 @@ import {
   type ProjectLeafPermission,
 } from "@/lib/auth/constants";
 import type { Session } from "@/lib/auth-types";
+import { lockdown } from "@/lib/lockdown";
 
 export type Role = "OWNER" | "ADMIN" | "REVIEWER";
 
@@ -29,7 +30,11 @@ export function roleAtLeast(actual: Role, required: Role): boolean {
 
 export async function requireSession(): Promise<Session> {
   const session = await auth();
-  if (!session?.user) redirect("/handler/sign-in");
+  // Refused by GLockdown's kill switch (src/lib/lockdown.ts): the home page,
+  // not the sign-in page, which would only bring the person back here.
+  if (!session?.user) {
+    redirect(lockdown().stage === "off" ? "/handler/sign-in" : "/");
+  }
   // Admin-restricted users are fully blocked: send them to the dedicated
   // /restricted page (which uses auth() directly, so no redirect loop). Placed
   // BEFORE the ghId gate so a restricted user is never routed to /welcome.

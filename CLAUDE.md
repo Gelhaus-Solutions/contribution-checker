@@ -802,6 +802,17 @@ id only.
   ADMIN. Project deletion requires OWNER.
 - The bot's GitHub App installation (`getInstallationOctokit`,
   `Repo.installationId`) is independent of login and unchanged.
+- **GLockdown's kill switch** (`src/lib/lockdown.ts`, GLockdown L104). The
+  stage is the strictest of `CC_LOCKDOWN`, the GLockdown agent's file
+  (`/run/glockdown/apps/contribution-checker.json`, mounted read-only) and
+  GLockdown's edge, asked over the app's own TLS identity
+  (`GLOCKDOWN_EDGE_URL`, `GLOCKDOWN_EDGE_PINS`, `GLOCKDOWN_IDENTITY_DIR`) through
+  `@ghub/glockdown-sdk`. `auth()` enforces it: `signups` creates no new account,
+  `members` admits only super-admins and project members, `admins` only
+  super-admins, `full` (and GLockdown's AAL) nobody, sessions included, and
+  `requireSession()` then sends people to `/`, not to the sign-in loop. From
+  GLockdown's AAL phase 2 the GitHub webhook and the CI routes answer 503 too;
+  below it the bot, public pages and signed webhooks work at every stage.
 - **Terms acceptance** (`src/lib/terms.ts`, hosted instance only). The account
   accepts Contribution Checker's terms and Gelhaus Solutions' general terms,
   recorded in `TermsAcceptance` as archived version ids from

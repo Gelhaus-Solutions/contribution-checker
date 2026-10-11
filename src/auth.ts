@@ -14,6 +14,7 @@ import {
 import { setSentryUser } from "@/lib/observability/sentry-user";
 import type { Session, SessionUser } from "@/lib/auth-types";
 import { standingOf } from "@/lib/gpterms";
+import { lockdown } from "@/lib/lockdown";
 
 export type { Session } from "@/lib/auth-types";
 
@@ -44,10 +45,23 @@ export type { Session } from "@/lib/auth-types";
  */
 async function resolveSession(): Promise<Session | null> {
   if (!env.stackConfigured) return null;
+  // GLockdown's kill switch (src/lib/lockdown.ts): at `full` nobody is signed
+  // in, existing sessions included.
+  const { stage } = lockdown();
+  if (stage === "full") {
+    setSentryUser(null);
+    return null;
+  }
   try {
     const stackApp = await getStackServerApp();
     const stackUser = await stackApp.getUser({ includeRestricted: true });
     if (!stackUser) {
+      setSentryUser(null);
+      return null;
+    }
+    // From `signups` no new account: an account this app has not seen yet is
+    // not created, and the person is not signed in.
+    if (stage !== "off" && !(await knownAccount(stackUser))) {
       setSentryUser(null);
       return null;
     }
@@ -133,6 +147,20 @@ async function resolveSession(): Promise<Session | null> {
         );
     }
 
+    // `admins`: only super-admins. `members`: super-admins and project members.
+    if (stage === "admins" && !roles.isSuperAdmin) {
+      setSentryUser(null);
+      return null;
+    }
+    if (
+      stage === "members" &&
+      !roles.isSuperAdmin &&
+      (await prisma.projectMember.count({ where: { userId: u.id } })) === 0
+    ) {
+      setSentryUser(null);
+      return null;
+    }
+
     setSentryUser({ id: u.id, ghLogin: u.ghLogin, email: u.email });
 
     return {
@@ -153,6 +181,25 @@ async function resolveSession(): Promise<Session | null> {
     logger.error({ err: e }, "auth: failed to resolve session");
     return null;
   }
+}
+
+/**
+ * Whether this app has an account for the Hexclave user already, by its
+ * Hexclave id or, for an account from before the migration, its address: what
+ * `resolveLocalUserFromStack` would link instead of creating.
+ */
+async function knownAccount(stackUser: {
+  id: string;
+  primaryEmail: string | null;
+}): Promise<boolean> {
+  const byId = await prisma.user.findUnique({
+    where: { stackUserId: stackUser.id },
+    select: { id: true },
+  });
+  if (byId) return true;
+  const email = stackUser.primaryEmail?.trim();
+  if (!email) return false;
+  return !!(await prisma.user.findUnique({ where: { email }, select: { id: true } }));
 }
 
 /**
