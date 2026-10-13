@@ -1,5 +1,5 @@
 import { cache } from "react";
-import { auth } from "@/auth";
+import { auth, lockedOut } from "@/auth";
 import { prisma } from "@/lib/db";
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
@@ -14,7 +14,7 @@ import {
   type ProjectLeafPermission,
 } from "@/lib/auth/constants";
 import type { Session } from "@/lib/auth-types";
-import { lockdown } from "@/lib/lockdown";
+import { signInClosed } from "@/lib/lockdown";
 
 export type Role = "OWNER" | "ADMIN" | "REVIEWER";
 
@@ -28,13 +28,23 @@ export function roleAtLeast(actual: Role, required: Role): boolean {
   return ROLE_RANK[actual] >= ROLE_RANK[required];
 }
 
+/**
+ * Where to send a request that has no session: the sign-in page, or the
+ * lockdown page when GLockdown's kill switch refused the person behind it or
+ * has closed signing in to everyone (src/lib/lockdown.ts). Sending a refused
+ * person to sign in would only bring them back here. `returnTo` is where the
+ * sign-in page sends them after.
+ */
+export async function signInPath(returnTo?: string): Promise<string> {
+  if ((await lockedOut()) || signInClosed()) return "/lockdown";
+  return returnTo
+    ? `/handler/sign-in?after_auth_return_to=${encodeURIComponent(returnTo)}`
+    : "/handler/sign-in";
+}
+
 export async function requireSession(): Promise<Session> {
   const session = await auth();
-  // Refused by GLockdown's kill switch (src/lib/lockdown.ts): the home page,
-  // not the sign-in page, which would only bring the person back here.
-  if (!session?.user) {
-    redirect(lockdown().stage === "off" ? "/handler/sign-in" : "/");
-  }
+  if (!session?.user) redirect(await signInPath());
   // Admin-restricted users are fully blocked: send them to the dedicated
   // /restricted page (which uses auth() directly, so no redirect loop). Placed
   // BEFORE the ghId gate so a restricted user is never routed to /welcome.

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { prisma } from "@/lib/db";
 import { logger } from "@/lib/logger";
+import { presentsDecoyKey } from "@/lib/lockdown";
 import { signalQaBoardSync } from "@/lib/temporal/start";
 import { boardCallbackUrl } from "@/lib/qa/board/sync";
 import { decryptCredentials } from "@/lib/vault/transit";
@@ -72,6 +73,9 @@ export async function POST(
   req: Request,
   ctx: { params: Promise<{ provider: string }> },
 ) {
+  // GLockdown's honeytokens (src/lib/lockdown.ts): a decoy key tells GLockdown
+  // at once, and is refused below as a bad signature, whatever the signature.
+  const decoy = presentsDecoyKey(req);
   const { provider } = await ctx.params;
   if (provider !== "notion" && provider !== "trello") {
     return NextResponse.json({ ok: true, ignored: "unknown provider" });
@@ -144,8 +148,10 @@ export async function POST(
       : verifyNotion(rawBody, notionSig, token);
   });
 
-  if (matched.length === 0) {
-    logger.warn({ provider }, "qa board callback signature did not verify");
+  if (matched.length === 0 || decoy) {
+    if (matched.length === 0) {
+      logger.warn({ provider }, "qa board callback signature did not verify");
+    }
     return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
   }
 

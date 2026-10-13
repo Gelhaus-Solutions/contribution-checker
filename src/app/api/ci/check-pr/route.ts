@@ -14,7 +14,7 @@ import {
   BodyTooLargeError,
   readLimitedBody,
 } from "@/lib/http/read-limited-body";
-import { botStopped } from "@/lib/lockdown";
+import { botStopped, presentsDecoyKey } from "@/lib/lockdown";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -29,6 +29,9 @@ function bearerToken(req: Request): string | null {
 }
 
 export async function POST(req: Request) {
+  // GLockdown's honeytokens (src/lib/lockdown.ts): a decoy key tells GLockdown
+  // at once, and is refused below exactly where an unknown token is.
+  const decoy = presentsDecoyKey(req);
   // GLockdown's kill switch from AAL phase 2 (src/lib/lockdown.ts): the bot
   // stops, and no pull request is gated or touched while it holds.
   if (botStopped()) {
@@ -72,6 +75,9 @@ export async function POST(req: Request) {
 
   // OIDC verification stays at the HTTP edge (needs the raw bearer token); the
   // decision + side effects run durably inside the workflow.
+  if (decoy) {
+    return NextResponse.json({ error: "invalid token" }, { status: 401 });
+  }
   let claims;
   try {
     claims = await verifyGhActionsToken({

@@ -3,6 +3,7 @@ import { auth } from "@/auth";
 import { buildAccountExport } from "@/lib/account-export";
 import { recordAudit } from "@/lib/audit";
 import { rateLimit } from "@/lib/ratelimit";
+import { presentsDecoyKey } from "@/lib/lockdown";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -18,9 +19,12 @@ export const dynamic = "force-dynamic";
  * right, not a feature the restriction switches off. No ghId or terms gate for
  * the same reason.
  */
-export async function GET() {
+export async function GET(req: Request) {
+  // GLockdown's honeytokens (src/lib/lockdown.ts): a decoy key tells GLockdown
+  // and is refused as no session, whatever the session.
+  const decoy = presentsDecoyKey(req);
   const session = await auth();
-  if (!session?.user) {
+  if (!session?.user || decoy) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const userId = session.user.id;

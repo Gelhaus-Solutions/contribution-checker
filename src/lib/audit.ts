@@ -94,6 +94,13 @@ export type AuditKind =
   | "ai.run_completed"
   | "ai.run_failed"
   | "ai.settings_changed"
+  // GLockdown (src/lib/lockdown.ts), all app-level. A trip never carries the
+  // credential presented, only what tripped and where.
+  | "lockdown.escalated"
+  | "lockdown.escalate_failed"
+  | "lockdown.decoy_tripped"
+  | "lockdown.decoys_reported"
+  | "lockdown.decoys_report_failed"
   // Temporal durable execution
   | "application.cooldown_elapsed"
   | "workflow.failed";

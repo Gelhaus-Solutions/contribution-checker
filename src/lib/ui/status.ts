@@ -52,6 +52,14 @@ const TONE: Record<string, StatusTone> = {
   QA_PASSED: "success",
   QA_FAILED: "destructive",
   QA_SKIPPED: "outline",
+
+  // GLockdown's stages (src/lib/lockdown.ts, `stageStatus`). Prefixed for the
+  // same reason as QA_: a bare OFF or FULL would mean nothing next to the rest.
+  LOCKDOWN_OFF: "success",
+  LOCKDOWN_SIGNUPS: "warning",
+  LOCKDOWN_MEMBERS: "warning",
+  LOCKDOWN_ADMINS: "destructive",
+  LOCKDOWN_FULL: "destructive",
 };
 
 /**
@@ -68,6 +76,11 @@ const LABEL: Record<string, string> = {
   QA_PASSED: "Verified",
   QA_FAILED: "Failed",
   QA_SKIPPED: "Skipped",
+  LOCKDOWN_OFF: "No lockdown",
+  LOCKDOWN_SIGNUPS: "No new accounts",
+  LOCKDOWN_MEMBERS: "Members only",
+  LOCKDOWN_ADMINS: "Admins only",
+  LOCKDOWN_FULL: "Full lockdown",
 };
 
 export function statusTone(status: string): StatusTone {

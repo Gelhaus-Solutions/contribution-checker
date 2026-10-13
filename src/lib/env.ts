@@ -242,12 +242,26 @@ const schema = z.object({
   // can lower: off, signups, members, admins or full. The stage file comes from
   // the GLockdown agent on the host, mounted read-only; the edge is the second
   // source, asked over this app's TLS identity (tls.crt and tls.key in
-  // GLOCKDOWN_IDENTITY_DIR) with the edge's key pins (comma-separated).
+  // GLOCKDOWN_IDENTITY_DIR) with the edge's key pins (comma-separated). The
+  // stage list and the directory are the SDK's; a test holds them equal, so
+  // this module stays free of the SDK's node:tls imports.
   CC_LOCKDOWN: z.enum(["off", "signups", "members", "admins", "full"]).default("off"),
   GLOCKDOWN_STAGE_DIR: z.string().default("/run/glockdown/apps"),
   GLOCKDOWN_EDGE_URL: optionalUrl,
   GLOCKDOWN_EDGE_PINS: z.string().optional(),
   GLOCKDOWN_IDENTITY_DIR: z.string().default("/etc/glockdown-app"),
+  // GLockdown's honeytokens (L97). The decoy admin's sign-in names (email or
+  // GitHub login, comma-separated) and the SHA-256 of each decoy API key (hex,
+  // comma-separated). The decoy key itself is planted where an intruder would
+  // look and never here; `node dist/glockdown.mjs hash-key` prints its hash.
+  // A malformed hash fails the boot rather than leaving a decoy unchecked.
+  GLOCKDOWN_DECOY_LOGIN: z.string().optional(),
+  GLOCKDOWN_DECOY_KEY_SHA256: z
+    .string()
+    .optional()
+    .refine((v) => csv(v).every((h) => /^[0-9a-f]{64}$/i.test(h)), {
+      message: "each entry must be 64 hex digits (a SHA-256)",
+    }),
 });
 
 // During `next build`, Next.js executes server modules to collect page data
@@ -312,6 +326,9 @@ export const env = {
   oauthClientSecret,
   oauthConfigured,
   superAdmins: csv(raw.SUPER_ADMINS).map((s) => s.toLowerCase()),
+  glockdownEdgePins: csv(raw.GLOCKDOWN_EDGE_PINS),
+  glockdownDecoyLogins: csv(raw.GLOCKDOWN_DECOY_LOGIN),
+  glockdownDecoyKeys: csv(raw.GLOCKDOWN_DECOY_KEY_SHA256).map((h) => h.toLowerCase()),
   projectCreators: csv(raw.PROJECT_CREATORS).map((s) => s.toLowerCase()),
   // Hexclave is "configured" when the public identifiers are present and the
   // secret server key is available (env or Vault). The auth layer short-circuits

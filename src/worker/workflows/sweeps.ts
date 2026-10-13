@@ -60,6 +60,16 @@ export async function flushTermsOutbox(): Promise<{
   return acts.flushTermsOutbox();
 }
 
+/**
+ * Daily: tells GLockdown which decoys this app checks, as hashes only (L120),
+ * so a decoy in GLockdown's inventory that is no longer checked here shows up
+ * there. The activity never throws; a failed report is audited and tomorrow's
+ * run takes it up.
+ */
+export async function reportGlockdownDecoys(): Promise<{ ok: boolean; code: string | null }> {
+  return acts.reportGlockdownDecoys();
+}
+
 /** Scheduled deletion of records past their retention period. */
 export async function pruneRetainedRecords(): Promise<{
   rateLimitBuckets: number;

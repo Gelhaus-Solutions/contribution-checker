@@ -34,6 +34,7 @@ export const WF = {
   pruneProcessedDeliveries: "pruneProcessedDeliveries",
   pruneRetainedRecords: "pruneRetainedRecords",
   flushTermsOutbox: "flushTermsOutbox",
+  reportGlockdownDecoys: "reportGlockdownDecoys",
 } as const;
 
 /** Signals delivered to entity workflows. `githubEvent` carries a raw GitHub

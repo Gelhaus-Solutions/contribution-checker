@@ -802,17 +802,12 @@ id only.
   ADMIN. Project deletion requires OWNER.
 - The bot's GitHub App installation (`getInstallationOctokit`,
   `Repo.installationId`) is independent of login and unchanged.
-- **GLockdown's kill switch** (`src/lib/lockdown.ts`, GLockdown L104). The
-  stage is the strictest of `CC_LOCKDOWN`, the GLockdown agent's file
-  (`/run/glockdown/apps/contribution-checker.json`, mounted read-only) and
-  GLockdown's edge, asked over the app's own TLS identity
-  (`GLOCKDOWN_EDGE_URL`, `GLOCKDOWN_EDGE_PINS`, `GLOCKDOWN_IDENTITY_DIR`) through
-  `@ghub/glockdown-sdk`. `auth()` enforces it: `signups` creates no new account,
-  `members` admits only super-admins and project members, `admins` only
-  super-admins, `full` (and GLockdown's AAL) nobody, sessions included, and
-  `requireSession()` then sends people to `/`, not to the sign-in loop. From
-  GLockdown's AAL phase 2 the GitHub webhook and the CI routes answer 503 too;
-  below it the bot, public pages and signed webhooks work at every stage.
+- **GLockdown's kill switch** (`src/lib/lockdown.ts`, GLockdown L104).
+  `auth()` enforces the stage: `signups` creates no new account, `members`
+  admits only super-admins and project members, `admins` only super-admins,
+  `full` (and from GLockdown's AAL phase 1 whatever the stage) nobody, sessions
+  included. A person it refuses goes to `/lockdown`, never to the sign-in loop.
+  See **GLockdown** below for the rest.
 - **Terms acceptance** (`src/lib/terms.ts`, hosted instance only). The account
   accepts Contribution Checker's terms and Gelhaus Solutions' general terms,
   recorded in `TermsAcceptance` as archived version ids from
@@ -828,6 +823,71 @@ id only.
   mail goes out, six weeks and a day apart. An account older than the step
   with no record is not asked about the versions it used the service under,
   only about the next one. GPlatform Terms will take this over.
+
+## GLockdown
+
+`src/lib/lockdown.ts` is the one module that touches `@ghub/glockdown-sdk`, and
+it uses all of it: the stage reader, escalation, honeytokens and the decoy
+report, all over the app's own pinned TLS identity.
+
+- **The stage is the strictest of three sources, and none can lower another**:
+  `CC_LOCKDOWN` (an env floor), the agent's file
+  (`/run/glockdown/apps/contribution-checker.json`, mounted read-only) and the
+  edge (`GLOCKDOWN_EDGE_URL`, `GLOCKDOWN_EDGE_PINS`, `tls.crt`/`tls.key` in
+  `GLOCKDOWN_IDENTITY_DIR`). The file and the edge each hold their last good
+  answer while silent. The identity is read **once per process**: rebuilding
+  the stage source to pick up a late mount would forget the stage it holds,
+  which is the one thing it must never do. A late mount takes a restart.
+- **Bot vs. people.** From AAL phase 1 every credential is refused
+  (`refusesEveryCredential`), sessions included; from AAL phase 2 the GitHub
+  webhook and the CI routes answer 503 too (`botStopped`). Below that the bot,
+  the signed webhooks and the public pages work at every stage, so pull
+  requests are never left stuck by a lockdown aimed at people.
+- **`auth()` says why there is no session** (`lockedOut()`, from the same
+  memoized resolve). `signInPath()` in `src/lib/authz.ts` turns that into
+  `/lockdown` or the sign-in page, and every page that used to redirect to
+  `/handler/sign-in` itself goes through it. Sending a refused person to sign
+  in only brings them back, which is the loop this replaced.
+- **`/lockdown` and the header strip say what is refused, never why**: no rung,
+  no source, no time. A decoy trip raises the stage too, and whoever tripped it
+  must learn nothing from the page. The rung is for the console.
+- **Honeytokens (L97).** `GLOCKDOWN_DECOY_LOGIN` (emails or GitHub logins) and
+  `GLOCKDOWN_DECOY_KEY_SHA256` (hashes only; a malformed one fails the boot).
+  `auth()` checks the Hexclave email **before** the identity is resolved,
+  linked or created, and the local GitHub login right after; a hit is refused
+  exactly as no session. Every API route that takes a credential calls
+  `presentsDecoyKey(req)` at the top and refuses a hit **at the point an
+  unknown token or a bad signature is refused, with the same answer**, so the
+  response says nothing. `src/app/api/[...path]` does the same for guessed
+  endpoints, where a found key is far more likely to be tried than on a real
+  route. A new credential-taking route must do the same. A trip signals
+  GLockdown first (which raises AAL phase 1), then logs and audits
+  `lockdown.decoy_tripped` with what tripped and where: method and path only,
+  never the query, which may hold the key.
+- **The decoy report (L120)** goes out at worker start and daily at 04:40 UTC
+  (`reportGlockdownDecoys` schedule), as hashes. **An empty set is reported
+  too**: GLockdown's inventory may still list a decoy this app stopped
+  checking, and that is the case the report exists for.
+- **Raising one rung** (`raiseOneRung`, from the console or the CLI) is the
+  only write. It settles any edge ask already in flight before deciding, because
+  reading the stage starts one in the background and the SDK hands that one back
+  to the next `askEdge()`: without it the stage "refreshed" after a raise with
+  an answer requested before it. A raise is one rung from where the stage
+  stands, so a double submit must never raise two: the console's form carries
+  the rung it was rendered at (`expectFrom`, nothing is sent once the stage has
+  moved), `raiseOneRung` refuses an overlapping raise in the process, and a
+  rate limit covers the other replicas. Nothing in the app lowers a stage.
+- **Surfaces.** `/admin/lockdown` (super-admins): the ladder, each source with
+  the edge asked live, the identity as the trust document must pin it, the
+  decoys as hashes, the `lockdown.*` audit trail, raise and report. At `full`
+  nobody reaches it, so `node dist/glockdown.mjs` (`status`, `ask`, `escalate
+  --reason`, `report-decoys`, `pin`, `hash-key` from stdin) answers from a
+  shell in the container. Stage badges are `LOCKDOWN_*` in
+  `src/lib/ui/status.ts`.
+- **Tests.** `tests/unit/lockdown.test.ts` mocks the SDK's network calls only;
+  `tests/unit/lockdown-edge.test.ts` runs the real SDK against a local edge
+  over TLS 1.3 pinned both ways. Both need `openssl` for certificates and skip
+  what needs it when it is missing.
 
 ## Adding a new quality heuristic
 

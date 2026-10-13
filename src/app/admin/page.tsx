@@ -13,6 +13,8 @@ import { env } from "@/lib/env";
 import { getAppSlug } from "@/lib/github/app";
 import { PageHeader } from "@/components/page-header";
 import { SHELL_MEDIUM } from "@/lib/ui/layout";
+import { StatusBadge } from "@/components/status-badge";
+import { lockdown, stageStatus } from "@/lib/lockdown";
 import { provisionStackAuthAction } from "./actions";
 
 export default async function AdminHome() {
@@ -27,6 +29,25 @@ export default async function AdminHome() {
           title="Super-admin"
           description="Instance-wide settings and integration status."
         />
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">GLockdown</CardTitle>
+            <CardDescription>
+              The kill switch: the stage in force and its sources, raising this app one rung,
+              the identity GLockdown pins, and the honeytokens.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-wrap items-center gap-3">
+            <StatusBadge status={stageStatus(lockdown().stage)} />
+            <Link
+              href="/admin/lockdown"
+              className="text-sm font-medium underline underline-offset-2"
+            >
+              Open the console →
+            </Link>
+          </CardContent>
+        </Card>
 
         <Card>
           <CardHeader>

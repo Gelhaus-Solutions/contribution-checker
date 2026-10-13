@@ -2,6 +2,7 @@
 
 import { redirect } from "next/navigation";
 import { auth } from "@/auth";
+import { signInPath } from "@/lib/authz";
 import { getStackServerApp } from "@/lib/stack";
 import { logger } from "@/lib/logger";
 import {
@@ -23,9 +24,7 @@ import {
  */
 export async function finishOnboarding(_formData: FormData): Promise<void> {
   const session = await auth();
-  if (!session?.user) {
-    redirect("/handler/sign-in?after_auth_return_to=/welcome");
-  }
+  if (!session?.user) redirect(await signInPath("/welcome"));
   if (session.user.restricted) redirect("/restricted");
 
   const stackApp = await getStackServerApp();

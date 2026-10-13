@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
-import { isRestricted } from "@/lib/authz";
+import { isRestricted, signInPath } from "@/lib/authz";
 import { prisma } from "@/lib/db";
+import { presentsDecoyKey } from "@/lib/lockdown";
 
 /**
  * GitHub redirects here after an admin installs the App on one or more repos.
@@ -11,11 +12,15 @@ import { prisma } from "@/lib/db";
  * the admin choose which ones to link.
  */
 export async function GET(req: Request) {
+  // GLockdown's honeytokens (src/lib/lockdown.ts): a decoy key tells GLockdown
+  // and is refused as no session, whatever the session.
+  const decoy = presentsDecoyKey(req);
   const session = await auth();
-  if (!session?.user) {
-    const url = new URL("/handler/sign-in", req.url);
-    url.searchParams.set("after_auth_return_to", req.url);
-    return NextResponse.redirect(url);
+  if (!session?.user || decoy) {
+    const here = new URL(req.url);
+    return NextResponse.redirect(
+      new URL(await signInPath(here.pathname + here.search), req.url),
+    );
   }
   if (isRestricted(session)) {
     return NextResponse.redirect(new URL("/restricted", req.url));

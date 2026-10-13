@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { ShieldAlert } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { auth, signIn } from "@/auth";
 import { env } from "@/lib/env";
@@ -7,6 +8,8 @@ import { SubmitButton } from "@/components/ui/submit-button";
 import { BrandMark } from "@/components/brand-mark";
 import { UserCluster } from "@/components/user-cluster";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { Button } from "@/components/ui/button";
+import { STAGE_COPY, lockdown, signInClosed } from "@/lib/lockdown";
 
 const MARKETING_LINKS = [
   { href: "/how-it-works", label: "How it works" },
@@ -25,6 +28,11 @@ export async function SiteHeader({
 } = {}) {
   const session = await auth();
   const unread = session?.user ? await unreadCount(session.user.id) : 0;
+  // GLockdown's kill switch (src/lib/lockdown.ts): a file read at most once a
+  // second, so every page can say when a stage is in force.
+  const { stage } = lockdown();
+  const gutter =
+    width === "wide" ? "px-5 sm:px-8 lg:px-14" : "px-5 sm:px-8 lg:px-12";
   return (
     // Sticky with a translucent ground: on a long docs page the nav has to stay
     // reachable, and the blur keeps content legible as it scrolls underneath.
@@ -33,10 +41,8 @@ export async function SiteHeader({
     <header className="sticky top-0 z-40 border-b border-border bg-background/90 backdrop-blur-md supports-[backdrop-filter]:bg-background/75">
       <div
         className={cn(
-          "mx-auto flex h-14 w-full items-center justify-between",
-          width === "wide"
-            ? "max-w-[110rem] px-5 sm:px-8 lg:px-14"
-            : "max-w-[110rem] px-5 sm:px-8 lg:px-12",
+          "mx-auto flex h-14 w-full max-w-[110rem] items-center justify-between",
+          gutter,
         )}
       >
         <Link
@@ -84,6 +90,12 @@ export async function SiteHeader({
                 stackConfigured={env.stackConfigured}
               />
             </>
+          ) : signInClosed() ? (
+            // Signing in is closed to everyone: the sign-in page would only
+            // send the visitor to the lockdown page, so link there directly.
+            <Button asChild size="sm" variant="outline">
+              <Link href="/lockdown">Sign-in paused</Link>
+            </Button>
           ) : (
             <form
               action={async () => {
@@ -96,6 +108,30 @@ export async function SiteHeader({
           )}
         </nav>
       </div>
+      {stage !== "off" ? (
+        // In the sticky header on purpose: a stage in force changes what
+        // every page can do, so it stays in view. The stage only, in plain
+        // words: never the rung or why (see /lockdown).
+        <div className="border-t border-warning/30 bg-warning/12 text-warning-strong">
+          <div
+            className={cn(
+              "mx-auto flex w-full max-w-[110rem] flex-wrap items-center gap-x-3 gap-y-0.5 py-1.5 text-xs",
+              gutter,
+            )}
+          >
+            <ShieldAlert className="size-3.5 shrink-0" aria-hidden="true" />
+            <span className="font-medium">{STAGE_COPY[stage].headline}.</span>
+            <Link href="/lockdown" className="underline underline-offset-2">
+              What this means
+            </Link>
+            {session?.user.isSuperAdmin ? (
+              <Link href="/admin/lockdown" className="underline underline-offset-2">
+                GLockdown console
+              </Link>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
     </header>
   );
 }
