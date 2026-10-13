@@ -363,6 +363,18 @@ describe("raising one rung", () => {
     );
   });
 
+  it("never lets two raises overlap, so a double submit cannot raise two rungs", async () => {
+    let answer: (v: unknown) => void = () => {};
+    sdk.escalate.mockReturnValue(new Promise((r) => (answer = r)));
+    const l = await load(undefined, { edge: true });
+    const first = l.raiseOneRung({ reason: "r", actorId: "u1", via: "console" });
+    const second = await l.raiseOneRung({ reason: "r", actorId: "u1", via: "console" });
+    expect(second).toMatchObject({ ok: false, code: "in_progress" });
+    answer({ ok: true, body: {} });
+    expect(await first).toMatchObject({ ok: true });
+    expect(sdk.escalate).toHaveBeenCalledTimes(1);
+  });
+
   it("refuses without a reason or an edge, and audits GLockdown's refusal", async () => {
     let l = await load(undefined, { edge: true });
     expect(await l.raiseOneRung({ reason: " ", actorId: "u1", via: "console" })).toMatchObject({

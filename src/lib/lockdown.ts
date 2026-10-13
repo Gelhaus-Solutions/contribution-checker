@@ -426,6 +426,8 @@ export function inspectIdentity(): IdentityReport {
 
 export type RaiseVia = "console" | "cli";
 
+let raising = false;
+
 export type RaiseOutcome =
   | { ok: true; from: Rung; expected: Rung | null; answer: unknown }
   | { ok: false; from: Rung; status: number; code: string; detail: string | null };
@@ -449,11 +451,20 @@ export async function raiseOneRung(args: {
   if (!reason) {
     return { ok: false, from, status: 0, code: "no_reason", detail: "a raise needs a reason" };
   }
-  const { connection, problem } = edge();
-  const r: EscalateResult = connection
-    ? await escalate({ ...connection, reason })
-    : notConfigured(problem);
-  if (r.ok) await glockdown().askEdge();
+  // One raise at a time per process: a raise is one rung from where the stage
+  // stands, so a second one overlapping the first would raise two.
+  if (raising) {
+    return { ok: false, from, status: 0, code: "in_progress", detail: "a raise is already on its way" };
+  }
+  raising = true;
+  let r: EscalateResult;
+  try {
+    const { connection, problem } = edge();
+    r = connection ? await escalate({ ...connection, reason }) : notConfigured(problem);
+    if (r.ok) await glockdown().askEdge();
+  } finally {
+    raising = false;
+  }
 
   const outcome: RaiseOutcome = r.ok
     ? { ok: true, from, expected, answer: r.body }
