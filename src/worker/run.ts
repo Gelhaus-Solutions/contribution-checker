@@ -40,6 +40,7 @@ import {
   indexedValueTypeName,
 } from "@/lib/temporal/search-attribute-registration";
 import { warmupSecrets } from "@/lib/vault/resolver";
+import { reportDecoyInventory } from "@/lib/lockdown";
 
 /**
  * Self-register the custom Search Attributes on the namespace, the same way
@@ -170,6 +171,11 @@ async function main(): Promise<void> {
   await ensureSchedules(client).catch((e) =>
     logger.error({ err: e }, "ensureSchedules failed (continuing)")
   );
+
+  // GLockdown's decoy inventory (L120) is reported at start and once a day
+  // (the daily run is the schedule above). Not awaited: a silent edge must not
+  // hold the worker's boot, and the report never throws.
+  void reportDecoyInventory("start");
 
   // Worker Deployments / Versioning (opt-in). When enabled the worker joins a
   // Deployment under a Build ID, enabling safe rolling deploys and the

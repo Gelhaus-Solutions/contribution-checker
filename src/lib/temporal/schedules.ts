@@ -46,6 +46,14 @@ const SCHEDULES: ScheduleSpec[] = [
     workflowType: WF.flushTermsOutbox,
     cron: "* * * * *",
   },
+  // GLockdown's decoy inventory (L120): which decoys this app checks, as
+  // hashes, daily at 04:40 UTC. The worker also reports once when it starts.
+  // A no-op where GLockdown's edge is not configured.
+  {
+    id: scheduleIds.reportGlockdownDecoys,
+    workflowType: WF.reportGlockdownDecoys,
+    cron: "40 4 * * *",
+  },
 ];
 
 /** Schedules retired by the projectGate migration, actively deleted on startup

@@ -54,4 +54,5 @@ export const scheduleIds = {
   pruneProcessedDeliveries: "schedule:prune-processed-deliveries",
   pruneRetainedRecords: "schedule:prune-retained-records",
   flushTermsOutbox: "schedule:flush-terms-outbox",
+  reportGlockdownDecoys: "schedule:report-glockdown-decoys",
 } as const;

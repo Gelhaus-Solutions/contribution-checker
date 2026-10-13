@@ -13,3 +13,4 @@ export * from "./sweeps";
 export * from "./terms";
 export * from "./ci";
 export * from "./ai";
+export * from "./lockdown";
