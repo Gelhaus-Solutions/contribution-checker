@@ -214,6 +214,40 @@ See [`.env.example`](./.env.example). Highlights:
 - `PROJECT_CREATORS`: comma-separated logins, granted project-creation rights on first sign-in
 - `SMTP_*`: optional, SMTP transport for email notifications
 - `VAULT_*`: optional, source secrets from HashiCorp Vault (see below)
+- `CC_LOCKDOWN`, `GLOCKDOWN_*`: optional, GLockdown's kill switch, its edge and
+  this app's honeytokens (see [GLockdown](#glockdown))
+
+## GLockdown
+
+The app takes part in [GLockdown](https://ennogelhaus.de) through
+`@ghub/glockdown-sdk` (`src/lib/lockdown.ts`):
+
+- **It enforces a stage**, the strictest of `CC_LOCKDOWN`, the file the
+  GLockdown agent writes on the host and GLockdown's edge: `signups` (no new
+  accounts), `members` (project members and super-admins only), `admins`
+  (super-admins only) and `full` (nobody, sessions included). From AAL phase 2
+  the bot stops too. Refused people land on `/lockdown`, and every page carries
+  a strip while a stage is in force.
+- **It can raise itself one rung** from the console at `/admin/lockdown` or
+  `node dist/glockdown.mjs escalate --reason "..."`. Nothing in the app lowers a
+  stage.
+- **It keeps honeytokens**: a decoy admin's sign-in names and the SHA-256 of a
+  decoy API key. Using either is refused like an unknown account or key, and
+  GLockdown is told. The decoys are reported to GLockdown, as hashes, at start
+  and daily.
+
+The console shows the stage and each source, asks the edge live, and shows this
+app's TLS identity as the trust document must pin it. At `full` it is out of
+reach, so the CLI answers from a shell in the container:
+
+```bash
+node dist/glockdown.mjs status          # the stage, its sources, the identity
+node dist/glockdown.mjs ask             # the edge's answer, now
+node dist/glockdown.mjs escalate --reason "suspicious sign-ins"
+node dist/glockdown.mjs report-decoys   # the decoy inventory, now
+node dist/glockdown.mjs pin             # this app's pin for the trust document
+node dist/glockdown.mjs hash-key < key  # the SHA-256 to set for a decoy key
+```
 
 ## Secrets via HashiCorp Vault
 
@@ -319,7 +353,8 @@ src/
 │   │   ├── projects/[id]/     per-project: overview, applications, decisions, repos, form, settings, audit
 │   │   ├── notifications/     in-app notification inbox
 │   │   └── templates/         user's saved form templates
-│   ├── admin/                 super-admin (allowlist, GitHub App setup)
+│   ├── admin/                 super-admin (allowlist, GitHub App setup, GLockdown console)
+│   ├── lockdown/              public page for people GLockdown's kill switch refuses
 │   └── api/
 │       ├── auth/              Auth.js v5 handlers
 │       └── github/            App webhook + post-install + manifest callback
@@ -330,6 +365,7 @@ src/
 │   ├── auth.ts / auth.config.ts   Auth.js setup (split for edge-safe middleware)
 │   ├── authz.ts               role-based authz helpers (requireProjectRole etc.)
 │   ├── audit.ts               append-only audit log writer
+│   ├── lockdown.ts            GLockdown: stage, escalation, honeytokens, decoy report
 │   ├── ratelimit.ts           DB-backed sliding-window rate limit
 │   └── env.ts                 Zod-validated environment
 └── components/
