@@ -28,8 +28,8 @@ importers:
         specifier: ^2.7.4
         version: 2.11.2(@prisma/client@6.19.3(prisma@6.19.3(typescript@5.9.3))(typescript@5.9.3))(nodemailer@10.0.13)
       '@ghub/glockdown-sdk':
-        specifier: 0.2.0
-        version: 0.2.0
+        specifier: 0.3.0
+        version: 0.3.0
       '@ghub/terms-client':
         specifier: ^0.1.0
         version: 0.1.0
@@ -796,8 +796,8 @@ packages:
   '@floating-ui/utils@0.2.11':
     resolution: {integrity: sha512-RiB/yIh78pcIxl6lLMG0CgBXAZ2Y0eVHqMPYugu+9U0AeT6YBeiJpf7lbdJNIugFP5SIjwNRgo4DhR1Qxi26Gg==}
 
-  '@ghub/glockdown-sdk@0.2.0':
-    resolution: {integrity: sha512-fJSq2bOaMzhEsxoYOYHV0tbsgzsZbWf7yxoBkLWx4MbszWZK6K46wfBXzq/PsCiOh6JAwNZVSyf0sJDeqPnVfQ==}
+  '@ghub/glockdown-sdk@0.3.0':
+    resolution: {integrity: sha512-j4PoZCcw7sCzq6nURzTWTYjDHP2gdL1vr+OqG5iNzoDcycvi/Ij/EKKg8sH2WgjTdIuxjfxC91NNVBs+6ScYCA==}
     engines: {node: '>=22.0.0'}
 
   '@ghub/terms-client@0.1.0':
@@ -7055,7 +7055,7 @@ snapshots:
 
   '@floating-ui/utils@0.2.11': {}
 
-  '@ghub/glockdown-sdk@0.2.0': {}
+  '@ghub/glockdown-sdk@0.3.0': {}
 
   '@ghub/terms-client@0.1.0':
     dependencies:
