@@ -3,9 +3,9 @@
 import { revalidatePath } from "next/cache";
 import { requireSuperAdmin } from "@/lib/authz";
 import {
+  isRung,
   lockdownStatus,
   raiseOneRung,
-  refreshFromEdge,
   reportDecoyInventory,
 } from "@/lib/lockdown";
 import { rateLimit } from "@/lib/ratelimit";
@@ -26,11 +26,9 @@ function refusal(r: { code: string; status: number; detail?: string | null }): s
 
 /**
  * Asks GLockdown to raise this app one rung (src/lib/lockdown.ts). The form
- * carries the rung it was rendered at, and the raise goes out only while the
- * stage still stands there: a raise is one rung from where the stage is, so a
- * second submit of the same form, or a form left open while the stage moved,
- * must not raise a second rung. `raiseOneRung` refuses an overlapping raise in
- * this process; the rate limit covers the other replicas.
+ * carries the rung it was rendered at, and `raiseOneRung` sends nothing once
+ * the stage has moved past it; it also refuses an overlapping raise in this
+ * process, and the rate limit covers the other replicas.
  */
 export async function raiseOneRungAction(
   _prev: LockdownActionState,
@@ -45,16 +43,7 @@ export async function raiseOneRungAction(
   if (reason.length < 3) {
     return { status: "error", message: "Say why. GLockdown records the reason with the raise." };
   }
-
-  await refreshFromEdge();
-  const now = lockdownStatus().rung;
-  if (from !== now) {
-    revalidatePath(PATH);
-    return {
-      status: "error",
-      message: `GLockdown's rung moved to ${now} since this page loaded. Nothing was sent; look again and decide.`,
-    };
-  }
+  if (!isRung(from)) return { status: "error", message: "Reload the page and decide again." };
   const limited = await rateLimit({ key: "glockdown:raise", limit: 1, windowMs: 30_000 });
   if (!limited.ok) {
     return {
@@ -63,9 +52,17 @@ export async function raiseOneRungAction(
     };
   }
 
-  const r = await raiseOneRung({ reason, actorId: session.user.id, via: "console" });
+  const r = await raiseOneRung({ reason, actorId: session.user.id, via: "console", expectFrom: from });
   revalidatePath(PATH);
-  if (!r.ok) return { status: "error", message: `GLockdown did not raise it: ${refusal(r)}.` };
+  if (!r.ok) {
+    return {
+      status: "error",
+      message:
+        r.code === "stage_moved"
+          ? `GLockdown's rung moved to ${r.from} since this page loaded. Nothing was sent; look again and decide.`
+          : `GLockdown did not raise it: ${refusal(r)}.`,
+    };
+  }
   const after = lockdownStatus().rung;
   return {
     status: "ok",

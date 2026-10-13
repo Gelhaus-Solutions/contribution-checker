@@ -438,27 +438,45 @@ export type RaiseOutcome =
  * the ceiling is refused there, not guessed at here. Every attempt that got
  * as far as asking is audited, answered or not, with the reason, which
  * GLockdown receives too.
+ *
+ * `expectFrom` is the rung the caller decided from (the console's form). A
+ * raise is one rung from where the stage stands, so once the stage has moved
+ * past it nothing is sent: a second submit of the same form, or a form left
+ * open while the stage moved, must not raise a second rung.
  */
 export async function raiseOneRung(args: {
   reason: string;
   actorId: string | null;
   via: RaiseVia;
+  expectFrom?: Rung;
 }): Promise<RaiseOutcome> {
   const reason = args.reason.trim().slice(0, 500);
-  const before = glockdown().reading();
-  const from = currentRung(before);
-  const expected = nextRung(before);
-  if (!reason) {
-    return { ok: false, from, status: 0, code: "no_reason", detail: "a raise needs a reason" };
-  }
+  const refused = (code: string, detail: string): RaiseOutcome => ({
+    ok: false,
+    from: currentRung(glockdown().reading()),
+    status: 0,
+    code,
+    detail,
+  });
+  if (!reason) return refused("no_reason", "a raise needs a reason");
   // One raise at a time per process: a raise is one rung from where the stage
   // stands, so a second one overlapping the first would raise two.
-  if (raising) {
-    return { ok: false, from, status: 0, code: "in_progress", detail: "a raise is already on its way" };
-  }
+  if (raising) return refused("in_progress", "a raise is already on its way");
   raising = true;
+  let from: Rung;
+  let expected: Rung | null;
   let r: EscalateResult;
   try {
+    // Settles an ask already in flight, which reading the stage starts in the
+    // background. Without this the ask after the raise would be that same
+    // in-flight one, sent before the raise, and the stage would not follow.
+    await glockdown().askEdge();
+    const before = glockdown().reading();
+    from = currentRung(before);
+    expected = nextRung(before);
+    if (args.expectFrom && from !== args.expectFrom) {
+      return refused("stage_moved", `GLockdown's rung is ${from} now, not ${args.expectFrom}`);
+    }
     const { connection, problem } = edge();
     r = connection ? await escalate({ ...connection, reason }) : notConfigured(problem);
     if (r.ok) await glockdown().askEdge();

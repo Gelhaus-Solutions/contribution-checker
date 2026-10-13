@@ -64,7 +64,6 @@ async function main(): Promise<number> {
         console.error('escalate needs --reason "...": GLockdown records it with the raise');
         return 2;
       }
-      await refreshFromEdge();
       const outcome = await raiseOneRung({ reason: values.reason, actorId: null, via: "cli" });
       print(outcome);
       return outcome.ok ? 0 : 1;
