@@ -68,3 +68,11 @@ await build({
   entryPoints: [path.join(root, "src/cli/erase-subject.ts")],
   outfile: path.join(root, "dist/erase-subject.mjs"),
 });
+
+// GLockdown from a shell (src/cli/glockdown.ts), for when the console at
+// /admin/lockdown is out of reach. Same bundle settings, for the same reason.
+await build({
+  ...shared,
+  entryPoints: [path.join(root, "src/cli/glockdown.ts")],
+  outfile: path.join(root, "dist/glockdown.mjs"),
+});
