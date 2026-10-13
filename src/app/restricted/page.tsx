@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { auth, signOut } from "@/auth";
+import { signInPath } from "@/lib/authz";
 import { SiteHeader } from "@/components/site-header";
 import { SubmitButton } from "@/components/ui/submit-button";
 import {
@@ -19,9 +20,7 @@ import {
  */
 export default async function RestrictedPage() {
   const session = await auth();
-  if (!session?.user) {
-    redirect("/handler/sign-in?after_auth_return_to=/restricted");
-  }
+  if (!session?.user) redirect(await signInPath("/restricted"));
   // Not actually restricted -> this page has nothing to say to them.
   if (!session.user.restricted) {
     redirect("/dashboard");

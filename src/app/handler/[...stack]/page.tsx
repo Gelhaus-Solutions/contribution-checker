@@ -5,7 +5,7 @@ import { StackHandler } from "@hexclave/next";
 import { SiteHeader } from "@/components/site-header";
 import { getStackServerApp } from "@/lib/stack";
 import { SHELL } from "@/lib/ui/layout";
-import { lockdown } from "@/lib/lockdown";
+import { signInClosed } from "@/lib/lockdown";
 
 /**
  * Hexclave (Stack Auth) catch-all handler: renders sign-in, sign-up,
@@ -24,9 +24,10 @@ export default async function Handler(props: {
   searchParams: Promise<Record<string, string>>;
 }) {
   const { stack } = await props.params;
-  // GLockdown's kill switch at `full` (src/lib/lockdown.ts): nobody signs in
-  // or up; signing out still works.
-  if (lockdown().stage === "full" && stack?.[0] !== "sign-out") redirect("/");
+  // GLockdown's kill switch at `full` and from AAL phase 1
+  // (src/lib/lockdown.ts): nobody signs in or up, and the lockdown page says
+  // so; signing out still works.
+  if (signInClosed() && stack?.[0] !== "sign-out") redirect("/lockdown");
   const app = await getStackServerApp();
   const embedded = EMBEDDED_ROUTES.has(stack?.[0] ?? "");
 

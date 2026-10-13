@@ -227,26 +227,25 @@ export function refreshFromEdge(): Promise<void> {
   return glockdown().askEdge();
 }
 
+/** The stage as a status string for `<StatusBadge>` (src/lib/ui/status.ts). */
+export function stageStatus(stage: Stage): string {
+  return `LOCKDOWN_${stage.toUpperCase()}`;
+}
+
 /** In plain words, per stage: what this app refuses, and what the lockdown page tells a visitor. */
-export const STAGE_COPY: Record<
-  Stage,
-  { label: string; refuses: string; headline: string; explain: string }
-> = {
+export const STAGE_COPY: Record<Stage, { refuses: string; headline: string; explain: string }> = {
   off: {
-    label: "Off",
     refuses: "Nothing. Everyone signs in as usual.",
     headline: "No lockdown is in force",
     explain: "Everyone signs in as usual.",
   },
   signups: {
-    label: "No new accounts",
     refuses: "New accounts. Everyone who has one signs in as usual.",
     headline: "New sign-ups are paused",
     explain:
       "If you already have an account, sign in as usual. New accounts cannot be created for now, so applying to a project waits until this lifts.",
   },
   members: {
-    label: "Members only",
     refuses:
       "Everyone but instance administrators and project members (owners, admins, reviewers). Applicants cannot sign in.",
     headline: "Only project members can sign in right now",
@@ -254,13 +253,11 @@ export const STAGE_COPY: Record<
       "Maintainers and reviewers of a project sign in as usual. Applicants cannot sign in for now; an application waits until this lifts.",
   },
   admins: {
-    label: "Admins only",
     refuses: "Everyone but instance administrators.",
     headline: "Only administrators can sign in right now",
     explain: "This instance's administrators sign in; everyone else waits until this lifts.",
   },
   full: {
-    label: "Full",
     refuses: "Everyone, existing sessions included. The sign-in pages are closed.",
     headline: "Signing in is paused",
     explain: "Nobody can sign in for now, and existing sessions are paused too.",

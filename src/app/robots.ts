@@ -16,7 +16,15 @@ export default function robots(): MetadataRoute.Robots {
       // Authenticated surfaces and machine endpoints. /p is deliberately not
       // listed: whether project pages should be indexed is per-instance, and
       // an operator who wants them private can front them with auth.
-      disallow: ["/dashboard", "/admin", "/api", "/handler", "/welcome", "/restricted"],
+      disallow: [
+        "/dashboard",
+        "/admin",
+        "/api",
+        "/handler",
+        "/welcome",
+        "/restricted",
+        "/lockdown",
+      ],
     },
     sitemap: `${base}/sitemap.xml`,
   };

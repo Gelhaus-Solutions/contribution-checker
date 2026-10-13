@@ -11,6 +11,7 @@ import { isInstanceAdminTeam } from "@/lib/stack-provisioning";
 import { readTeamMemberships } from "@/lib/stack-teams";
 import { closeAccount } from "@/lib/gpterms";
 import { logger } from "@/lib/logger";
+import { presentsDecoyKey } from "@/lib/lockdown";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -181,6 +182,9 @@ async function reconcileTeam(
 }
 
 export async function POST(req: Request) {
+  // GLockdown's honeytokens (src/lib/lockdown.ts): a decoy key tells GLockdown
+  // at once, and is refused below as a bad signature, whatever the signature.
+  const decoy = presentsDecoyKey(req);
   const secret = await getSecret("STACK_WEBHOOK_SECRET");
   if (!secret) {
     logger.warn({}, "stack webhook: STACK_WEBHOOK_SECRET not configured");
@@ -223,11 +227,14 @@ export async function POST(req: Request) {
   if (body.length > MAX_BODY_BYTES) {
     return NextResponse.json({ ok: false }, { status: 413 });
   }
-  if (!verifySvixSignature(secret, id, timestamp, signature, body)) {
-    logger.warn(
-      { "stack.webhook_id": id },
-      "stack webhook: signature verification failed (check STACK_WEBHOOK_SECRET matches the endpoint secret)",
-    );
+  const signed = verifySvixSignature(secret, id, timestamp, signature, body);
+  if (!signed || decoy) {
+    if (!signed) {
+      logger.warn(
+        { "stack.webhook_id": id },
+        "stack webhook: signature verification failed (check STACK_WEBHOOK_SECRET matches the endpoint secret)",
+      );
+    }
     return NextResponse.json({ ok: false }, { status: 401 });
   }
 

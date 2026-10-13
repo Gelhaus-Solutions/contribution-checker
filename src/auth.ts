@@ -14,7 +14,7 @@ import {
 import { setSentryUser } from "@/lib/observability/sentry-user";
 import type { Session, SessionUser } from "@/lib/auth-types";
 import { standingOf } from "@/lib/gpterms";
-import { lockdown } from "@/lib/lockdown";
+import { isDecoyLogin, lockdown } from "@/lib/lockdown";
 
 export type { Session } from "@/lib/auth-types";
 
@@ -42,28 +42,48 @@ export type { Session } from "@/lib/auth-types";
  * earlier cache() wrapper was removed for supposedly causing a sign-in loop; if
  * a runtime ever does refuse the memo, the wrapper below falls back to
  * resolving directly rather than reporting the request as signed out.
+ *
+ * Besides the session it says whether GLockdown's kill switch is why there is
+ * none (`lockedOut`), so `requireSession()` can send that person to /lockdown
+ * rather than to a sign-in page that would only refuse them again.
  */
-async function resolveSession(): Promise<Session | null> {
-  if (!env.stackConfigured) return null;
-  // GLockdown's kill switch (src/lib/lockdown.ts): at `full` nobody is signed
-  // in, existing sessions included.
-  const { stage } = lockdown();
-  if (stage === "full") {
+interface Resolved {
+  session: Session | null;
+  lockedOut: boolean;
+}
+
+const SIGNED_OUT: Resolved = { session: null, lockedOut: false };
+const LOCKED_OUT: Resolved = { session: null, lockedOut: true };
+
+async function resolveSession(): Promise<Resolved> {
+  if (!env.stackConfigured) return SIGNED_OUT;
+  // GLockdown's kill switch (src/lib/lockdown.ts): at `full`, and from AAL
+  // phase 1 whatever the stage, nobody is signed in, existing sessions
+  // included.
+  const { stage, refusesEveryCredential } = lockdown();
+  if (stage === "full" || refusesEveryCredential) {
     setSentryUser(null);
-    return null;
+    return LOCKED_OUT;
   }
   try {
     const stackApp = await getStackServerApp();
     const stackUser = await stackApp.getUser({ includeRestricted: true });
     if (!stackUser) {
       setSentryUser(null);
-      return null;
+      return SIGNED_OUT;
+    }
+    // GLockdown's honeytokens (L97): a session as the decoy admin is refused
+    // before anything is looked up, linked or created for it, exactly as no
+    // session at all, and GLockdown is told. Nobody signs in as the decoy.
+    if (isDecoyLogin(stackUser.primaryEmail, `Hexclave user ${stackUser.id}`)) {
+      setSentryUser(null);
+      return SIGNED_OUT;
     }
     // From `signups` no new account: an account this app has not seen yet is
     // not created, and the person is not signed in.
     if (stage !== "off" && !(await knownAccount(stackUser))) {
       setSentryUser(null);
-      return null;
+      return LOCKED_OUT;
     }
 
     // Restriction handling. includeRestricted:true surfaces users the SDK would
@@ -76,7 +96,7 @@ async function resolveSession(): Promise<Session | null> {
       stackUser.restrictedReason?.type === "restricted_by_administrator";
     if (stackUser.isRestricted && !restrictedByAdmin) {
       setSentryUser(null);
-      return null;
+      return SIGNED_OUT;
     }
     if (restrictedByAdmin) {
       // Minimal flagged session: skip the local-user resolve, country capture,
@@ -89,18 +109,21 @@ async function resolveSession(): Promise<Session | null> {
         email: stackUser.primaryEmail,
       });
       return {
-        user: {
-          id: stackUser.id,
-          name: stackUser.displayName,
-          email: stackUser.primaryEmail ?? "",
-          image: stackUser.profileImageUrl,
-          ghId: null,
-          ghLogin: null,
-          country: null,
-          isSuperAdmin: false,
-          canCreateProj: false,
-          restricted: true,
-          restrictionReason: stackUser.restrictedByAdminReason,
+        lockedOut: false,
+        session: {
+          user: {
+            id: stackUser.id,
+            name: stackUser.displayName,
+            email: stackUser.primaryEmail ?? "",
+            image: stackUser.profileImageUrl,
+            ghId: null,
+            ghLogin: null,
+            country: null,
+            isSuperAdmin: false,
+            canCreateProj: false,
+            restricted: true,
+            restrictionReason: stackUser.restrictedByAdminReason,
+          },
         },
       };
     }
@@ -111,6 +134,12 @@ async function resolveSession(): Promise<Session | null> {
       displayName: stackUser.displayName,
       profileImageUrl: stackUser.profileImageUrl,
     });
+    // The decoy's GitHub login too, which only the local row knows. An
+    // intruder who registered that login on GitHub presents it here.
+    if (isDecoyLogin(u.ghLogin, `Hexclave user ${stackUser.id}`)) {
+      setSentryUser(null);
+      return SIGNED_OUT;
+    }
 
     // Country is no longer captured. Any code the old capture left in Hexclave
     // metadata is removed on the user's next request: one bounded write, then
@@ -150,7 +179,7 @@ async function resolveSession(): Promise<Session | null> {
     // `admins`: only super-admins. `members`: super-admins and project members.
     if (stage === "admins" && !roles.isSuperAdmin) {
       setSentryUser(null);
-      return null;
+      return LOCKED_OUT;
     }
     if (
       stage === "members" &&
@@ -158,28 +187,31 @@ async function resolveSession(): Promise<Session | null> {
       (await prisma.projectMember.count({ where: { userId: u.id } })) === 0
     ) {
       setSentryUser(null);
-      return null;
+      return LOCKED_OUT;
     }
 
     setSentryUser({ id: u.id, ghLogin: u.ghLogin, email: u.email });
 
     return {
-      user: {
-        id: u.id,
-        name: u.name,
-        email: u.email ?? "",
-        image: u.image,
-        ghId: u.ghId,
-        ghLogin: u.ghLogin,
-        country: null,
-        isSuperAdmin: roles.isSuperAdmin,
-        canCreateProj: roles.canCreateProj,
-        terms,
+      lockedOut: false,
+      session: {
+        user: {
+          id: u.id,
+          name: u.name,
+          email: u.email ?? "",
+          image: u.image,
+          ghId: u.ghId,
+          ghLogin: u.ghLogin,
+          country: null,
+          isSuperAdmin: roles.isSuperAdmin,
+          canCreateProj: roles.canCreateProj,
+          terms,
+        },
       },
     };
   } catch (e) {
     logger.error({ err: e }, "auth: failed to resolve session");
-    return null;
+    return SIGNED_OUT;
   }
 }
 
@@ -225,7 +257,7 @@ async function termsOf(u: { id: string; createdAt: Date }): Promise<SessionUser[
 
 const memoizedSession = cache(resolveSession);
 
-export async function auth(): Promise<Session | null> {
+async function resolved(): Promise<Resolved> {
   try {
     return await memoizedSession();
   } catch (e) {
@@ -236,6 +268,19 @@ export async function auth(): Promise<Session | null> {
     logger.warn({ err: e }, "auth: session memo unavailable, resolving direct");
     return resolveSession();
   }
+}
+
+export async function auth(): Promise<Session | null> {
+  return (await resolved()).session;
+}
+
+/**
+ * Whether GLockdown's kill switch is why this request has no session: a
+ * signed-in person the stage refuses, or everyone at `full`. Read from the same
+ * memoized resolve as `auth()`, so it costs nothing after it.
+ */
+export async function lockedOut(): Promise<boolean> {
+  return (await resolved()).lockedOut;
 }
 
 function handlerUrl(action: "sign-in" | "sign-out", returnTo?: string): string {

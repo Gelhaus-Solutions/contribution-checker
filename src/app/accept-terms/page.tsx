@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { auth, signOut } from "@/auth";
+import { signInPath } from "@/lib/authz";
 import { SiteHeader } from "@/components/site-header";
 import { SubmitButton } from "@/components/ui/submit-button";
 import {
@@ -34,11 +35,7 @@ export default async function AcceptTermsPage({
   const { next: rawNext } = await searchParams;
   const next = safeNext(rawNext);
   const session = await auth();
-  if (!session?.user) {
-    redirect(
-      `/handler/sign-in?after_auth_return_to=${encodeURIComponent(`/accept-terms?next=${next}`)}`,
-    );
-  }
+  if (!session?.user) redirect(await signInPath(`/accept-terms?next=${next}`));
   if (session.user.restricted) redirect("/restricted");
   if (!session.user.ghId) redirect("/welcome");
 

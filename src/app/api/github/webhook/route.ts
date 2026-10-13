@@ -16,7 +16,7 @@ import {
   BodyTooLargeError,
   readLimitedBody,
 } from "@/lib/http/read-limited-body";
-import { botStopped } from "@/lib/lockdown";
+import { botStopped, presentsDecoyKey } from "@/lib/lockdown";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -61,6 +61,9 @@ async function verifySignature(
 }
 
 export async function POST(req: Request) {
+  // GLockdown's honeytokens (src/lib/lockdown.ts): a decoy key tells GLockdown
+  // at once, and is refused below as a bad signature, whatever the signature.
+  const decoy = presentsDecoyKey(req);
   // GLockdown's kill switch from AAL phase 2 (src/lib/lockdown.ts): the bot
   // stops, and no pull request is gated or touched while it holds.
   if (botStopped()) {
@@ -94,8 +97,8 @@ export async function POST(req: Request) {
     logger.error({ err: e, deliveryId, eventName }, "webhook secret resolve failed");
     return NextResponse.json({ error: "Secret resolve failed" }, { status: 500 });
   }
-  if (!signatureOk) {
-    logger.warn({ deliveryId, eventName }, "webhook signature invalid");
+  if (!signatureOk || decoy) {
+    if (!signatureOk) logger.warn({ deliveryId, eventName }, "webhook signature invalid");
     return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
   }
 

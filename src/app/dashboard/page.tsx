@@ -20,13 +20,12 @@ import {
   listAppliedProjectsForUser,
   listProjectsForUser,
 } from "@/lib/projects";
-import { requireTermsStanding } from "@/lib/authz";
+import { requireTermsStanding, signInPath } from "@/lib/authz";
 
 
 export default async function DashboardHome() {
   const session = await auth();
-  if (!session?.user)
-    redirect("/handler/sign-in?after_auth_return_to=/dashboard");
+  if (!session?.user) redirect(await signInPath("/dashboard"));
   if (session.user.restricted) redirect("/restricted");
   if (!session.user.ghId) redirect("/welcome");
   await requireTermsStanding(session);

@@ -1,6 +1,7 @@
 import { Suspense } from "react";
 import { redirect } from "next/navigation";
 import { auth } from "@/auth";
+import { signInPath } from "@/lib/authz";
 import { SiteHeader } from "@/components/site-header";
 import {
   Card,
@@ -27,9 +28,7 @@ export default async function WelcomePage({
   searchParams: Promise<{ error?: string }>;
 }) {
   const session = await auth();
-  if (!session?.user) {
-    redirect("/handler/sign-in?after_auth_return_to=/welcome");
-  }
+  if (!session?.user) redirect(await signInPath("/welcome"));
   if (session.user.restricted) redirect("/restricted");
   // GitHub already linked -> onboarding is done.
   if (session.user.ghId) {

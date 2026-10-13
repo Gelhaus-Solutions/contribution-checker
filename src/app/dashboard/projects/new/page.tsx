@@ -1,4 +1,5 @@
 import { auth } from "@/auth";
+import { signInPath } from "@/lib/authz";
 import { redirect } from "next/navigation";
 import { SiteHeader } from "@/components/site-header";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -8,8 +9,7 @@ import { CreateProjectForm } from "./form";
 
 export default async function NewProject() {
   const session = await auth();
-  if (!session?.user)
-    redirect("/handler/sign-in?after_auth_return_to=/dashboard/projects/new");
+  if (!session?.user) redirect(await signInPath("/dashboard/projects/new"));
   if (session.user.restricted) redirect("/restricted");
   if (!session.user.ghId) redirect("/welcome");
   if (!session.user.canCreateProj) redirect("/dashboard");

@@ -3,6 +3,7 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { auth } from "@/auth";
+import { signInPath } from "@/lib/authz";
 import { recordAudit } from "@/lib/audit";
 import { prisma } from "@/lib/db";
 import { env } from "@/lib/env";
@@ -22,7 +23,7 @@ import { acceptTermsPath, safeNext, TERMS_ANSWER_COOKIE } from "@/lib/terms";
 export async function acceptTermsAction(formData: FormData): Promise<void> {
   const session = await auth();
   const next = safeNext(formData.get("next"));
-  if (!session?.user) redirect("/handler/sign-in");
+  if (!session?.user) redirect(await signInPath());
   if (session.user.restricted) redirect("/restricted");
   const terms = session.user.terms;
   if (!terms) redirect(next);
@@ -62,7 +63,7 @@ export async function acceptTermsAction(formData: FormData): Promise<void> {
 export async function deferTermsAction(formData: FormData): Promise<void> {
   const session = await auth();
   const next = safeNext(formData.get("next"));
-  if (!session?.user) redirect("/handler/sign-in");
+  if (!session?.user) redirect(await signInPath());
   const terms = session.user.terms;
   if (!terms || (terms.kind !== "asked" && terms.kind !== "restricted")) redirect(next);
 
