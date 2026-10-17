@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { BrandMark } from "@/components/brand-mark";
+import { BrandLogo, BrandWordmark } from "@/components/brand";
 import { legalLinks } from "@/components/legal-notice";
 import { ReplayChoiceLink } from "@/app/replay-consent";
 
@@ -39,11 +39,9 @@ export function MarketingFooter() {
               href="/"
               className="flex items-center gap-2 text-sm font-semibold tracking-tight"
             >
-              <BrandMark className="size-5 text-primary" />
+              <BrandLogo className="size-5 text-primary" />
               <span>
-                contribution
-                <span className="text-muted-foreground">/</span>
-                checker
+                <BrandWordmark />
               </span>
             </Link>
             <p className="text-xs leading-relaxed text-muted-foreground">

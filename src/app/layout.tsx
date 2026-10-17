@@ -5,9 +5,11 @@ import { GeistSans } from "geist/font/sans";
 import { GeistMono } from "geist/font/mono";
 import "./globals.css";
 import { auth } from "@/auth";
+import { BrandProvider } from "@/components/brand";
 import { cn } from "@/lib/cn";
 import { getStackServerApp } from "@/lib/stack";
 import { env } from "@/lib/env";
+import { ownBrand } from "@/lib/own-brand";
 import {
   setSentryUser,
   userFromSession,
@@ -29,22 +31,29 @@ const DESCRIPTION =
  */
 export async function generateMetadata(): Promise<Metadata> {
   const base = env.PUBLIC_BASE_URL.replace(/\/$/, "");
+  // The catalogue's name and mark where the instance reads them (`ownBrand`),
+  // else the ones a release ships with. The catalogue's mark is linked at
+  // Identity's own address, which never changes its file.
+  const brand = await ownBrand();
   return {
     metadataBase: new URL(base),
     title: {
-      default: "contribution-checker",
-      template: "%s · contribution-checker",
+      default: brand.name,
+      template: `%s · ${brand.name}`,
+    },
+    icons: {
+      icon: [{ url: brand.markUrl ?? "/mark.svg", type: "image/svg+xml" }],
     },
     description: DESCRIPTION,
-    applicationName: "contribution-checker",
+    applicationName: brand.name,
     authors: [{ name: "Enno Gelhaus", url: "https://ennogelhaus.de" }],
     creator: "Enno Gelhaus",
     publisher: "Gelhaus Solutions",
     openGraph: {
       type: "website",
-      siteName: "contribution-checker",
+      siteName: brand.name,
       url: base,
-      title: "contribution-checker",
+      title: brand.name,
       description: DESCRIPTION,
     },
     twitter: { card: "summary_large_image" },
@@ -77,10 +86,11 @@ export default async function RootLayout({
   // keeps the theme server-readable. Stamping "dark" is what makes a pinned
   // dark theme flash-free; "system" is resolved by ThemeScript before paint,
   // which is why <html> needs suppressHydrationWarning.
-  const [session, stackApp, cookieStore] = await Promise.all([
+  const [session, stackApp, cookieStore, brand] = await Promise.all([
     auth(),
     env.stackConfigured ? getStackServerApp() : null,
     cookies(),
+    ownBrand(),
   ]);
 
   const user = userFromSession(session);
@@ -91,11 +101,12 @@ export default async function RootLayout({
   const theme = cookieStore.get(THEME_COOKIE)?.value;
 
   const content = (
-    <>
+    // The name and mark every draw site uses, read once here.
+    <BrandProvider brand={brand}>
       <SentryUserClient user={user} />
       {children}
       <ReplayConsent privacyUrl={env.LEGAL_PRIVACY_URL ?? null} />
-    </>
+    </BrandProvider>
   );
 
   return (

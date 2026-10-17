@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
-import { BrandMark } from "@/components/brand-mark";
+import { BrandLogo } from "@/components/brand";
 
 /**
  * The centered message used by not-found and the error boundaries. Kept as one
@@ -21,7 +21,7 @@ export function StatusPage({
 }) {
   return (
     <main className="mx-auto flex min-h-[70vh] max-w-md flex-col items-center justify-center px-4 text-center">
-      <BrandMark className="size-8 text-primary" />
+      <BrandLogo className="size-8 text-primary" />
       {code ? (
         <p className="mt-6 font-mono text-xs tracking-widest text-muted-foreground">
           {code}

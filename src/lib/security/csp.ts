@@ -2,7 +2,7 @@
  * Content-Security-Policy built at RUNTIME (in middleware), not baked into the
  * build manifest by next.config's headers(). The connect-src must include the
  * operator's Hexclave backend (STACK_API_URL), which is only known at container
- * runtime in our generic CI-built image — so it can't be set at `next build`.
+ * runtime in our generic CI-built image, so it can't be set at `next build`.
  *
  * Edge-safe: only string building + process.env reads, no Node/Hexclave/Vault.
  */
@@ -57,6 +57,12 @@ export function buildCsp(): string {
   // SDK fetch()es data:/blob: URLs (e.g. avatar images on the account-settings
   // page); a Fetch is governed by connect-src, not img-src.
   const extra = extraDomains();
+  // GPlatform Identity, where the instance reads its catalogue (GPID_URL): the
+  // header draws the catalogue's mark, the favicon links it, and the apps
+  // picker and account popup draw product marks and pictures from Identity's
+  // asset store. Images only; the controls fetch through this origin's own
+  // /api/identity-chrome.
+  const identityOrigin = originOf(process.env.GPID_URL);
 
   const directives = [
     ["default-src", "'self'", ...extra],
@@ -64,6 +70,7 @@ export function buildCsp(): string {
       "img-src",
       "'self'",
       "https://avatars.githubusercontent.com",
+      identityOrigin,
       "data:",
       "blob:",
       ...extra,

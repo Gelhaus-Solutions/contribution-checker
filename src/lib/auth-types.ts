@@ -18,6 +18,9 @@ export type SessionUser = {
   country?: string | null;
   isSuperAdmin: boolean;
   canCreateProj: boolean;
+  /** Hexclave has verified `email`. Only a verified address is reported to
+   * GPlatform Identity (src/app/api/identity-chrome/route.ts). */
+  emailVerified?: boolean;
   /** True only when the user is restricted BY AN ADMINISTRATOR in Stack Auth.
    * When set, all protected surfaces/actions must route to /restricted. */
   restricted?: boolean;

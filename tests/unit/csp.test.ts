@@ -4,12 +4,15 @@ import { buildCsp, reportToHeader } from "@/lib/security/csp";
 const origStack = process.env.STACK_API_URL;
 const origReport = process.env.SENTRY_CSP_ENDPOINT;
 const origExtra = process.env.CSP_EXTRA_DOMAINS;
+const origGpid = process.env.GPID_URL;
 
 afterEach(() => {
   process.env.STACK_API_URL = origStack;
   process.env.SENTRY_CSP_ENDPOINT = origReport;
   if (origExtra === undefined) delete process.env.CSP_EXTRA_DOMAINS;
   else process.env.CSP_EXTRA_DOMAINS = origExtra;
+  if (origGpid === undefined) delete process.env.GPID_URL;
+  else process.env.GPID_URL = origGpid;
 });
 
 describe("buildCsp", () => {
@@ -41,6 +44,21 @@ describe("buildCsp", () => {
       .find((d) => d.startsWith("connect-src "))!;
     expect(connect).toContain(" data:");
     expect(connect).toContain(" blob:");
+  });
+
+  it("allows GPlatform Identity's ORIGIN for images only, where GPID_URL is set", () => {
+    process.env.GPID_URL = "https://identity.example.test/some/path";
+    const directive = (name: string) =>
+      buildCsp()
+        .split("; ")
+        .find((d) => d.startsWith(`${name} `))!;
+    expect(directive("img-src")).toContain(" https://identity.example.test ");
+    expect(directive("img-src")).not.toContain("/some/path");
+    expect(directive("connect-src")).not.toContain("identity.example.test");
+    expect(directive("script-src")).not.toContain("identity.example.test");
+
+    delete process.env.GPID_URL;
+    expect(directive("img-src")).not.toContain("identity.example.test");
   });
 
   it("appends CSP_EXTRA_DOMAINS to the resource directives", () => {

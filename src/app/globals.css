@@ -167,6 +167,53 @@
   }
 }
 
+/* The host contract of GPlatform Identity's shared controls
+   (`@ghub/identity-chrome`: the apps picker and the account popup at the right
+   of the header). They draw in a shadow root and read only these names, which
+   inherit into it; without them they fall back to their own palette and follow
+   the OS theme rather than `html.dark`. Where a name has a counterpart here it
+   is ours, so it moves with the palette above; the rest are the overlay values
+   the Identity bundle draws, in a light and dark pair. The popup's ground is
+   `--gm-sunken`, a tray a step below the page in dark, and its panels
+   `--gm-overlay`, the popover (Identity D36). */
+@layer base {
+  :root,
+  .dark {
+    --gm-overlay: var(--popover);
+    --gm-plate: var(--card);
+    --gm-ink: var(--foreground);
+    --gm-ink-2: var(--muted-foreground);
+    --gm-ink-3: var(--muted-foreground);
+    --gm-hairline: var(--border);
+    --gm-accent: var(--primary);
+    --gm-accent-text: var(--primary-strong);
+    --gm-ring: var(--ring);
+    --gm-crit-ink: var(--destructive-strong);
+  }
+
+  :root {
+    --gm-sunken: var(--muted);
+    --gm-control: oklch(0 0 0 / 0.42);
+    --gm-hover: oklch(0 0 0 / 0.045);
+    --gm-active: oklch(0 0 0 / 0.08);
+    --gm-selected: color-mix(in oklab, var(--primary) 11%, transparent);
+    --gm-shadow-overlay:
+      0 0 0 1px oklch(0 0 0 / 0.07), 0 2px 4px oklch(0 0 0 / 0.04),
+      0 22px 48px -12px oklch(0 0 0 / 0.28);
+  }
+
+  .dark {
+    --gm-sunken: oklch(0.155 0.012 259);
+    --gm-control: oklch(1 0 0 / 0.36);
+    --gm-hover: oklch(1 0 0 / 0.06);
+    --gm-active: oklch(1 0 0 / 0.1);
+    --gm-selected: color-mix(in oklab, var(--primary) 16%, transparent);
+    --gm-shadow-overlay:
+      inset 0 1px 0 oklch(1 0 0 / 0.07), 0 0 0 1px oklch(1 0 0 / 0.08),
+      0 24px 56px -12px oklch(0 0 0 / 0.7);
+  }
+}
+
 /* Colors, radii and fonts have to resolve at the use site, which is what
    `inline` means here: the emitted utility becomes `background-color:
    var(--card)` rather than a :root snapshot. That is what makes both the .dark

@@ -30,6 +30,9 @@ importers:
       '@ghub/glockdown-sdk':
         specifier: 0.3.0
         version: 0.3.0
+      '@ghub/identity-chrome':
+        specifier: 0.5.1
+        version: 0.5.1(react@19.2.5)
       '@ghub/terms-client':
         specifier: ^0.1.0
         version: 0.1.0
@@ -799,6 +802,15 @@ packages:
   '@ghub/glockdown-sdk@0.3.0':
     resolution: {integrity: sha512-j4PoZCcw7sCzq6nURzTWTYjDHP2gdL1vr+OqG5iNzoDcycvi/Ij/EKKg8sH2WgjTdIuxjfxC91NNVBs+6ScYCA==}
     engines: {node: '>=22.0.0'}
+
+  '@ghub/identity-chrome@0.5.1':
+    resolution: {integrity: sha512-i2LeOCg9jByPzwAI3exGEX+BXv3mjE6oZEikC0X4wda3ni3jyL11XUtzkeqX6WhRjb/P7up7CsOyNPE+iskTpA==}
+    engines: {node: '>=22.0.0'}
+    peerDependencies:
+      react: '>=19'
+    peerDependenciesMeta:
+      react:
+        optional: true
 
   '@ghub/terms-client@0.1.0':
     resolution: {integrity: sha512-p91TrGoc0CbiZV+X97hYvZICUz9fCXsTTYtbh7PCh/hWuva+xbF22DrardrWrU9d36VRxTkbb6CC5bsNOylIMw==}
@@ -7056,6 +7068,10 @@ snapshots:
   '@floating-ui/utils@0.2.11': {}
 
   '@ghub/glockdown-sdk@0.3.0': {}
+
+  '@ghub/identity-chrome@0.5.1(react@19.2.5)':
+    optionalDependencies:
+      react: 19.2.5
 
   '@ghub/terms-client@0.1.0':
     dependencies:

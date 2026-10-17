@@ -5,7 +5,8 @@ import { auth, signIn } from "@/auth";
 import { env } from "@/lib/env";
 import { unreadCount } from "@/lib/notifications/inbox";
 import { SubmitButton } from "@/components/ui/submit-button";
-import { BrandMark } from "@/components/brand-mark";
+import { BrandLogo, BrandWordmark } from "@/components/brand";
+import { identityChrome } from "@/lib/identity-chrome";
 import { UserCluster } from "@/components/user-cluster";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
@@ -49,11 +50,9 @@ export async function SiteHeader({
           href="/"
           className="group flex items-center gap-2 text-sm font-semibold tracking-tight"
         >
-          <BrandMark className="h-7 w-7 text-primary transition-transform group-hover:rotate-3" />
+          <BrandLogo className="h-7 w-7 text-primary transition-transform group-hover:rotate-3" />
           <span className="hidden sm:inline">
-            <span>contribution</span>
-            <span className="text-muted-foreground">/</span>
-            <span>checker</span>
+            <BrandWordmark />
           </span>
         </Link>
         {marketing ? (
@@ -88,6 +87,13 @@ export async function SiteHeader({
                 isSuperAdmin={session.user.isSuperAdmin}
                 unread={unread}
                 stackConfigured={env.stackConfigured}
+                identityChrome={identityChrome !== null}
+                person={{
+                  id: session.user.id,
+                  name: session.user.name ?? null,
+                  email: session.user.email ?? "",
+                  image: session.user.image ?? null,
+                }}
               />
             </>
           ) : signInClosed() ? (

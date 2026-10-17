@@ -75,7 +75,7 @@ const schema = z.object({
   SUPER_ADMINS: z.string().optional(),
   PROJECT_CREATORS: z.string().optional(),
 
-  // Hexclave (self-hosted Stack Auth fork) — human login. Deliberately NOT
+  // Hexclave (self-hosted Stack Auth fork): human login. Deliberately NOT
   // prefixed NEXT_PUBLIC_: the project id and publishable client key are
   // public, but we ship a single generic Docker image built in CI and configure
   // it at container runtime, so nothing may be inlined at `next build`. These
@@ -219,7 +219,7 @@ const schema = z.object({
     .transform((v) => v === "true"),
   // Logical deployment name (stable across releases), e.g. "contribution-checker".
   TEMPORAL_DEPLOYMENT_NAME: z.string().default("contribution-checker"),
-  // Build ID — unique per worker code version. Wire to the image tag / git sha
+  // Build ID: unique per worker code version. Wire to the image tag / git sha
   // (e.g. the CI version "0.0.99" or commit). Required when versioning is on.
   TEMPORAL_BUILD_ID: z.string().optional(),
   // How in-flight workflows behave when a new Build ID is deployed:
@@ -231,7 +231,7 @@ const schema = z.object({
     .enum(["AUTO_UPGRADE", "PINNED"])
     .default("AUTO_UPGRADE"),
   // Auto-promote this Build ID to the deployment's Current version once the
-  // worker has registered. Removes the manual "Set Current" step — fine for a
+  // worker has registered. Removes the manual "Set Current" step, fine for a
   // single-worker setup; disable if you want to verify before shifting traffic.
   TEMPORAL_SET_CURRENT_ON_START: z
     .enum(["true", "false"])
@@ -262,6 +262,13 @@ const schema = z.object({
     .refine((v) => csv(v).every((h) => /^[0-9a-f]{64}$/i.test(h)), {
       message: "each entry must be 64 hex digits (a SHA-256)",
     }),
+
+  // GPlatform Identity (src/lib/identity-chrome.ts, src/lib/own-brand.ts).
+  // GPID_URL alone draws the name and mark from Identity's catalogue; with
+  // GPID_CHROME_TOKEN as well, the header carries the shared apps picker and
+  // account popup. A self-hoster sets neither and Identity is asked nothing.
+  GPID_URL: optionalUrl,
+  GPID_CHROME_TOKEN: z.string().optional(),
 });
 
 // During `next build`, Next.js executes server modules to collect page data

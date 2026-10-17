@@ -205,6 +205,14 @@ async function resolveSession(): Promise<Resolved> {
           country: null,
           isSuperAdmin: roles.isSuperAdmin,
           canCreateProj: roles.canCreateProj,
+          // Verified for the address this session carries, not merely for
+          // some address: the local row's email is what the app shows and
+          // reports.
+          emailVerified:
+            stackUser.primaryEmailVerified === true &&
+            !!u.email &&
+            u.email.trim().toLowerCase() ===
+              (stackUser.primaryEmail ?? "").trim().toLowerCase(),
           terms,
         },
       },
