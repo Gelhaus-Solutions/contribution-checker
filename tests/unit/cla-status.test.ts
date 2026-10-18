@@ -6,6 +6,8 @@ const rosterFindMany = vi.fn();
 
 vi.mock("@/lib/db", () => ({
   prisma: {
+    // Kept here, not in GPlatform Legal.
+    project: { findUnique: async () => ({ claLegalEnrolledAt: null }) },
     claWaiver: {
       findFirst: (...args: unknown[]) => waiverFindFirst(...args),
     },

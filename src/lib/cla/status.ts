@@ -1,4 +1,6 @@
 import { prisma } from "@/lib/db";
+import { legal } from "@/lib/cla/legal";
+import { logger } from "@/lib/logger";
 
 /**
  * Short-TTL LRU-ish cache of the boolean coverage result, keyed
@@ -30,8 +32,10 @@ export type ClaStatusResult = {
 };
 
 /**
- * Compute the full coverage status for a contributor on a project. Pure DB
- * reads (all indexed); not cached itself. `isClaSatisfied` caches the boolean.
+ * Compute the full coverage status for a contributor on a project: from
+ * GPlatform Legal where its records moved there, else from the tables here
+ * (pure DB reads, all indexed). Not cached itself; `isClaSatisfied` caches the
+ * boolean.
  *
  * Satisfied if ANY of:
  *  - an ACTIVE ClaWaiver matching ghId or lowercased ghLogin;
@@ -49,6 +53,62 @@ export type ClaStatusResult = {
  * them is on a resignRequired version (=> the gate reports cla_stale).
  */
 export async function getClaStatus(a: {
+  projectId: string;
+  ghId: number;
+  ghLogin: string;
+}): Promise<ClaStatusResult> {
+  const project = await prisma.project.findUnique({
+    where: { id: a.projectId },
+    select: { claLegalEnrolledAt: true },
+  });
+  return project?.claLegalEnrolledAt ? legalClaStatus(a) : localClaStatus(a);
+}
+
+/**
+ * The last answer Legal gave per contributor: what the gate decides by while
+ * Legal cannot be reached, rather than closing every pull request or letting
+ * every one through. Bounded; the oldest is dropped first.
+ */
+const lastKnown = new Map<string, ClaStatusResult>();
+const LAST_KNOWN_MAX = 10_000;
+
+/**
+ * Coverage of a project whose records are in GPlatform Legal (D123): Legal
+ * decides by the same rule. Unreachable, the last answer it gave for this
+ * contributor stands; with none, the error is the caller's.
+ */
+async function legalClaStatus(a: {
+  projectId: string;
+  ghId: number;
+  ghLogin: string;
+}): Promise<ClaStatusResult> {
+  const key = cacheKey(a.projectId, a.ghId);
+  try {
+    const answer = await legal<ClaStatusResult>(
+      "GET",
+      a.projectId,
+      `status?ghId=${String(a.ghId)}&ghLogin=${encodeURIComponent(a.ghLogin)}`
+    );
+    lastKnown.delete(key);
+    lastKnown.set(key, answer);
+    if (lastKnown.size > LAST_KNOWN_MAX) {
+      const oldest = lastKnown.keys().next().value;
+      if (oldest !== undefined) lastKnown.delete(oldest);
+    }
+    return answer;
+  } catch (error) {
+    const known = lastKnown.get(key);
+    if (known === undefined) throw error;
+    logger.warn(
+      { err: error, projectId: a.projectId, ghId: a.ghId },
+      "cla: GPlatform Legal did not answer; deciding by its last answer"
+    );
+    return known;
+  }
+}
+
+/** Coverage from this product's own tables: a project whose records are kept here. */
+export async function localClaStatus(a: {
   projectId: string;
   ghId: number;
   ghLogin: string;
