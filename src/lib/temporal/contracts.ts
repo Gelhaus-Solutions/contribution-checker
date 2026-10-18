@@ -34,6 +34,7 @@ export const WF = {
   pruneProcessedDeliveries: "pruneProcessedDeliveries",
   pruneRetainedRecords: "pruneRetainedRecords",
   flushTermsOutbox: "flushTermsOutbox",
+  followClaLegal: "followClaLegal",
   reportGlockdownDecoys: "reportGlockdownDecoys",
 } as const;
 

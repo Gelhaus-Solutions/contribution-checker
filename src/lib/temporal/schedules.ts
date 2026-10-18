@@ -46,6 +46,14 @@ const SCHEDULES: ScheduleSpec[] = [
     workflowType: WF.flushTermsOutbox,
     cron: "* * * * *",
   },
+  // GPlatform Legal's chains of the projects moved there (D126): what staff
+  // wrote in Legal's console has the pull requests checked again, every
+  // minute. A no-op where Legal is not configured.
+  {
+    id: scheduleIds.followClaLegal,
+    workflowType: WF.followClaLegal,
+    cron: "* * * * *",
+  },
   // GLockdown's decoy inventory (L120): which decoys this app checks, as
   // hashes, daily at 04:40 UTC. The worker also reports once when it starts.
   // A no-op where GLockdown's edge is not configured.

@@ -1,3 +1,4 @@
+import { followClaLegalChains } from "@/lib/cla/follow";
 import { flushTermsOutbox as flush } from "@/lib/gpterms";
 import { logger } from "@/lib/logger";
 import { processPrivacyRuns } from "@/lib/privacy-runs";
@@ -22,4 +23,17 @@ export async function flushTermsOutbox(): Promise<{
   );
   if (report === null) return null;
   return { delivered: report.delivered, retrying: report.retrying, parked: report.parked };
+}
+
+/**
+ * The chains in GPlatform Legal of the projects moved there, followed for
+ * what Legal's staff wrote (D126), whose pull requests are then checked
+ * again. Without Legal configured it does nothing.
+ */
+export async function followClaLegal(): Promise<{
+  projects: number;
+  entries: number;
+  regated: number;
+} | null> {
+  return followClaLegalChains();
 }

@@ -61,6 +61,20 @@ export async function flushTermsOutbox(): Promise<{
 }
 
 /**
+ * Every minute: the chains in GPlatform Legal of the projects moved there,
+ * read past the entry last followed (D126); what Legal's staff wrote there has
+ * the project's pull requests checked again. A failed project is read again
+ * the next minute.
+ */
+export async function followClaLegal(): Promise<{
+  projects: number;
+  entries: number;
+  regated: number;
+} | null> {
+  return acts.followClaLegal();
+}
+
+/**
  * Daily: tells GLockdown which decoys this app checks, as hashes only (L120),
  * so a decoy in GLockdown's inventory that is no longer checked here shows up
  * there. The activity never throws; a failed report is audited and tomorrow's
