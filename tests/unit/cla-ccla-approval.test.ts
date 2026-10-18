@@ -23,6 +23,8 @@ const h = vi.hoisted(() => {
   let n = 0;
 
   const makeTx = () => ({
+    // The project row appendClaEvent holds: kept here, not in Legal.
+    $queryRaw: async () => [{ claLegalEnrolledAt: null }],
     corporateCla: {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       findUnique: async (args: any) => {

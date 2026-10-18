@@ -49,6 +49,8 @@ function makeFakeTx() {
   const rows: Row[] = [];
   let n = 0;
   const tx = {
+    // The project row appendClaEvent holds: kept here, not in Legal.
+    $queryRaw: async () => [{ claLegalEnrolledAt: null }],
     claEventLog: {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       findFirst: async (args: any) => {

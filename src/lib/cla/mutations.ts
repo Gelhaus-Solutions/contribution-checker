@@ -745,6 +745,64 @@ export async function rejectCorporateCla(a: {
 }
 
 /**
+ * Revoke an ACTIVE Corporate CLA (maintainer override). Flips status to
+ * REVOKED, stamps revokedBy/revokedAt and appends a `ccla.revoked` ledger
+ * entry, which a revocation lacked before: it is a legal fact like the
+ * approval. Roster rows stay as they are; an inactive corporate no longer
+ * covers them. Returns the roster's ACTIVE ghIds captured before the flip, so
+ * the caller can re-gate their PRs.
+ */
+export async function revokeCorporateCla(a: {
+  corporateId: string;
+  actorUserId: string | null;
+}): Promise<{ projectId: string; companyName: string; affectedGhIds: number[] }> {
+  return prisma.$transaction(async (tx) => {
+    const corporate = await tx.corporateCla.findUnique({
+      where: { id: a.corporateId },
+      select: {
+        id: true,
+        projectId: true,
+        status: true,
+        companyName: true,
+        members: { where: { status: "ACTIVE", ghId: { not: null } }, select: { ghId: true } },
+      },
+    });
+    if (!corporate) throw new Error("Corporate CLA not found");
+    if (corporate.status !== "ACTIVE") {
+      throw new Error("Only an active corporate CLA can be revoked.");
+    }
+
+    const revokedAt = new Date();
+    await tx.corporateCla.update({
+      where: { id: a.corporateId },
+      data: { status: "REVOKED", revokedById: a.actorUserId, revokedAt },
+    });
+
+    await appendClaEvent({
+      tx,
+      projectId: corporate.projectId,
+      kind: "ccla.revoked",
+      actorUserId: a.actorUserId,
+      links: { corporateId: corporate.id },
+      payload: {
+        kind: "ccla.revoked",
+        corporateId: corporate.id,
+        companyName: corporate.companyName,
+        revokedAt: revokedAt.toISOString(),
+      },
+    });
+
+    return {
+      projectId: corporate.projectId,
+      companyName: corporate.companyName,
+      affectedGhIds: Array.from(
+        new Set(corporate.members.map((m) => m.ghId).filter((g): g is number => g != null))
+      ),
+    };
+  });
+}
+
+/**
  * Bulk-add roster members to a CorporateCla. Each entry that has an existing
  * DISPUTED member for this corporate (matched by ghId, else lowercased ghLogin)
  * is refused (collected into `skippedDisputed`, the consent gate). The rest

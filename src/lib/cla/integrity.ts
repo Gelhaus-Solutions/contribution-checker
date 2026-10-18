@@ -15,6 +15,7 @@ export type ChainKind =
   | "ccla.signed"
   | "ccla.approved"
   | "ccla.rejected"
+  | "ccla.revoked"
   | "doc.published"
   | "doc.resign_set"
   | "roster.added"
@@ -74,8 +75,22 @@ export function computeEntryHash(a: {
 }
 
 /**
+ * Thrown by a local CLA write for a project whose records moved to GPlatform
+ * Legal (`Project.claLegalEnrolledAt`) after the write chose its store: the
+ * write is refused rather than forking the chain, and is tried again.
+ */
+export class ClaInLegalError extends Error {
+  constructor(readonly projectId: string) {
+    super("This project's CLA records have moved to GPlatform Legal. Try again.");
+    this.name = "ClaInLegalError";
+  }
+}
+
+/**
  * Append one event to a project's ledger inside the caller's transaction.
  *
+ * Holds the project's row first, so two appends never read the same MAX(seq)
+ * and a project that moved to Legal meanwhile is refused (`ClaInLegalError`).
  * Reads MAX(seq) for the project within `tx`. If the chain is empty, a genesis
  * entry (seq 0, kind "genesis", prevHash GENESIS, payload `{ projectId }`) is
  * written first, then the real event is appended at the next seq. Returns the
@@ -97,6 +112,10 @@ export async function appendClaEvent(a: {
   };
 }): Promise<{ seq: number; entryHash: string; id: string }> {
   const { tx, projectId, kind, payload } = a;
+
+  const held = await tx.$queryRaw<{ claLegalEnrolledAt: Date | null }[]>`
+    SELECT "claLegalEnrolledAt" FROM "Project" WHERE "id" = ${projectId} FOR UPDATE`;
+  if (held[0]?.claLegalEnrolledAt) throw new ClaInLegalError(projectId);
 
   const last = await tx.claEventLog.findFirst({
     where: { projectId },
