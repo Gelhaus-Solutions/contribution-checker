@@ -301,7 +301,12 @@ model Project {
   // Still written by publishClaVersion for backward-compat and UI hints.
   minIclaVersion               Int     @default(0)
   minCclaVersion               Int     @default(0)
+  // When this project's CLA records moved to GPlatform Legal (D123): from then
+  // on every CLA read and write goes to Legal (src/lib/cla/store.ts), and the
+  // CLA rows here are the history as it was moved. Null: kept here, as before.
+  claLegalEnrolledAt           DateTime?
   // Denormalized pointers to the active published document per kind (fast gate).
+  // For a project in Legal, a mirror of Legal's, written on every publish.
   currentIclaVersionId         String?
   currentCclaVersionId         String?
   // When a repo-file CLA auto-versions on push, whether that forces re-sign. In
@@ -1185,7 +1190,7 @@ model ClaEventLog {
   actorUserId String?
   actorGhId   Int?
 
-  signatureId       String? @unique
+  signatureId       String?
   documentVersionId String?
   rosterMemberId    String?
   corporateId       String?
@@ -1199,6 +1204,7 @@ model ClaEventLog {
 
   @@unique([projectId, seq])
   @@index([projectId, kind])
+  @@index([signatureId])
 }
 
 /**
