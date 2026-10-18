@@ -1,6 +1,7 @@
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import { auth, signIn } from "@/auth";
+import { welcomeFor } from "@/lib/auth/next-path";
 import { prisma } from "@/lib/db";
 import { getClaStatus } from "@/lib/cla/status";
 import { parseFormSchema } from "@/lib/applications/schema";
@@ -46,6 +47,13 @@ export default async function ClaSignPage({
   if (!project) notFound();
 
   const session = await auth();
+  // An application is matched to pull requests by the GitHub account, and the
+  // CLA is signed as it: someone signed in without one linked (an email or
+  // Google sign-up) links it first and comes back here. Without this they
+  // could apply with no GitHub account and so without signing.
+  if (session?.user && !session.user.restricted && !session.user.ghId) {
+    redirect(welcomeFor(`/p/${slug}/cla`));
+  }
   if (session?.user && !session.user.restricted && session.user.ghId) {
     await requireTermsStanding(session, `/p/${slug}/cla`);
   }

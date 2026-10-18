@@ -27,6 +27,7 @@ import {
   type ClaSignatureCapture,
 } from "@/lib/cla/mutations";
 import { onClaCoverageChanged } from "@/lib/cla/post-sign";
+import { fillGithubLogin } from "@/lib/auth/sync-user";
 import { claStore } from "@/lib/cla/store";
 import { notifyApplicantClaRequired } from "@/lib/cla/notify";
 import { getClientIp, getClientUserAgent } from "@/lib/http/client";
@@ -103,8 +104,33 @@ export async function applyAction(
   // submission. Mirrors the page-side gate (claEnabled && claRequired &&
   // claPlacementEmbed && a published ICLA version && not already covered).
   // Re-checked server-side so a stale/forged client cannot skip signing.
+  // An application is matched to the applicant's pull requests by their
+  // GitHub account, and a required CLA is signed as it. Without one linked the
+  // application could be checked against nothing and its CLA skipped: the
+  // page sends such a person to link GitHub first, and this refuses a stale
+  // form. A row with the id but not the login gets the login now.
   const ghId = session.user.ghId;
-  const ghLogin = session.user.ghLogin;
+  if (typeof ghId !== "number") {
+    return {
+      status: "error",
+      reason: "Link your GitHub account first: reload this page and it takes you there.",
+      values: submitted,
+    };
+  }
+  const ghLogin =
+    session.user.ghLogin ?? (await fillGithubLogin(session.user.id, ghId));
+  if (
+    !ghLogin &&
+    project.claEnabled &&
+    project.claRequired &&
+    project.currentIclaVersionId
+  ) {
+    return {
+      status: "error",
+      reason: "GitHub did not tell us your login just now, and the CLA is signed as it. Try again in a minute.",
+      values: submitted,
+    };
+  }
   let claRequiredForSubmission = false;
   if (
     project.claEnabled &&

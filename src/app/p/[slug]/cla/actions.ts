@@ -56,6 +56,7 @@ function signFailure(e: unknown, fallback: string): string {
 }
 import { onClaCoverageChanged } from "@/lib/cla/post-sign";
 import { termsRefuseWrite } from "@/lib/authz";
+import { fillGithubLogin } from "@/lib/auth/sync-user";
 import { TERMS_REFUSAL } from "@/lib/terms";
 
 // ---------------------------------------------------------------------------
@@ -108,10 +109,19 @@ async function gate(): Promise<RateLimited> {
   if (termsRefuseWrite(session)) {
     return { ok: false, reason: TERMS_REFUSAL };
   }
-  if (typeof user.ghId !== "number" || !user.ghLogin) {
+  if (typeof user.ghId !== "number") {
     return {
       ok: false,
-      reason: "Your GitHub identity is incomplete. Sign out and back in.",
+      reason: "Link your GitHub account first: reload this page and it takes you there.",
+    };
+  }
+  // Onboarding keeps the GitHub id even when GitHub could not be asked for the
+  // login; ask again now rather than send the person round in circles.
+  const ghLogin = user.ghLogin ?? (await fillGithubLogin(user.id, user.ghId));
+  if (!ghLogin) {
+    return {
+      ok: false,
+      reason: "GitHub did not tell us your login just now. Try again in a minute.",
     };
   }
 
@@ -143,7 +153,7 @@ async function gate(): Promise<RateLimited> {
     user: {
       id: user.id,
       ghId: user.ghId,
-      ghLogin: user.ghLogin,
+      ghLogin,
       email: user.email ?? null,
     },
     ip,

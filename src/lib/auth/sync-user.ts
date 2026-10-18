@@ -168,6 +168,33 @@ export async function syncGitHubIdentity(
   return { userId: localUserId, ghId, ghLogin };
 }
 
+/**
+ * The GitHub login of a user whose row has the GitHub id but not the login:
+ * onboarding persists the id even when GitHub cannot be asked for the profile,
+ * and nothing asked again, so the login stayed empty. Resolved by id now and
+ * kept; null when GitHub still does not answer, or the login is another row's.
+ */
+export async function fillGithubLogin(
+  userId: string,
+  ghId: number,
+): Promise<string | null> {
+  try {
+    const gh = await fetchGithubUserById(ghId);
+    if (!gh.login) return null;
+    await prisma.user.update({
+      where: { id: userId },
+      data: { ghLogin: gh.login },
+    });
+    return gh.login;
+  } catch (e) {
+    logger.warn(
+      { err: e, "auth.user_id": userId, "github.id": ghId },
+      "auth: filling a missing GitHub login failed",
+    );
+    return null;
+  }
+}
+
 export type OrgRoles = { isSuperAdmin: boolean; canCreateProj: boolean };
 
 /**
