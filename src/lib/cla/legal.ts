@@ -27,6 +27,31 @@ export class ClaLegalError extends Error {
   }
 }
 
+/**
+ * Legal could not answer: it was not reached, or it failed on its side (5xx).
+ * A refusal (4xx) is an answer, and is not this.
+ */
+export function legalIsDown(error: unknown): error is ClaLegalError {
+  return error instanceof ClaLegalError && (error.status === null || error.status >= 500);
+}
+
+/** What a page gets instead of its data while Legal cannot answer. */
+export const LEGAL_DOWN = Symbol("legal-down");
+
+/**
+ * Runs a page's reads of a moved project, and gives LEGAL_DOWN instead of
+ * throwing while Legal cannot answer, so the page can say so rather than fall
+ * through to the generic error page. A refusal still throws.
+ */
+export async function unlessLegalDown<T>(read: () => Promise<T>): Promise<T | typeof LEGAL_DOWN> {
+  try {
+    return await read();
+  } catch (error) {
+    if (legalIsDown(error)) return LEGAL_DOWN;
+    throw error;
+  }
+}
+
 export type LegalKind = "ICLA" | "CCLA";
 
 export interface LegalProjectView {
