@@ -76,3 +76,11 @@ await build({
   entryPoints: [path.join(root, "src/cli/glockdown.ts")],
   outfile: path.join(root, "dist/glockdown.mjs"),
 });
+
+// A project's CLA records moved to GPlatform Legal (src/cli/cla-move-to-legal.ts),
+// run once per project from a shell. Same bundle settings, for the same reason.
+await build({
+  ...shared,
+  entryPoints: [path.join(root, "src/cli/cla-move-to-legal.ts")],
+  outfile: path.join(root, "dist/cla-move-to-legal.mjs"),
+});
