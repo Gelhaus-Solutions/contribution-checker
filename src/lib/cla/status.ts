@@ -24,6 +24,16 @@ export function invalidateClaCache(projectId: string, ghId: number): void {
   cache.delete(cacheKey(projectId, ghId));
 }
 
+/**
+ * Drop every cached coverage result of a project: its records changed in
+ * GPlatform Legal, written by staff there rather than by this process (D126).
+ */
+export function invalidateClaProject(projectId: string): void {
+  for (const key of cache.keys()) {
+    if (key.startsWith(`${projectId}:`)) cache.delete(key);
+  }
+}
+
 export type ClaStatusResult = {
   satisfied: boolean;
   via?: "icla" | "ccla" | "waiver";
