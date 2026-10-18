@@ -19,6 +19,7 @@ import { SignForm, DisputeForm } from "./sign-form";
 import { CollectionNotice } from "@/components/legal-notice";
 import { signIcla, disputeMembership } from "./actions";
 import { requireTermsStanding } from "@/lib/authz";
+import { claStore } from "@/lib/cla/store";
 
 export default async function ClaSignPage({
   params,
@@ -187,13 +188,13 @@ async function ClaSurface({
 
   // Covered by a corporate CLA: offer the exemption/dispute path.
   if (status.satisfied && status.via === "ccla" && status.corporate) {
-    const member = await prisma.cclaRosterMember.findFirst({
-      where: {
-        corporateId: status.corporate.id,
-        status: "ACTIVE",
-        OR: [{ ghId }, { ghLogin: ghLogin.toLowerCase() }],
-      },
-      select: { id: true },
+    const [member] = await (
+      await claStore(project.id)
+    ).roster({
+      corporateIds: [status.corporate.id],
+      status: "ACTIVE",
+      ghId,
+      ghLogin,
     });
     return (
       <Card>
@@ -214,6 +215,7 @@ async function ClaSurface({
         {member && (
           <CardContent>
             <DisputeForm
+              projectId={project.id}
               memberId={member.id}
               companyName={status.corporate.companyName}
               action={disputeMembership}
@@ -226,16 +228,7 @@ async function ClaSurface({
 
   // Needs to sign (or re-sign a now-stale version). Load the current ICLA text.
   const version = project.currentIclaVersionId
-    ? await prisma.claDocumentVersion.findUnique({
-        where: { id: project.currentIclaVersionId },
-        select: {
-          id: true,
-          version: true,
-          contentHash: true,
-          bodyMarkdown: true,
-          kind: true,
-        },
-      })
+    ? await (await claStore(project.id)).version(project.currentIclaVersionId)
     : null;
 
   if (!version || version.kind !== "ICLA") {
@@ -274,7 +267,7 @@ async function ClaSurface({
           projectId={project.id}
           versionId={version.id}
           contentHash={version.contentHash}
-          bodyMarkdown={version.bodyMarkdown}
+          bodyMarkdown={version.bodyMarkdown ?? ""}
           ghLogin={ghLogin}
           requireSignature={project.claIclaRequireSignature}
           customFields={parseFormSchema(project.claIclaCustomFields)}

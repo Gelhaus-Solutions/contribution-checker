@@ -141,10 +141,12 @@ export function SignForm({
  * maintainers and the corporate contact.
  */
 export function DisputeForm({
+  projectId,
   memberId,
   companyName,
   action,
 }: {
+  projectId: string;
   memberId: string;
   companyName: string;
   action: (
@@ -169,6 +171,7 @@ export function DisputeForm({
 
   return (
     <form action={dispatch} className="space-y-3">
+      <input type="hidden" name="projectId" value={projectId} />
       <input type="hidden" name="memberId" value={memberId} />
       <div className="space-y-1.5">
         <Label htmlFor="dispute-note">Reason (optional)</Label>

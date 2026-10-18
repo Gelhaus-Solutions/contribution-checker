@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db";
+import { claHeldInLegalFor } from "@/lib/cla/store";
 
 /**
  * Self-service data export (GDPR Art. 15 and 20): everything the app holds
@@ -402,6 +403,9 @@ export async function buildAccountExport(
         ...e,
         payload: parseJson(e.payload),
       })),
+      // Projects whose CLA records moved to GPlatform Legal: what it holds
+      // about this person there (the rows above are what is kept here).
+      inLegal: await claHeldInLegalFor({ userId, ghId, ghLogin }),
     },
     prChecks: prChecks.map((p) => ({
       id: p.id,

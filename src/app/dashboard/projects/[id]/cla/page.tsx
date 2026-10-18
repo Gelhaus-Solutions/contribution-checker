@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { prisma } from "@/lib/db";
+import { claStore } from "@/lib/cla/store";
 import { requireProjectPermission } from "@/lib/authz";
 import {
   Card,
@@ -44,24 +45,7 @@ export default async function ClaSettings({
       orderBy: { fullName: "asc" },
       select: { id: true, fullName: true, installationId: true },
     }),
-    prisma.claDocumentVersion.findMany({
-      where: { projectId: id },
-      orderBy: [{ kind: "asc" }, { version: "desc" }],
-      select: {
-        id: true,
-        kind: true,
-        version: true,
-        contentHash: true,
-        sourceType: true,
-        sourceRepoId: true,
-        sourcePath: true,
-        sourceRef: true,
-        sourceCommitSha: true,
-        requireResign: true,
-        resignRequired: true,
-        publishedAt: true,
-      },
-    }),
+    claStore(id).then((store) => store.versions()),
     prisma.claPendingChange.findMany({
       where: { projectId: id, status: "PENDING" },
       orderBy: { detectedAt: "desc" },

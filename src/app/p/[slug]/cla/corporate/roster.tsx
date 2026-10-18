@@ -27,12 +27,14 @@ export type RosterMember = {
 
 
 export function RosterManager({
+  projectId,
   corporateId,
   members,
   companyName,
   addAction,
   revokeAction,
 }: {
+  projectId: string;
   corporateId: string;
   members: RosterMember[];
   companyName: string;
@@ -51,7 +53,7 @@ export function RosterManager({
 
   return (
     <div className="space-y-6">
-      <AddRosterForm corporateId={corporateId} action={addAction} />
+      <AddRosterForm projectId={projectId} corporateId={corporateId} action={addAction} />
 
       {active.length > 0 && (
         <section className="space-y-2">
@@ -63,6 +65,7 @@ export function RosterManager({
               <ActiveRow
                 key={m.id}
                 member={m}
+                projectId={projectId}
                 corporateId={corporateId}
                 action={revokeAction}
               />
@@ -134,9 +137,11 @@ export function RosterManager({
 }
 
 function AddRosterForm({
+  projectId,
   corporateId,
   action,
 }: {
+  projectId: string;
   corporateId: string;
   action: (
     prev: ClaActionState,
@@ -150,6 +155,7 @@ function AddRosterForm({
 
   return (
     <form action={dispatch} className="space-y-3">
+      <input type="hidden" name="projectId" value={projectId} />
       <input type="hidden" name="corporateId" value={corporateId} />
       <div className="space-y-1.5">
         <Label htmlFor="ghLogins">Add contributors</Label>
@@ -179,10 +185,12 @@ function AddRosterForm({
 
 function ActiveRow({
   member,
+  projectId,
   corporateId,
   action,
 }: {
   member: RosterMember;
+  projectId: string;
   corporateId: string;
   action: (
     prev: ClaActionState,
@@ -202,6 +210,7 @@ function ActiveRow({
         added {member.addedAt}
       </span>
       <form action={dispatch} className="ml-auto">
+        <input type="hidden" name="projectId" value={projectId} />
         <input type="hidden" name="corporateId" value={corporateId} />
         <input type="hidden" name="memberId" value={member.id} />
         <Button

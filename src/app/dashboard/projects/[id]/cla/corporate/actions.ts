@@ -10,11 +10,16 @@ import {
   onClaCoverageChanged,
   onClaCoverageRevoked,
 } from "@/lib/cla/post-sign";
-import {
-  revokeRosterMember as revokeRosterMemberMutation,
-  approveCorporateCla as approveCorporateClaMutation,
-  rejectCorporateCla as rejectCorporateClaMutation,
-} from "@/lib/cla/mutations";
+import { claStore } from "@/lib/cla/store";
+
+/** The project's slug, for revalidating its public pages. */
+async function slugOf(projectId: string): Promise<string> {
+  const project = await prisma.project.findUniqueOrThrow({
+    where: { id: projectId },
+    select: { slug: true },
+  });
+  return project.slug;
+}
 
 const revokeRosterSchema = z.object({
   projectId: z.string().min(1),
@@ -33,15 +38,13 @@ export async function revokeRosterMember(formData: FormData) {
   });
   const { session } = await requireProjectRole(parsed.projectId, "ADMIN");
 
-  const member = await prisma.cclaRosterMember.findUnique({
-    where: { id: parsed.memberId },
-    select: { projectId: true, corporateId: true, ghLogin: true },
-  });
-  if (!member || member.projectId !== parsed.projectId) {
+  const store = await claStore(parsed.projectId);
+  const member = await store.rosterMember(parsed.memberId);
+  if (!member) {
     throw new Error("Roster member not found");
   }
 
-  await revokeRosterMemberMutation({
+  await store.revokeRosterMember({
     memberId: parsed.memberId,
     actorUserId: session.user.id,
   });
@@ -79,15 +82,12 @@ export async function approveCorporateCla(formData: FormData) {
   });
   const { session } = await requireProjectRole(parsed.projectId, "ADMIN");
 
-  const corporate = await prisma.corporateCla.findUnique({
-    where: { id: parsed.corporateId },
-    select: { projectId: true, project: { select: { slug: true } } },
-  });
-  if (!corporate || corporate.projectId !== parsed.projectId) {
+  const store = await claStore(parsed.projectId);
+  if (!(await store.corporate(parsed.corporateId))) {
     throw new Error("Corporate CLA not found");
   }
 
-  const result = await approveCorporateClaMutation({
+  const result = await store.approveCorporate({
     corporateId: parsed.corporateId,
     actorUserId: session.user.id,
   });
@@ -122,7 +122,7 @@ export async function approveCorporateCla(formData: FormData) {
   }
 
   revalidatePath(`/dashboard/projects/${parsed.projectId}/cla/corporate`);
-  revalidatePath(`/p/${corporate.project.slug}/cla/corporate`);
+  revalidatePath(`/p/${await slugOf(parsed.projectId)}/cla/corporate`);
 }
 
 const rejectCorporateSchema = z.object({
@@ -148,15 +148,12 @@ export async function rejectCorporateCla(formData: FormData) {
   });
   const { session } = await requireProjectRole(parsed.projectId, "ADMIN");
 
-  const corporate = await prisma.corporateCla.findUnique({
-    where: { id: parsed.corporateId },
-    select: { projectId: true, project: { select: { slug: true } } },
-  });
-  if (!corporate || corporate.projectId !== parsed.projectId) {
+  const store = await claStore(parsed.projectId);
+  if (!(await store.corporate(parsed.corporateId))) {
     throw new Error("Corporate CLA not found");
   }
 
-  const result = await rejectCorporateClaMutation({
+  const result = await store.rejectCorporate({
     corporateId: parsed.corporateId,
     actorUserId: session.user.id,
     reason: parsed.reason ?? "",
@@ -187,7 +184,7 @@ export async function rejectCorporateCla(formData: FormData) {
   }
 
   revalidatePath(`/dashboard/projects/${parsed.projectId}/cla/corporate`);
-  revalidatePath(`/p/${corporate.project.slug}/cla/corporate`);
+  revalidatePath(`/p/${await slugOf(parsed.projectId)}/cla/corporate`);
 }
 
 const revokeCorporateSchema = z.object({
@@ -196,9 +193,10 @@ const revokeCorporateSchema = z.object({
 });
 
 /**
- * Admin-revoke a whole Corporate CLA (status REVOKED). Roster members are left
- * as-is; an inactive CorporateCla no longer confers coverage on its roster. The
- * signatory's signature stays as the immutable legal record.
+ * Admin-revoke a whole active Corporate CLA (status REVOKED, with its ledger
+ * entry). Roster members are left as-is; an inactive CorporateCla no longer
+ * confers coverage on its roster. The signatory's signature stays as the
+ * immutable legal record. A pending one is rejected, not revoked.
  */
 export async function revokeCorporateCla(formData: FormData) {
   const parsed = revokeCorporateSchema.parse({
@@ -207,31 +205,20 @@ export async function revokeCorporateCla(formData: FormData) {
   });
   const { session } = await requireProjectRole(parsed.projectId, "ADMIN");
 
-  const corporate = await prisma.corporateCla.findUnique({
-    where: { id: parsed.corporateId },
-    select: { projectId: true, status: true, companyName: true },
-  });
-  if (!corporate || corporate.projectId !== parsed.projectId) {
+  const store = await claStore(parsed.projectId);
+  const corporate = await store.corporate(parsed.corporateId);
+  if (!corporate) {
     throw new Error("Corporate CLA not found");
   }
   if (corporate.status === "REVOKED") {
     throw new Error("Corporate CLA is already revoked");
   }
 
-  // Capture the roster members covered by this corporate BEFORE the revoke, so
-  // we can re-gate their open PRs once their coverage is gone.
-  const activeMembers = await prisma.cclaRosterMember.findMany({
-    where: { corporateId: parsed.corporateId, status: "ACTIVE", ghId: { not: null } },
-    select: { ghId: true },
-  });
-
-  await prisma.corporateCla.update({
-    where: { id: parsed.corporateId },
-    data: {
-      status: "REVOKED",
-      revokedById: session.user.id,
-      revokedAt: new Date(),
-    },
+  // The roster members it covered come back with the revocation, so their
+  // open PRs can be re-gated once their coverage is gone.
+  const revoked = await store.revokeCorporate({
+    corporateId: parsed.corporateId,
+    actorUserId: session.user.id,
   });
 
   await recordAudit({
@@ -247,9 +234,7 @@ export async function revokeCorporateCla(formData: FormData) {
 
   // Coverage just turned off for the roster: re-gate each member's currently-
   // approved, CLA-gated PRs (and send resign notices). Previously a no-op gap.
-  const ghIds = activeMembers
-    .map((m) => m.ghId)
-    .filter((g): g is number => g != null);
+  const ghIds = revoked.affectedGhIds;
   if (ghIds.length > 0) {
     await onClaCoverageRevoked({ projectId: parsed.projectId, ghIds });
   }

@@ -17,7 +17,7 @@ import {
   ClaGateError,
 } from "@/lib/applications/decide";
 import { getClaStatus } from "@/lib/cla/status";
-import { grantWaiver as grantClaWaiver } from "@/lib/cla/mutations";
+import { claStore } from "@/lib/cla/store";
 
 const ghLoginPattern = /^[a-z0-9](?:[a-z0-9]|-(?=[a-z0-9])){0,38}$/i;
 
@@ -329,8 +329,7 @@ export async function waiveClaForUser(args: {
     select: { ghId: true },
   });
 
-  const waiver = await grantClaWaiver({
-    projectId: parsed.projectId,
+  const waiver = await (await claStore(parsed.projectId)).grantWaiver({
     ghLogin: parsed.ghLogin,
     ghId: existingUser?.ghId ?? null,
     reason: parsed.reason,
@@ -588,25 +587,16 @@ export async function getUserOverview(args: {
       ghLogin,
     });
 
+    const store = await claStore(projectId);
     const sig = ghIdForLookup
-      ? await prisma.claSignature.findFirst({
-          where: { projectId, ghId: ghIdForLookup, kind: "ICLA" },
-          orderBy: { signedAt: "desc" },
-          select: {
-            documentVersion: true,
-            signedAt: true,
-            legalName: true,
-            status: true,
-          },
-        })
+      ? ((
+          await store.signatures({ ghId: ghIdForLookup, kind: "ICLA", skip: 0, take: 1 })
+        ).items[0] ?? null)
       : null;
 
     let currentVersion: number | null = null;
     if (project.currentIclaVersionId) {
-      const v = await prisma.claDocumentVersion.findUnique({
-        where: { id: project.currentIclaVersionId },
-        select: { version: true },
-      });
+      const v = await store.version(project.currentIclaVersionId);
       currentVersion = v?.version ?? null;
     }
 

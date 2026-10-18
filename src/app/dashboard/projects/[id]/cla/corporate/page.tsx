@@ -1,6 +1,5 @@
-import type { Prisma } from "@prisma/client";
-import { prisma } from "@/lib/db";
 import { requireProjectRole } from "@/lib/authz";
+import { claStore } from "@/lib/cla/store";
 import {
   Card,
   CardContent,
@@ -66,45 +65,25 @@ export default async function CorporateClaPage({
 
   const { page, perPage, skip, take, q } = parsePageParams(sp);
 
-  const where: Prisma.CorporateClaWhereInput = {
-    projectId: id,
-    ...(q
-      ? {
-          OR: [
-            { companyName: { contains: q, mode: "insensitive" } },
-            { contactEmail: { contains: q, mode: "insensitive" } },
-          ],
-        }
-      : {}),
-  };
-
-  // disputedCount and pendingCount are project-wide (not just the current page),
-  // so compute them with dedicated aggregates rather than reducing over the page
-  // slice.
-  const [corporates, total, disputedCount, pendingCount] =
-    await prisma.$transaction([
-      prisma.corporateCla.findMany({
-        where,
-        include: {
-          signature: {
-            select: { ghLogin: true, ghId: true, legalName: true },
-          },
-          members: {
-            orderBy: [{ status: "asc" }, { addedAt: "desc" }],
-          },
-        },
-        orderBy: { createdAt: "desc" },
-        skip,
-        take,
-      }),
-      prisma.corporateCla.count({ where }),
-      prisma.cclaRosterMember.count({
-        where: { projectId: id, status: "DISPUTED" },
-      }),
-      prisma.corporateCla.count({
-        where: { projectId: id, status: "PENDING" },
-      }),
-    ]);
+  // disputedCount and pendingCount are project-wide (not just the current
+  // page); the store counts them alongside the page.
+  const store = await claStore(id);
+  const found = await store.corporates({ q, skip, take });
+  const rosters = await store.roster({ corporateIds: found.items.map((c) => c.id) });
+  const statusOrder = (status: string) => ["ACTIVE", "DISPUTED", "REVOKED"].indexOf(status);
+  const corporates = found.items.map((c) => ({
+    ...c,
+    members: rosters
+      .filter((m) => m.corporateId === c.id)
+      .sort(
+        (a, b) =>
+          statusOrder(a.status) - statusOrder(b.status) ||
+          b.addedAt.getTime() - a.addedAt.getTime()
+      ),
+  }));
+  const total = found.total;
+  const disputedCount = found.disputed;
+  const pendingCount = found.pending;
 
   const basePath = `/dashboard/projects/${id}/cla/corporate`;
 

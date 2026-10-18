@@ -4,7 +4,7 @@ import { logger } from "@/lib/logger";
 import { getInstallationOctokit } from "@/lib/github/app";
 import { recordAudit } from "@/lib/audit";
 import { notifyProjectReviewers } from "@/lib/notifications/inbox";
-import { publishClaVersion } from "@/lib/cla/mutations";
+import { storeFor } from "@/lib/cla/store";
 import { onClaCoverageRevoked } from "@/lib/cla/post-sign";
 
 /**
@@ -94,6 +94,8 @@ export type SyncOutcome =
 type RepoRef = { id: string; fullName: string; installationId: number };
 type ProjectFlags = {
   id: string;
+  /** Where its CLA records are: here (null), or GPlatform Legal since then. */
+  claLegalEnrolledAt?: Date | null;
   claAutoVersionRequiresResign: boolean;
   claRepoFileReviewMode: boolean;
 };
@@ -178,8 +180,7 @@ async function detectAndApply(args: {
 
   // Auto mode: publish a new version.
   const requireResign = project.claAutoVersionRequiresResign;
-  const result = await publishClaVersion({
-    projectId: project.id,
+  const result = await storeFor(project).publishVersion({
     kind,
     bodyMarkdown: fetched.content,
     sourceType: "repo_file",
@@ -294,16 +295,6 @@ async function supersedePendingChanges(
     .catch(() => undefined);
 }
 
-const SOURCE_VERSION_SELECT = {
-  id: true,
-  kind: true,
-  sourceType: true,
-  sourceRepoId: true,
-  sourcePath: true,
-  sourceRef: true,
-  contentHash: true,
-} as const;
-
 /**
  * Auto-track + auto-version: when a push lands on the branch that backs a
  * project's repo-file-sourced CLA and the configured file changed, fetch the
@@ -332,6 +323,7 @@ export async function syncRepoFileClaForPush(args: {
       project: {
         select: {
           id: true,
+          claLegalEnrolledAt: true,
           claEnabled: true,
           claAutoVersionRequiresResign: true,
           claRepoFileReviewMode: true,
@@ -351,10 +343,7 @@ export async function syncRepoFileClaForPush(args: {
   ].filter((v): v is string => !!v);
   if (versionIds.length === 0) return { published };
 
-  const versions = await prisma.claDocumentVersion.findMany({
-    where: { id: { in: versionIds } },
-    select: SOURCE_VERSION_SELECT,
-  });
+  const versions = await storeFor(project).versionsById(versionIds);
 
   const repoRef: RepoRef = {
     id: repo.id,
@@ -363,6 +352,7 @@ export async function syncRepoFileClaForPush(args: {
   };
   const projectFlags: ProjectFlags = {
     id: project.id,
+    claLegalEnrolledAt: project.claLegalEnrolledAt,
     claAutoVersionRequiresResign: project.claAutoVersionRequiresResign,
     claRepoFileReviewMode: project.claRepoFileReviewMode,
   };
@@ -415,6 +405,7 @@ export async function syncClaRepoSourceNow(args: {
     where: { id: args.projectId },
     select: {
       id: true,
+      claLegalEnrolledAt: true,
       claAutoVersionRequiresResign: true,
       claRepoFileReviewMode: true,
       currentIclaVersionId: true,
@@ -429,10 +420,7 @@ export async function syncClaRepoSourceNow(args: {
   ].filter((v): v is string => !!v);
   if (versionIds.length === 0) return { results: [] };
 
-  const versions = await prisma.claDocumentVersion.findMany({
-    where: { id: { in: versionIds } },
-    select: SOURCE_VERSION_SELECT,
-  });
+  const versions = await storeFor(project).versionsById(versionIds);
 
   // ClaDocumentVersion.sourceRepoId is a plain scalar (no relation), so resolve
   // the source repos in one query and index them by id.
@@ -449,6 +437,7 @@ export async function syncClaRepoSourceNow(args: {
 
   const projectFlags: ProjectFlags = {
     id: project.id,
+    claLegalEnrolledAt: project.claLegalEnrolledAt,
     claAutoVersionRequiresResign: project.claAutoVersionRequiresResign,
     claRepoFileReviewMode: project.claRepoFileReviewMode,
   };

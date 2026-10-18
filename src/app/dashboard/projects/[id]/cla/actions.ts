@@ -15,7 +15,7 @@ import {
   saveCustomFieldsSchema,
 } from "@/lib/cla/schema";
 import { formSchema as formSchemaValidator } from "@/lib/applications/schema";
-import * as claMutations from "@/lib/cla/mutations";
+import { claStore, pushClaSettingsToLegal } from "@/lib/cla/store";
 import {
   fetchRepoFile,
   sha256Hex,
@@ -163,6 +163,12 @@ export async function updateClaSettings(formData: FormData) {
     labelClaPending: parsed.labelClaPending ?? before.labelClaPending,
   };
 
+  // A project whose CLA records are in GPlatform Legal: Legal holds its
+  // settings too, so it hears them first and a refusal there saves nothing.
+  if ((await claStore(parsed.projectId)).inLegal) {
+    await pushClaSettingsToLegal(parsed.projectId, after, session.user.id);
+  }
+
   await prisma.project.update({
     where: { id: parsed.projectId },
     data: after,
@@ -289,14 +295,12 @@ export async function publishClaVersion(formData: FormData) {
 
   // Validate any selected prior versions belong to this project + kind, so the
   // per-version selection can't reference another project's versions.
+  const store = await claStore(parsed.projectId);
   if (parsed.resignVersionIds && parsed.resignVersionIds.length > 0) {
-    const owned = await prisma.claDocumentVersion.count({
-      where: {
-        id: { in: parsed.resignVersionIds },
-        projectId: parsed.projectId,
-        kind: parsed.kind,
-      },
-    });
+    const named = new Set(parsed.resignVersionIds);
+    const owned = (await store.versions()).filter(
+      (v) => v.kind === parsed.kind && named.has(v.id),
+    ).length;
     if (owned !== parsed.resignVersionIds.length) {
       throw new Error("A selected version does not belong to this CLA.");
     }
@@ -357,8 +361,7 @@ export async function publishClaVersion(formData: FormData) {
     bodyMarkdown = parsed.bodyMarkdown;
   }
 
-  const published = await claMutations.publishClaVersion({
-    projectId: parsed.projectId,
+  const published = await store.publishVersion({
     kind: parsed.kind,
     bodyMarkdown,
     sourceType: parsed.sourceType,
@@ -423,15 +426,13 @@ export async function revokeSignature(formData: FormData) {
 
   const { session } = await requireProjectRole(projectId, "ADMIN");
 
-  const sig = await prisma.claSignature.findUnique({
-    where: { id: signatureId },
-    select: { projectId: true },
-  });
-  if (!sig || sig.projectId !== projectId) {
+  const store = await claStore(projectId);
+  const sig = await store.signature(signatureId);
+  if (!sig) {
     throw new Error("Signature not found for this project.");
   }
 
-  await claMutations.revokeSignature({
+  await store.revokeSignature({
     signatureId,
     actorUserId: session.user.id,
     reason,
@@ -467,8 +468,8 @@ export async function grantWaiver(formData: FormData) {
     select: { ghId: true },
   });
 
-  const waiver = await claMutations.grantWaiver({
-    projectId: parsed.projectId,
+  const store = await claStore(parsed.projectId);
+  const waiver = await store.grantWaiver({
     ghLogin: parsed.ghLogin,
     ghId: existingUser?.ghId ?? null,
     reason: parsed.reason,
@@ -497,15 +498,13 @@ export async function revokeWaiver(formData: FormData) {
 
   const { session } = await requireProjectRole(projectId, "ADMIN");
 
-  const waiver = await prisma.claWaiver.findUnique({
-    where: { id: waiverId },
-    select: { projectId: true },
-  });
-  if (!waiver || waiver.projectId !== projectId) {
+  const store = await claStore(projectId);
+  const waiver = await store.waiver(waiverId);
+  if (!waiver) {
     throw new Error("Waiver not found for this project.");
   }
 
-  await claMutations.revokeWaiver({ waiverId, actorUserId: session.user.id });
+  await store.revokeWaiver({ waiverId, actorUserId: session.user.id });
 
   await recordAudit({
     projectId,
@@ -538,8 +537,9 @@ export async function setVersionResign(formData: FormData) {
 
   const { session } = await requireProjectRole(parsed.projectId, "ADMIN");
 
-  const result = await claMutations.setVersionResign({
-    projectId: parsed.projectId,
+  const result = await (
+    await claStore(parsed.projectId)
+  ).setVersionResign({
     changes: parsed.changes,
     actorUserId: session.user.id,
   });
@@ -617,21 +617,18 @@ export async function approvePendingChange(formData: FormData) {
   }
 
   const kind = pending.kind as "ICLA" | "CCLA";
+  const store = await claStore(parsed.projectId);
   if (parsed.resignVersionIds && parsed.resignVersionIds.length > 0) {
-    const owned = await prisma.claDocumentVersion.count({
-      where: {
-        id: { in: parsed.resignVersionIds },
-        projectId: parsed.projectId,
-        kind,
-      },
-    });
+    const named = new Set(parsed.resignVersionIds);
+    const owned = (await store.versions()).filter(
+      (v) => v.kind === kind && named.has(v.id),
+    ).length;
     if (owned !== parsed.resignVersionIds.length) {
       throw new Error("A selected version does not belong to this CLA.");
     }
   }
 
-  const published = await claMutations.publishClaVersion({
-    projectId: parsed.projectId,
+  const published = await store.publishVersion({
     kind,
     bodyMarkdown: pending.detectedContent,
     sourceType: "repo_file",
@@ -751,17 +748,7 @@ export async function fetchClaRepoSource(
       : project?.currentCclaVersionId;
   if (!versionId) return { sourced: false };
 
-  const version = await prisma.claDocumentVersion.findUnique({
-    where: { id: versionId },
-    select: {
-      sourceType: true,
-      sourceRepoId: true,
-      sourcePath: true,
-      sourceRef: true,
-      sourceCommitSha: true,
-      contentHash: true,
-    },
-  });
+  const version = await (await claStore(projectId)).version(versionId);
   if (
     !version ||
     version.sourceType !== "repo_file" ||
@@ -853,11 +840,8 @@ export async function getClaVersionBody(
   versionId: string,
 ): Promise<{ bodyMarkdown: string }> {
   await requireProjectRole(projectId, "ADMIN");
-  const version = await prisma.claDocumentVersion.findUnique({
-    where: { id: versionId },
-    select: { projectId: true, bodyMarkdown: true },
-  });
-  if (!version || version.projectId !== projectId) {
+  const version = await (await claStore(projectId)).version(versionId);
+  if (!version || version.bodyMarkdown === undefined) {
     throw new Error("Version not found for this project.");
   }
   return { bodyMarkdown: version.bodyMarkdown };

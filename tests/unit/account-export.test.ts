@@ -18,6 +18,8 @@ beforeEach(() => {
   ]) {
     db.prisma[m] = { findMany: f() };
   }
+  // No project's CLA records are in GPlatform Legal.
+  db.prisma.project = { count: vi.fn(async () => 0) };
   fn(db.prisma.user.findUnique).mockResolvedValue({
     id: "u1", name: "Ada", email: "ada@example.com", ghId: 42, ghLogin: "ada",
   });

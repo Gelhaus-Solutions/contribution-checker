@@ -21,6 +21,7 @@ import { AppealForm } from "./appeal-form";
 import { applyAction, appealAction } from "./actions";
 import { isManuallyBlocked } from "@/lib/applications/lifecycle";
 import { getClaStatus } from "@/lib/cla/status";
+import { claStore } from "@/lib/cla/store";
 import type { FormValue } from "@/components/form-renderer";
 import { replyToCommentAction } from "@/app/dashboard/projects/[id]/applications/[appId]/actions";
 import { StatusBadge } from "@/components/status-badge";
@@ -86,21 +87,12 @@ export default async function PublicProjectPage({
       ghLogin: session.user.ghLogin,
     });
     if (!status.satisfied) {
-      const version = await prisma.claDocumentVersion.findUnique({
-        where: { id: project.currentIclaVersionId },
-        select: {
-          id: true,
-          version: true,
-          contentHash: true,
-          bodyMarkdown: true,
-          kind: true,
-        },
-      });
+      const version = await (await claStore(project.id)).version(project.currentIclaVersionId);
       if (version && version.kind === "ICLA") {
         claEmbed = {
           versionId: version.id,
           contentHash: version.contentHash,
-          bodyMarkdown: version.bodyMarkdown,
+          bodyMarkdown: version.bodyMarkdown ?? "",
           version: version.version,
           requireSignature: project.claIclaRequireSignature,
           customFields: parseFormSchema(project.claIclaCustomFields),

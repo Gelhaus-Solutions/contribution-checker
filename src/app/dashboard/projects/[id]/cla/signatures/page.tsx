@@ -1,7 +1,6 @@
-import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { requireProjectRole } from "@/lib/authz";
-import { verifyChain } from "@/lib/cla/integrity";
+import { claStore } from "@/lib/cla/store";
 import {
   Card,
   CardContent,
@@ -60,78 +59,20 @@ export default async function ClaSignatureLog({
   const wai = parsePageParams(sp, { keys: { page: "wpage", q: "wq" } });
   const evt = parsePageParams(sp, { keys: { page: "epage", q: "eq" } });
 
-  const sigWhere: Prisma.ClaSignatureWhereInput = {
-    projectId: id,
-    ...(sig.q
-      ? {
-          OR: [
-            { ghLogin: { contains: sig.q, mode: "insensitive" } },
-            { legalName: { contains: sig.q, mode: "insensitive" } },
-            { emailSnapshot: { contains: sig.q, mode: "insensitive" } },
-          ],
-        }
-      : {}),
-  };
-  const waiWhere: Prisma.ClaWaiverWhereInput = {
-    projectId: id,
-    ...(wai.q
-      ? {
-          OR: [
-            { ghLogin: { contains: wai.q, mode: "insensitive" } },
-            { reason: { contains: wai.q, mode: "insensitive" } },
-          ],
-        }
-      : {}),
-  };
-  const evtWhere: Prisma.ClaEventLogWhereInput = { projectId: id };
-
-  const [
-    [signatures, sigTotal, waivers, waiTotal, events, evtTotal],
-    chain,
-    project,
-  ] = await Promise.all([
-    prisma.$transaction([
-      prisma.claSignature.findMany({
-        where: sigWhere,
-        include: {
-          corporateSignatory: {
-            select: {
-              id: true,
-              companyName: true,
-              registeredAddress: true,
-              country: true,
-              contactName: true,
-              contactEmail: true,
-              signatoryTitle: true,
-            },
-          },
-        },
-        orderBy: { signedAt: "desc" },
-        skip: sig.skip,
-        take: sig.take,
-      }),
-      prisma.claSignature.count({ where: sigWhere }),
-      prisma.claWaiver.findMany({
-        where: waiWhere,
-        orderBy: { grantedAt: "desc" },
-        skip: wai.skip,
-        take: wai.take,
-      }),
-      prisma.claWaiver.count({ where: waiWhere }),
-      prisma.claEventLog.findMany({
-        where: evtWhere,
-        orderBy: { seq: "desc" },
-        skip: evt.skip,
-        take: evt.take,
-      }),
-      prisma.claEventLog.count({ where: evtWhere }),
-    ]),
-    verifyChain(id),
+  const store = await claStore(id);
+  const [signed, waived, chained, chain, project] = await Promise.all([
+    store.signatures({ q: sig.q, skip: sig.skip, take: sig.take, withImages: true }),
+    store.waivers({ q: wai.q, skip: wai.skip, take: wai.take }),
+    store.events({ skip: evt.skip, take: evt.take, order: "desc" }),
+    store.verify(),
     prisma.project.findUnique({
       where: { id },
       select: { claIclaCustomFields: true, claCclaCustomFields: true },
     }),
   ]);
+  const { items: signatures, total: sigTotal } = signed;
+  const { items: waivers, total: waiTotal } = waived;
+  const { items: events, total: evtTotal } = chained;
 
   const basePath = `/dashboard/projects/${id}/cla/signatures`;
 
@@ -453,7 +394,7 @@ export default async function ClaSignatureLog({
           ) : (
             <ul className="divide-y divide-border">
               {events.map((e) => (
-                <li key={e.id} className="px-6 py-3 text-sm">
+                <li key={e.seq} className="px-6 py-3 text-sm">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="flex items-center gap-2">
                       <span className="font-mono text-xs text-muted-foreground">

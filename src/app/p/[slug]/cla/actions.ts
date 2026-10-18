@@ -25,13 +25,35 @@ import {
   parseFormSchema,
   buildAnswersSchema,
 } from "@/lib/applications/schema";
-import {
-  recordIclaSignature,
-  recordCclaSignature,
-  addRosterMembers as addRosterMembersMutation,
-  revokeRosterMember as revokeRosterMemberMutation,
-  disputeRosterMembership,
-} from "@/lib/cla/mutations";
+import { claStore, type ClaStore } from "@/lib/cla/store";
+import { ClaLegalError } from "@/lib/cla/legal";
+
+/** The project's slug and name, for its pages and mails. */
+async function projectOf(projectId: string) {
+  return prisma.project.findUnique({
+    where: { id: projectId },
+    select: { slug: true, name: true },
+  });
+}
+
+/**
+ * A roster entry with the corporate CLA it is under, from the project's
+ * store: null unless both are the project's.
+ */
+async function memberOf(store: ClaStore, memberId: string) {
+  const member = await store.rosterMember(memberId);
+  if (!member) return null;
+  const corporate = await store.corporate(member.corporateId);
+  return corporate ? { ...member, corporateCla: corporate } : null;
+}
+
+/** Why a signature was not taken, in words for the signer. */
+function signFailure(e: unknown, fallback: string): string {
+  if (e instanceof ClaLegalError && e.code === "cla.version-moved") {
+    return "A newer version of the CLA was published while you were reading. Reload the page, read it, and sign again.";
+  }
+  return fallback;
+}
 import { onClaCoverageChanged } from "@/lib/cla/post-sign";
 import { termsRefuseWrite } from "@/lib/authz";
 import { TERMS_REFUSAL } from "@/lib/terms";
@@ -232,10 +254,8 @@ export async function signIcla(
     customFields = ans.data as Record<string, string | boolean>;
   }
 
-  const version = await prisma.claDocumentVersion.findUnique({
-    where: { id: project.currentIclaVersionId },
-    select: { version: true, contentHash: true, kind: true },
-  });
+  const store = await claStore(project.id);
+  const version = await store.version(project.currentIclaVersionId);
   if (!version || version.kind !== "ICLA") {
     return fail("The current CLA version is unavailable. Try again shortly.");
   }
@@ -249,8 +269,8 @@ export async function signIcla(
   });
 
   try {
-    const sig = await recordIclaSignature({
-      projectId: project.id,
+    const sig = await store.signIcla({
+      versionId: version.id,
       userId: user.id,
       ghId: user.ghId,
       ghLogin: user.ghLogin,
@@ -279,7 +299,7 @@ export async function signIcla(
     });
   } catch (e) {
     logger.warn({ err: e, projectId: project.id }, "icla sign failed");
-    return fail("Could not record your signature. Please try again.");
+    return fail(signFailure(e, "Could not record your signature. Please try again."));
   }
 
   revalidatePath(`/p/${project.slug}/cla`);
@@ -360,10 +380,8 @@ export async function signCcla(
     customFields = ans.data as Record<string, string | boolean>;
   }
 
-  const version = await prisma.claDocumentVersion.findUnique({
-    where: { id: project.currentCclaVersionId },
-    select: { version: true, contentHash: true, kind: true },
-  });
+  const store = await claStore(project.id);
+  const version = await store.version(project.currentCclaVersionId);
   if (!version || version.kind !== "CCLA") {
     return fail("The current CLA version is unavailable. Try again shortly.");
   }
@@ -378,8 +396,8 @@ export async function signCcla(
   });
 
   try {
-    const { corporateId, signatureId } = await recordCclaSignature({
-      projectId: project.id,
+    const { corporateId, signatureId } = await store.signCcla({
+      versionId: version.id,
       userId: user.id,
       ghId: user.ghId,
       ghLogin: user.ghLogin,
@@ -424,7 +442,7 @@ export async function signCcla(
     });
   } catch (e) {
     logger.warn({ err: e, projectId: project.id }, "ccla sign failed");
-    return fail("Could not record the corporate CLA. Please try again.");
+    return fail(signFailure(e, "Could not record the corporate CLA. Please try again."));
   }
 
   revalidatePath(`/p/${project.slug}/cla/corporate`);
@@ -453,6 +471,7 @@ export async function addRosterMembers(
     .filter(Boolean);
 
   const parsed = rosterAddSchema.safeParse({
+    projectId: String(formData.get("projectId") ?? ""),
     corporateId: String(formData.get("corporateId") ?? ""),
     ghLogins: rawLogins,
   });
@@ -463,17 +482,11 @@ export async function addRosterMembers(
 
   // Authorize: the caller must be the signatory of this corporate CLA and the
   // corporate must belong to a project the contributor can see.
-  const corporate = await prisma.corporateCla.findUnique({
-    where: { id: input.corporateId },
-    select: {
-      id: true,
-      projectId: true,
-      status: true,
-      signature: { select: { userId: true, ghId: true } },
-      project: { select: { slug: true } },
-    },
-  });
-  if (!corporate) return fail("Corporate CLA not found.");
+  const store = await claStore(input.projectId);
+  const found = await store.corporate(input.corporateId);
+  const project = found ? await projectOf(found.projectId) : null;
+  if (!found || !project) return fail("Corporate CLA not found.");
+  const corporate = { ...found, project };
   // The signatory may stage the roster while the CCLA is still PENDING admin
   // approval (coverage applies once it is approved). REJECTED/REVOKED are closed.
   if (corporate.status !== "ACTIVE" && corporate.status !== "PENDING") {
@@ -489,9 +502,8 @@ export async function addRosterMembers(
   let added: { id: string; ghLogin: string }[] = [];
   let skippedDisputed: string[] = [];
   try {
-    const result = await addRosterMembersMutation({
+    const result = await store.addRosterMembers({
       corporateId: corporate.id,
-      projectId: corporate.projectId,
       entries: input.ghLogins.map((ghLogin) => ({ ghLogin })),
       actorUserId: user.id,
     });
@@ -573,29 +585,18 @@ export async function revokeRosterMember(
   const { user } = gated;
 
   const parsed = rosterRevokeSchema.safeParse({
+    projectId: String(formData.get("projectId") ?? ""),
     corporateId: String(formData.get("corporateId") ?? ""),
     memberId: String(formData.get("memberId") ?? ""),
   });
   if (!parsed.success) return fail("Invalid request.");
   const input = parsed.data;
 
-  const member = await prisma.cclaRosterMember.findUnique({
-    where: { id: input.memberId },
-    select: {
-      id: true,
-      corporateId: true,
-      projectId: true,
-      ghLogin: true,
-      corporateCla: {
-        select: {
-          id: true,
-          status: true,
-          signature: { select: { userId: true, ghId: true } },
-          project: { select: { slug: true } },
-        },
-      },
-    },
-  });
+  const store = await claStore(input.projectId);
+  const found = await memberOf(store, input.memberId);
+  const project = found ? await projectOf(found.projectId) : null;
+  const member =
+    found && project ? { ...found, corporateCla: { ...found.corporateCla, project } } : null;
   if (!member || member.corporateId !== input.corporateId) {
     return fail("Roster member not found.");
   }
@@ -606,7 +607,7 @@ export async function revokeRosterMember(
   }
 
   try {
-    await revokeRosterMemberMutation({
+    await store.revokeRosterMember({
       memberId: member.id,
       actorUserId: user.id,
     });
@@ -657,29 +658,17 @@ export async function disputeMembership(
   const { user } = gated;
 
   const parsed = disputeSchema.safeParse({
+    projectId: String(formData.get("projectId") ?? ""),
     memberId: String(formData.get("memberId") ?? ""),
   });
   if (!parsed.success) return fail("Invalid request.");
   const note = formData.get("note") ? String(formData.get("note")) : undefined;
 
-  const member = await prisma.cclaRosterMember.findUnique({
-    where: { id: parsed.data.memberId },
-    select: {
-      id: true,
-      projectId: true,
-      corporateId: true,
-      ghLogin: true,
-      ghId: true,
-      status: true,
-      corporateCla: {
-        select: {
-          companyName: true,
-          contactEmail: true,
-          project: { select: { slug: true, name: true } },
-        },
-      },
-    },
-  });
+  const store = await claStore(parsed.data.projectId);
+  const found = await memberOf(store, parsed.data.memberId);
+  const project = found ? await projectOf(found.projectId) : null;
+  const member =
+    found && project ? { ...found, corporateCla: { ...found.corporateCla, project } } : null;
   if (!member) return fail("Membership not found.");
   if (member.status === "DISPUTED") {
     return fail("This membership is already disputed.");
@@ -695,7 +684,7 @@ export async function disputeMembership(
   }
 
   try {
-    await disputeRosterMembership({
+    await store.disputeRosterMembership({
       memberId: member.id,
       actorUserId: user.id,
       actorGhId: user.ghId,

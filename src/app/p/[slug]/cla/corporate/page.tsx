@@ -20,6 +20,7 @@ import { parseFormSchema, type FormSchema } from "@/lib/applications/schema";
 import { formatDate } from "@/lib/ui/format";
 import { SHELL_NARROW } from "@/lib/ui/layout";
 import { requireTermsStanding } from "@/lib/authz";
+import { claStore } from "@/lib/cla/store";
 
 export default async function CorporateClaPage({
   params,
@@ -132,33 +133,24 @@ async function CorporateSurface({
   // user can hold several (multiple legal entities, or re-signs), each at its
   // own point in the approval lifecycle. The signatory's ClaSignature is FK'd to
   // the CorporateCla; we match on the signing user.
-  const managed = await prisma.corporateCla.findMany({
-    where: { projectId, signature: { userId } },
-    orderBy: { createdAt: "desc" },
-    select: {
-      id: true,
-      companyName: true,
-      status: true,
-      rejectReason: true,
-      members: {
-        orderBy: { addedAt: "desc" },
-        select: {
-          id: true,
-          ghLogin: true,
-          ghId: true,
-          status: true,
-          disputeNote: true,
-          addedAt: true,
-        },
-      },
-    },
+  const store = await claStore(projectId);
+  const signed = await store.corporates({
+    signatoryUserId: userId,
+    skip: 0,
+    take: 200,
   });
+  const rosters = await store.roster({
+    corporateIds: signed.items.map((c) => c.id),
+  });
+  const managed = signed.items.map((c) => ({
+    ...c,
+    members: rosters
+      .filter((m) => m.corporateId === c.id)
+      .sort((a, b) => b.addedAt.getTime() - a.addedAt.getTime()),
+  }));
 
   const version = currentCclaVersionId
-    ? await prisma.claDocumentVersion.findUnique({
-        where: { id: currentCclaVersionId },
-        select: { bodyMarkdown: true, version: true, contentHash: true },
-      })
+    ? await store.version(currentCclaVersionId)
     : null;
 
   return (
@@ -195,6 +187,7 @@ async function CorporateSurface({
             {manageable && (
               <CardContent>
                 <RosterManager
+                  projectId={projectId}
                   corporateId={c.id}
                   companyName={c.companyName}
                   members={members}
@@ -222,7 +215,7 @@ async function CorporateSurface({
           </CardHeader>
           <CardContent className="space-y-5">
             <div className="max-h-96 overflow-y-auto rounded-md border border-border bg-muted/20 p-4">
-              <Markdown source={version.bodyMarkdown} />
+              <Markdown source={version.bodyMarkdown ?? ""} />
             </div>
             <SignCclaForm
               projectId={projectId}

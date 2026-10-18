@@ -27,6 +27,7 @@ import {
   type ClaSignatureCapture,
 } from "@/lib/cla/mutations";
 import { onClaCoverageChanged } from "@/lib/cla/post-sign";
+import { claStore } from "@/lib/cla/store";
 import { notifyApplicantClaRequired } from "@/lib/cla/notify";
 import { getClientIp, getClientUserAgent } from "@/lib/http/client";
 import type { ApplyState } from "./apply-form";
@@ -231,6 +232,11 @@ export async function applyAction(
     }
   }
 
+  // Where the project's CLA records are: signed here inside the application's
+  // own transaction, or in GPlatform Legal from inside it (a refusal there
+  // rolls the application back; a failure after it leaves a signature that
+  // names an application never written, which is still what was agreed).
+  const store = claRequiredForSubmission ? await claStore(project.id) : null;
   const result =
     claRequiredForSubmission && typeof ghId === "number" && ghLogin
       ? await prisma.$transaction((tx) =>
@@ -243,8 +249,7 @@ export async function applyAction(
               // Atomic: the application and the immutable click-wrap signature
               // commit together (recordIclaSignature also appends the
               // icla.signed ledger entry inside this same transaction).
-              await recordIclaSignature({
-                projectId: project.id,
+              const signing = {
                 userId: session.user!.id,
                 ghId,
                 ghLogin,
@@ -256,8 +261,9 @@ export async function applyAction(
                 ip,
                 userAgent,
                 applicationId: application.id,
-                tx: innerTx,
-              });
+              };
+              if (store?.inLegal) await store.signIcla(signing);
+              else await recordIclaSignature({ ...signing, projectId: project.id, tx: innerTx });
             },
           }),
         )

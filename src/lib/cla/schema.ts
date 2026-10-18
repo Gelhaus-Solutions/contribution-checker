@@ -116,6 +116,13 @@ const cclaRejectedPayloadSchema = z.object({
   rejectedAt: z.string().min(1),
 });
 
+const cclaRevokedPayloadSchema = z.object({
+  kind: z.literal("ccla.revoked"),
+  corporateId: z.string().min(1),
+  companyName: z.string().min(1),
+  revokedAt: z.string().min(1),
+});
+
 const docPublishedPayloadSchema = z.object({
   kind: z.literal("doc.published"),
   documentVersionId: z.string().min(1),
@@ -214,6 +221,7 @@ export const chainPayloadSchema = z.discriminatedUnion("kind", [
   cclaSignedPayloadSchema,
   cclaApprovedPayloadSchema,
   cclaRejectedPayloadSchema,
+  cclaRevokedPayloadSchema,
   docPublishedPayloadSchema,
   docResignSetPayloadSchema,
   rosterAddedPayloadSchema,
@@ -293,16 +301,19 @@ export const signCclaSchema = signIclaSchema.extend({
 });
 
 export const rosterAddSchema = z.object({
+  projectId: z.string().min(1),
   corporateId: z.string().min(1),
   ghLogins: z.array(ghLoginSchema).min(1).max(500),
 });
 
 export const rosterRevokeSchema = z.object({
+  projectId: z.string().min(1),
   corporateId: z.string().min(1),
   memberId: z.string().min(1),
 });
 
 export const disputeSchema = z.object({
+  projectId: z.string().min(1),
   memberId: z.string().min(1),
 });
 

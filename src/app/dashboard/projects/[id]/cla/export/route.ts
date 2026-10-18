@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
-import { prisma } from "@/lib/db";
 import {
   getProjectMembership,
   isRestricted,
@@ -8,7 +7,7 @@ import {
   type Role,
 } from "@/lib/authz";
 import { recordAudit } from "@/lib/audit";
-import { verifyChain } from "@/lib/cla/integrity";
+import { claRecord, claStore } from "@/lib/cla/store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -17,9 +16,9 @@ export const dynamic = "force-dynamic";
  * GET /dashboard/projects/[id]/cla/export?format=csv|json
  *
  * Exports the project's full CLA legal record as a downloadable attachment:
- * the immutable hash-chained ledger (ClaEventLog, ordered by seq) plus the
- * operational tables (signatures, corporate CLAs, rosters, waivers) and the
- * `verifyChain` integrity result. ADMIN-only (re-checked here: server
+ * the immutable hash-chained ledger (ordered by seq) plus the operational
+ * records (signatures, corporate CLAs, rosters, waivers) and the integrity
+ * result, from wherever the project's records are (here, or GPlatform Legal). ADMIN-only (re-checked here: server
  * components redirect, but a Route Handler returns a JSON 403 instead).
  *
  * - JSON (default): the complete record + integrity status.
@@ -51,30 +50,9 @@ export async function GET(
   // Pull the ledger (ordered by seq, the legally-authoritative ordering) plus
   // the operational tables. The ledger is the immutable record; the others are
   // current state, included so the export is self-contained.
-  const [events, signatures, corporates, roster, waivers, integrity] =
-    await Promise.all([
-      prisma.claEventLog.findMany({
-        where: { projectId },
-        orderBy: { seq: "asc" },
-      }),
-      prisma.claSignature.findMany({
-        where: { projectId },
-        orderBy: { signedAt: "asc" },
-      }),
-      prisma.corporateCla.findMany({
-        where: { projectId },
-        orderBy: { createdAt: "asc" },
-      }),
-      prisma.cclaRosterMember.findMany({
-        where: { projectId },
-        orderBy: { addedAt: "asc" },
-      }),
-      prisma.claWaiver.findMany({
-        where: { projectId },
-        orderBy: { grantedAt: "asc" },
-      }),
-      verifyChain(projectId),
-    ]);
+  const { events, signatures, corporates, roster, waivers, integrity } = await claRecord(
+    await claStore(projectId)
+  );
 
   await recordAudit({
     projectId,
