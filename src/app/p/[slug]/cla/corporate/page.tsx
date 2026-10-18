@@ -21,6 +21,8 @@ import { formatDate } from "@/lib/ui/format";
 import { SHELL_NARROW } from "@/lib/ui/layout";
 import { requireTermsStanding } from "@/lib/authz";
 import { claStore } from "@/lib/cla/store";
+import { LEGAL_DOWN, unlessLegalDown } from "@/lib/cla/legal";
+import { LegalUnavailable } from "@/components/legal-unavailable";
 
 export default async function CorporateClaPage({
   params,
@@ -96,6 +98,8 @@ export default async function CorporateClaPage({
             userId={session.user.id}
             currentCclaVersionId={project.currentCclaVersionId}
             cclaCustomFields={parseFormSchema(project.claCclaCustomFields)}
+            projectName={project.name}
+            projectSlug={project.slug}
           />
         )}
       </main>
@@ -119,6 +123,25 @@ function cclaStatusBadge(status: string) {
 }
 
 async function CorporateSurface({
+  projectName,
+  projectSlug,
+  ...props
+}: Parameters<typeof CorporateSurfaceContent>[0] & {
+  projectName: string;
+  projectSlug: string;
+}) {
+  const surface = await unlessLegalDown(() => CorporateSurfaceContent(props));
+  if (surface !== LEGAL_DOWN) return surface;
+  return (
+    <LegalUnavailable
+      audience="contributor"
+      project={projectName}
+      retryHref={`/p/${projectSlug}/cla/corporate`}
+    />
+  );
+}
+
+async function CorporateSurfaceContent({
   projectId,
   userId,
   currentCclaVersionId,

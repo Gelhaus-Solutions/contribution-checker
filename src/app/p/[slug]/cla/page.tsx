@@ -20,6 +20,8 @@ import { CollectionNotice } from "@/components/legal-notice";
 import { signIcla, disputeMembership } from "./actions";
 import { requireTermsStanding } from "@/lib/authz";
 import { claStore } from "@/lib/cla/store";
+import { LEGAL_DOWN, unlessLegalDown } from "@/lib/cla/legal";
+import { LegalUnavailable } from "@/components/legal-unavailable";
 
 export default async function ClaSignPage({
   params,
@@ -112,7 +114,19 @@ export default async function ClaSignPage({
   );
 }
 
-async function ClaSurface({
+async function ClaSurface(props: Parameters<typeof ClaSurfaceContent>[0]) {
+  const surface = await unlessLegalDown(() => ClaSurfaceContent(props));
+  if (surface !== LEGAL_DOWN) return surface;
+  return (
+    <LegalUnavailable
+      audience="contributor"
+      project={props.project.name}
+      retryHref={`/p/${props.project.slug}/cla`}
+    />
+  );
+}
+
+async function ClaSurfaceContent({
   project,
   user,
 }: {

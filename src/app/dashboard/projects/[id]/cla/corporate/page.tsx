@@ -1,5 +1,7 @@
 import { requireProjectRole } from "@/lib/authz";
 import { claStore } from "@/lib/cla/store";
+import { LEGAL_DOWN, unlessLegalDown } from "@/lib/cla/legal";
+import { LegalUnavailable } from "@/components/legal-unavailable";
 import {
   Card,
   CardContent,
@@ -52,13 +54,19 @@ function corporateBadgeVariant(
   }
 }
 
-export default async function CorporateClaPage({
-  params,
-  searchParams,
-}: {
+type PageProps = {
   params: Promise<{ id: string }>;
   searchParams: Promise<SearchParamRecord>;
-}) {
+};
+
+export default async function CorporateClaPage(props: PageProps) {
+  const page = await unlessLegalDown(() => CorporateClaContent(props));
+  if (page !== LEGAL_DOWN) return page;
+  const { id } = await props.params;
+  return <LegalUnavailable audience="maintainer" retryHref={`/dashboard/projects/${id}/cla/corporate`} />;
+}
+
+async function CorporateClaContent({ params, searchParams }: PageProps) {
   const { id } = await params;
   const sp = await searchParams;
   await requireProjectRole(id, "ADMIN");

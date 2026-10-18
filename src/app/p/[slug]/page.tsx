@@ -22,6 +22,7 @@ import { applyAction, appealAction } from "./actions";
 import { isManuallyBlocked } from "@/lib/applications/lifecycle";
 import { getClaStatus } from "@/lib/cla/status";
 import { claStore } from "@/lib/cla/store";
+import { LEGAL_DOWN, unlessLegalDown } from "@/lib/cla/legal";
 import type { FormValue } from "@/components/form-renderer";
 import { replyToCommentAction } from "@/app/dashboard/projects/[id]/applications/[appId]/actions";
 import { StatusBadge } from "@/components/status-badge";
@@ -81,24 +82,27 @@ export default async function PublicProjectPage({
     typeof session.user.ghId === "number" &&
     session.user.ghLogin
   ) {
-    const status = await getClaStatus({
-      projectId: project.id,
-      ghId: session.user.ghId,
-      ghLogin: session.user.ghLogin,
+    const ghId = session.user.ghId;
+    const ghLogin = session.user.ghLogin;
+    const currentIcla = project.currentIclaVersionId;
+    // While GPlatform Legal, which holds a moved project's CLA, cannot answer,
+    // the form goes without the embedded CLA; the pull request check still
+    // asks for a signature, on the CLA page.
+    const embed = await unlessLegalDown(async (): Promise<ClaEmbed | null> => {
+      const status = await getClaStatus({ projectId: project.id, ghId, ghLogin });
+      if (status.satisfied) return null;
+      const version = await (await claStore(project.id)).version(currentIcla);
+      if (!version || version.kind !== "ICLA") return null;
+      return {
+        versionId: version.id,
+        contentHash: version.contentHash,
+        bodyMarkdown: version.bodyMarkdown ?? "",
+        version: version.version,
+        requireSignature: project.claIclaRequireSignature,
+        customFields: parseFormSchema(project.claIclaCustomFields),
+      };
     });
-    if (!status.satisfied) {
-      const version = await (await claStore(project.id)).version(project.currentIclaVersionId);
-      if (version && version.kind === "ICLA") {
-        claEmbed = {
-          versionId: version.id,
-          contentHash: version.contentHash,
-          bodyMarkdown: version.bodyMarkdown ?? "",
-          version: version.version,
-          requireSignature: project.claIclaRequireSignature,
-          customFields: parseFormSchema(project.claIclaCustomFields),
-        };
-      }
-    }
+    claEmbed = embed === LEGAL_DOWN ? null : embed;
   }
 
   const existing = session?.user

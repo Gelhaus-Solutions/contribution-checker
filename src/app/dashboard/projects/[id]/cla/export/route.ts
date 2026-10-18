@@ -8,6 +8,7 @@ import {
 } from "@/lib/authz";
 import { recordAudit } from "@/lib/audit";
 import { claRecord, claStore } from "@/lib/cla/store";
+import { LEGAL_DOWN, unlessLegalDown } from "@/lib/cla/legal";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -50,9 +51,18 @@ export async function GET(
   // Pull the ledger (ordered by seq, the legally-authoritative ordering) plus
   // the operational tables. The ledger is the immutable record; the others are
   // current state, included so the export is self-contained.
-  const { events, signatures, corporates, roster, waivers, integrity } = await claRecord(
-    await claStore(projectId)
-  );
+  const record = await unlessLegalDown(async () => claRecord(await claStore(projectId)));
+  if (record === LEGAL_DOWN) {
+    return NextResponse.json(
+      {
+        error: "legal-unavailable",
+        message:
+          "This project's CLA records are kept in GPlatform Legal, which is not answering. Try again in a minute.",
+      },
+      { status: 503 }
+    );
+  }
+  const { events, signatures, corporates, roster, waivers, integrity } = record;
 
   await recordAudit({
     projectId,

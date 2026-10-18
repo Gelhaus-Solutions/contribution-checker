@@ -1,6 +1,8 @@
 import { prisma } from "@/lib/db";
 import { requireProjectRole } from "@/lib/authz";
 import { claStore } from "@/lib/cla/store";
+import { LEGAL_DOWN, unlessLegalDown } from "@/lib/cla/legal";
+import { LegalUnavailable } from "@/components/legal-unavailable";
 import {
   Card,
   CardContent,
@@ -42,13 +44,19 @@ function renderAnswer(v: unknown): string {
   return String(v);
 }
 
-export default async function ClaSignatureLog({
-  params,
-  searchParams,
-}: {
+type PageProps = {
   params: Promise<{ id: string }>;
   searchParams: Promise<SearchParamRecord>;
-}) {
+};
+
+export default async function ClaSignatureLog(props: PageProps) {
+  const page = await unlessLegalDown(() => ClaSignatureLogContent(props));
+  if (page !== LEGAL_DOWN) return page;
+  const { id } = await props.params;
+  return <LegalUnavailable audience="maintainer" retryHref={`/dashboard/projects/${id}/cla/signatures`} />;
+}
+
+async function ClaSignatureLogContent({ params, searchParams }: PageProps) {
   const { id } = await params;
   const sp = await searchParams;
   await requireProjectRole(id, "ADMIN");

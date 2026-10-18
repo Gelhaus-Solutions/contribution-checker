@@ -1,6 +1,9 @@
 import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { claStore } from "@/lib/cla/store";
+import { LEGAL_DOWN, unlessLegalDown } from "@/lib/cla/legal";
+import { LegalUnavailable } from "@/components/legal-unavailable";
+import { formatDate } from "@/lib/ui/format";
 import { requireProjectPermission } from "@/lib/authz";
 import {
   Card,
@@ -28,7 +31,21 @@ import {
   notifyUnsignedApplicants,
 } from "./actions";
 
-export default async function ClaSettings({
+export default async function ClaSettings(props: {
+  params: Promise<{ id: string }>;
+}) {
+  const page = await unlessLegalDown(() => ClaSettingsContent(props));
+  if (page !== LEGAL_DOWN) return page;
+  const { id } = await props.params;
+  return (
+    <LegalUnavailable
+      audience="maintainer"
+      retryHref={`/dashboard/projects/${id}/cla`}
+    />
+  );
+}
+
+async function ClaSettingsContent({
   params,
 }: {
   params: Promise<{ id: string }>;
@@ -124,6 +141,13 @@ export default async function ClaSettings({
             their PRs are accepted. Failing PRs stay open with a{" "}
             <code>cla-pending</code> label and a failing Check. They are never
             closed.
+            {project.claLegalEnrolledAt && (
+              <>
+                {" "}
+                Its CLA records are kept in GPlatform Legal since{" "}
+                {formatDate(project.claLegalEnrolledAt)}.
+              </>
+            )}
           </CardDescription>
         </CardHeader>
         <CardContent>
