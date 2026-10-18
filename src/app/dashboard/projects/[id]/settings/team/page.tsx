@@ -135,7 +135,7 @@ export default async function ProjectTeam({
                       )}
                       <div>
                         <div className="text-sm font-medium">
-                          {m.user.ghLogin ?? "(no login)"}
+                          {m.user.ghLogin ?? "No GitHub account linked"}
                         </div>
                         <div className="text-xs text-muted-foreground">
                           {m.user.name}

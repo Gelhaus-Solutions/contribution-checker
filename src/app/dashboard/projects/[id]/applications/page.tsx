@@ -139,7 +139,7 @@ export default async function ProjectApplications({
                     )}
                     <div>
                       <div className="text-sm font-medium">
-                        {a.user.ghLogin ?? "(no login)"}
+                        {a.user.ghLogin ?? "No GitHub account linked"}
                       </div>
                       <div className="text-xs text-muted-foreground">
                         {a.user.name}

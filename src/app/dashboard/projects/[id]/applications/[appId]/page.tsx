@@ -190,7 +190,9 @@ export default async function ApplicationDetail({
       )}
       {!claGateMet && (
         <span className="ml-1">
-          Applicant must sign the CLA before approval.
+          {app.user.ghId == null
+            ? "The applicant has not linked a GitHub account, so they cannot sign it yet. They are asked to link it when they next open the project's page."
+            : "Applicant must sign the CLA before approval."}
         </span>
       )}
     </p>
@@ -386,7 +388,7 @@ export default async function ApplicationDetail({
             )}
             <div>
               <CardTitle className="text-base">
-                {app.user.ghLogin ?? "(no login)"}
+                {app.user.ghLogin ?? "No GitHub account linked"}
               </CardTitle>
               <p className="text-xs text-muted-foreground">{app.user.name}</p>
             </div>

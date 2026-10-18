@@ -62,7 +62,11 @@ export default async function ProjectPeople({
     byLogin.set(d.ghLogin, row);
   }
   for (const a of applications) {
-    const login = a.user.ghLogin ?? "(no login)";
+    // People are decided on by GitHub login. An applicant without a linked
+    // GitHub account has none: their rows all fell into one "(no login)" row,
+    // and a decision there named nobody. They stay on Applications.
+    const login = a.user.ghLogin;
+    if (login === null) continue;
     const row = byLogin.get(login) ?? { ghLogin: login };
     const derived: "APPROVED" | "DENIED" | "PENDING" =
       a.status === "DENIED" &&
