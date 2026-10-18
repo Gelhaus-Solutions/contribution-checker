@@ -5,6 +5,7 @@ import { auth } from "@/auth";
 import { signInPath } from "@/lib/authz";
 import { getStackServerApp } from "@/lib/stack";
 import { logger } from "@/lib/logger";
+import { safeNextPath } from "@/lib/auth/next-path";
 import {
   reconcileOrgPermissions,
   syncGitHubIdentity,
@@ -19,18 +20,20 @@ import {
  * no token when its GitHub provider runs on shared OAuth keys, which is why
  * syncGitHubIdentity reads the numeric id off the provider link instead.
  *
- * Takes a FormData arg because it's invoked as a `<form action>` (the form has
- * no fields; it's just the submit trigger), but reads nothing from it.
+ * Invoked as a `<form action>`; its one field is `next`, where to go once
+ * done (the project the person was applying to), a path on this site only.
  */
-export async function finishOnboarding(_formData: FormData): Promise<void> {
+export async function finishOnboarding(formData: FormData): Promise<void> {
+  const next = safeNextPath(formData.get("next"));
+  const again = next === null ? "/welcome" : `/welcome?next=${encodeURIComponent(next)}`;
   const session = await auth();
-  if (!session?.user) redirect(await signInPath("/welcome"));
+  if (!session?.user) redirect(await signInPath(again));
   if (session.user.restricted) redirect("/restricted");
 
   const stackApp = await getStackServerApp();
   const stackUser = await stackApp.getUser();
   if (!stackUser) {
-    redirect("/handler/sign-in?after_auth_return_to=/welcome");
+    redirect(`/handler/sign-in?after_auth_return_to=${encodeURIComponent(again)}`);
   }
 
   try {
@@ -47,8 +50,8 @@ export async function finishOnboarding(_formData: FormData): Promise<void> {
       { err: e, "stack.user_id": stackUser.id },
       "welcome: onboarding failed",
     );
-    redirect("/welcome?error=github");
+    redirect(`${again}${again.includes("?") ? "&" : "?"}error=github`);
   }
 
-  redirect("/dashboard");
+  redirect(next ?? "/dashboard");
 }

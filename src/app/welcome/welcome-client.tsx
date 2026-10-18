@@ -18,7 +18,7 @@ import { finishOnboarding } from "./actions";
 const GITHUB_PROVIDER = "github";
 const GITHUB_SCOPES = ["read:user", "user:email"];
 
-export function WelcomeClient({ error }: { error?: string }) {
+export function WelcomeClient({ error, next }: { error?: string; next: string | null }) {
   // Require a signed-in user, then make sure a GitHub provider is LINKED.
   //
   // This deliberately does not use `useConnectedAccount("github", { or:
@@ -71,6 +71,7 @@ export function WelcomeClient({ error }: { error?: string }) {
           </p>
         )}
         <form ref={formRef} action={finishOnboarding}>
+          {next === null ? null : <input type="hidden" name="next" value={next} />}
           <SubmitButton>Continue</SubmitButton>
         </form>
       </CardContent>

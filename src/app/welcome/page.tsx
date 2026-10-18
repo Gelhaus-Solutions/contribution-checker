@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { signInPath } from "@/lib/authz";
+import { safeNextPath } from "@/lib/auth/next-path";
 import { SiteHeader } from "@/components/site-header";
 import {
   Card,
@@ -20,22 +21,25 @@ import { WelcomeClient } from "./welcome-client";
  * the background (no user prompt).
  *
  * Uses auth() directly (never requireSession) so it can't redirect-loop into
- * itself.
+ * itself. `next` brings the person back where they came from (the project
+ * they were applying to) instead of the dashboard.
  */
 export default async function WelcomePage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; next?: string }>;
 }) {
+  const { error, next: asked } = await searchParams;
+  const next = safeNextPath(asked);
+  const here = next === null ? "/welcome" : `/welcome?next=${encodeURIComponent(next)}`;
   const session = await auth();
-  if (!session?.user) redirect(await signInPath("/welcome"));
+  if (!session?.user) redirect(await signInPath(here));
   if (session.user.restricted) redirect("/restricted");
   // GitHub already linked -> onboarding is done.
   if (session.user.ghId) {
-    redirect("/dashboard");
+    redirect(next ?? "/dashboard");
   }
 
-  const { error } = await searchParams;
 
   return (
     <>
@@ -49,7 +53,7 @@ export default async function WelcomePage({
          * without it the page 500s with NoSuspenseBoundaryError.
          */}
         <Suspense fallback={<WelcomeFallback />}>
-          <WelcomeClient error={error} />
+          <WelcomeClient error={error} next={next} />
         </Suspense>
       </main>
     </>
