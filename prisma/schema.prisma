@@ -305,6 +305,11 @@ model Project {
   // on every CLA read and write goes to Legal (src/lib/cla/store.ts), and the
   // CLA rows here are the history as it was moved. Null: kept here, as before.
   claLegalEnrolledAt           DateTime?
+  // The newest entry of the project's chain in Legal this instance has
+  // followed (D126): an entry past it that staff wrote in Legal's console has
+  // the project's pull requests checked again (src/lib/cla/follow.ts). Null:
+  // not followed yet; the first follow starts at the chain's head.
+  claLegalFollowedSeq          Int?
   // Denormalized pointers to the active published document per kind (fast gate).
   // For a project in Legal, a mirror of Legal's, written on every publish.
   currentIclaVersionId         String?
