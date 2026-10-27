@@ -1,11 +1,11 @@
 "use client";
 
 import {
+  CACHE_KEY,
   createChromeCore,
   type AccountItem,
   type AccountPerson,
   type ChromeCore,
-  type StorageLike,
 } from "@ghub/identity-chrome";
 import { GpAccount, GpApps } from "@ghub/identity-chrome/react";
 import { useRouter } from "next/navigation";
@@ -24,6 +24,11 @@ import { reopenReplayChoice } from "@/lib/observability/replay-consent";
  * that button had: account settings, the data export, session recording and,
  * for super-admins, Admin. Contribution Checker has no organisations of its
  * own to switch between, so the popup lists none.
+ *
+ * **Nothing is kept on the device** (operator D383, GPLATLEGAL-227): the core
+ * gets no storage and asks its route on each page. The entry an earlier
+ * version kept in local storage (picture address, colour, products used, 30
+ * days) is removed once.
  */
 
 const svg = (inner: string): string =>
@@ -45,29 +50,31 @@ const ICONS = {
   ),
 };
 
-/** `localStorage`, or none where the browser refuses it (the list is then not kept). */
-function localStore(): StorageLike | null {
+/** The entry the header once kept in local storage, gone the first time this runs. */
+function forgetOldCache(): void {
   try {
-    return window.localStorage;
+    window.localStorage.removeItem(CACHE_KEY);
   } catch {
-    return null;
+    // Storage refused (a private window, blocked site data): there is nothing to remove.
   }
 }
 
 let shared: ChromeCore | null = null;
 
 /**
- * One core for the page, so the two controls share one fetch and one cache, as
- * the package intends. It lives as long as the page. None on the server, which
- * has no storage and draws only the bare tags.
+ * One core for the page, so the two controls share one fetch, as the package
+ * intends, and nothing is stored. It lives as long as the page. None on the
+ * server, which draws only the bare tags.
  */
 function pageCore(): ChromeCore | null {
   if (typeof window === "undefined") return null;
-  shared ??= createChromeCore({
-    enabled: true,
-    endpoint: "/api/identity-chrome",
-    storage: localStore(),
-  });
+  if (shared === null) {
+    forgetOldCache();
+    shared = createChromeCore({
+      enabled: true,
+      endpoint: "/api/identity-chrome",
+    });
+  }
   return shared;
 }
 
