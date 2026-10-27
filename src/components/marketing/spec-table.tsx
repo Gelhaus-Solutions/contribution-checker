@@ -38,7 +38,9 @@ export function SpecTable({
             {head.map((h, i) => (
               <TableHead
                 key={i}
-                className="px-3 py-2"
+                // Ink rather than the muted grey, which reads at 4.47:1 on this
+                // tinted row (WCAG 1.4.3, OTHER-8).
+                className="px-3 py-2 text-foreground"
                 style={widths?.[i] ? { width: widths[i] } : undefined}
               >
                 {h}

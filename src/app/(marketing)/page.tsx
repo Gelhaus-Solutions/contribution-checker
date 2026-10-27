@@ -212,7 +212,7 @@ export default async function Home() {
           the DCO check.{" "}
           <Link
             href="/how-it-works#precedence"
-            className="text-primary underline-offset-2 hover:underline"
+            className="text-primary underline underline-offset-2"
           >
             The full pipeline
           </Link>
