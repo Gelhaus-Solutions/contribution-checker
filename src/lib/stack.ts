@@ -48,6 +48,13 @@ export function getStackServerApp(): Promise<StackServerApp<true>> {
           afterSignUp: "/welcome",
           afterSignOut: "/",
         },
+        // OFF, both halves, as GAdvisory has it: the SDK otherwise records a
+        // replay of every visit and its product analytics, for an anonymous
+        // user too, and posts them to the Hexclave server. The privacy notice
+        // promises a recording only after a yes, and that one is Sentry's.
+        // This app reaches the browser through <StackProvider>, so setting it
+        // here is what stops the browser recording.
+        analytics: { enabled: false, replays: { enabled: false } },
       });
     })();
   }
