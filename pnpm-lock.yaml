@@ -30,6 +30,9 @@ importers:
       '@ghub/glockdown-sdk':
         specifier: 0.3.0
         version: 0.3.0
+      '@ghub/gmint-sdk':
+        specifier: ^0.2.0
+        version: 0.2.0
       '@ghub/identity-chrome':
         specifier: 0.5.1
         version: 0.5.1(react@19.2.5)
@@ -48,6 +51,9 @@ importers:
       '@octokit/auth-app':
         specifier: ^7.2.1
         version: 7.2.2
+      '@octokit/core':
+        specifier: ^6.1.6
+        version: 6.1.6
       '@octokit/webhooks':
         specifier: ^13.4.4
         version: 13.9.1
@@ -801,6 +807,14 @@ packages:
 
   '@ghub/glockdown-sdk@0.3.0':
     resolution: {integrity: sha512-j4PoZCcw7sCzq6nURzTWTYjDHP2gdL1vr+OqG5iNzoDcycvi/Ij/EKKg8sH2WgjTdIuxjfxC91NNVBs+6ScYCA==}
+    engines: {node: '>=22.0.0'}
+
+  '@ghub/gmint-protocol@0.2.0':
+    resolution: {integrity: sha512-LqeoNQYd4aPErJwvEGxwxipwHx5dTZf9VBXGeAHAePouURm9G8mB0fNuqUjKbKtRcBeQf8JsE+bHPVP3/I+C5w==}
+    engines: {node: '>=22.0.0'}
+
+  '@ghub/gmint-sdk@0.2.0':
+    resolution: {integrity: sha512-6utp5v71GPnV5GWTp6cG5qzxT2+nqlbrq5xgskxg8dBj1BSpmTdkhB2J8SriRcViL36UnEnF2KXI9wXa/pBhPw==}
     engines: {node: '>=22.0.0'}
 
   '@ghub/identity-chrome@0.5.1':
@@ -7068,6 +7082,12 @@ snapshots:
   '@floating-ui/utils@0.2.11': {}
 
   '@ghub/glockdown-sdk@0.3.0': {}
+
+  '@ghub/gmint-protocol@0.2.0': {}
+
+  '@ghub/gmint-sdk@0.2.0':
+    dependencies:
+      '@ghub/gmint-protocol': 0.2.0
 
   '@ghub/identity-chrome@0.5.1(react@19.2.5)':
     optionalDependencies:

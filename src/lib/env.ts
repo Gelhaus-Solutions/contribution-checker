@@ -72,6 +72,33 @@ const schema = z.object({
   GITHUB_APP_CLIENT_ID: z.string().optional(),
   GITHUB_APP_CLIENT_SECRET: z.string().optional(),
 
+  // GMint, the broker that holds GitHub App private keys (E11-03,
+  // src/lib/github/gmint-tokens.ts). For a GitHub App whose numeric id is in
+  // GMINT_GITHUB_APP_IDS (comma-separated), every installation token comes from
+  // GMint, asked for exactly what one call needs, and this app never reads
+  // that App's private key, so GITHUB_APP_PRIVATE_KEY may be left unset.
+  // Blank, which is every self-hosted install, keeps minting with the App's own
+  // key.
+  //
+  // The rest is this app's identity at GMint (RB-08): GMint's client listener,
+  // its instance name, the client id (gmint://<namespace>/<workload>), the
+  // request-signing key's kid and PKCS8 file, the TLS certificate and key (the
+  // certificate renews itself, so its file must be writable), the GMint root,
+  // GMint's response keys as comma-separated kid=b64url pairs, and the durable
+  // sequence file. Without all of them a listed App mints nothing: it never
+  // falls back to its own key.
+  GMINT_GITHUB_APP_IDS: z.string().optional(),
+  GMINT_URL: optionalUrl,
+  GMINT_INSTANCE: z.string().optional(),
+  GMINT_CLIENT_ID: z.string().optional(),
+  GMINT_SIGN_KID: z.string().optional(),
+  GMINT_SIGN_KEY_FILE: z.string().optional(),
+  GMINT_TLS_CERT_FILE: z.string().optional(),
+  GMINT_TLS_KEY_FILE: z.string().optional(),
+  GMINT_CA_FILE: z.string().optional(),
+  GMINT_SERVER_KEYS: z.string().optional(),
+  GMINT_SEQUENCE_FILE: z.string().optional(),
+
   SUPER_ADMINS: z.string().optional(),
   PROJECT_CREATORS: z.string().optional(),
 
@@ -321,6 +348,46 @@ const oauthConfigured =
   (presentInEnvOrVault("AUTH_GITHUB_SECRET") ||
     presentInEnvOrVault("GITHUB_APP_CLIENT_SECRET"));
 
+// GMint (E11-03). `client` is undefined unless every setting is present, and a
+// listed App then mints nothing rather than reaching for its own key.
+const gmintAppIds = csv(raw.GMINT_GITHUB_APP_IDS);
+const gmintClient =
+  raw.GMINT_URL &&
+  raw.GMINT_INSTANCE &&
+  raw.GMINT_CLIENT_ID &&
+  raw.GMINT_SIGN_KID &&
+  raw.GMINT_SIGN_KEY_FILE &&
+  raw.GMINT_TLS_CERT_FILE &&
+  raw.GMINT_TLS_KEY_FILE &&
+  raw.GMINT_CA_FILE &&
+  raw.GMINT_SERVER_KEYS &&
+  raw.GMINT_SEQUENCE_FILE
+    ? {
+        url: raw.GMINT_URL,
+        instance: raw.GMINT_INSTANCE,
+        clientId: raw.GMINT_CLIENT_ID,
+        signingKey: { kid: raw.GMINT_SIGN_KID, file: raw.GMINT_SIGN_KEY_FILE },
+        tls: {
+          certFile: raw.GMINT_TLS_CERT_FILE,
+          keyFile: raw.GMINT_TLS_KEY_FILE,
+          caFile: raw.GMINT_CA_FILE,
+        },
+        serverKeys: Object.fromEntries(
+          csv(raw.GMINT_SERVER_KEYS).map((pair) => {
+            const at = pair.indexOf("=");
+            return [pair.slice(0, at), pair.slice(at + 1)];
+          }),
+        ),
+        sequenceFile: raw.GMINT_SEQUENCE_FILE,
+      }
+    : undefined;
+// Whether GMint holds the key of the App this instance runs as. The App id may
+// live in Vault, which this module cannot await, so with it only there any
+// listed id counts; getInstallationOctokit decides on the resolved id.
+const gmintHoldsAppKey =
+  gmintAppIds.length > 0 &&
+  (!raw.GITHUB_APP_ID || gmintAppIds.includes(raw.GITHUB_APP_ID.trim()));
+
 export const env = {
   ...raw,
   termsAcceptStep:
@@ -352,10 +419,12 @@ export const env = {
     !!raw.STACK_PUBLISHABLE_CLIENT_KEY &&
     presentInEnvOrVault("STACK_SECRET_SERVER_KEY") &&
     presentInEnvOrVault("STACK_SUPER_SECRET_ADMIN_KEY"),
+  // An App whose key GMint holds needs no private key here.
   githubAppConfigured:
     presentInEnvOrVault("GITHUB_APP_ID") &&
-    presentInEnvOrVault("GITHUB_APP_PRIVATE_KEY") &&
+    (presentInEnvOrVault("GITHUB_APP_PRIVATE_KEY") || gmintHoldsAppKey) &&
     presentInEnvOrVault("GITHUB_APP_WEBHOOK_SECRET"),
+  gmint: { appIds: gmintAppIds, client: gmintClient },
   smtpConfigured:
     presentInEnvOrVault("SMTP_HOST") && presentInEnvOrVault("SMTP_FROM"),
   // The AI features need nothing but the key: model ids have defaults, and the

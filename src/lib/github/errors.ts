@@ -90,6 +90,19 @@ const PERMANENT_STATUSES = new Set([401, 404, 410, 422]);
  */
 export function classifyGithubError(e: unknown): unknown {
   if (e instanceof ApplicationFailure) return e; // already classified upstream
+  // A token GMint would not give (src/lib/github/gmint-tokens.ts). GMint's own
+  // answer says whether asking again can help; a refusal, a lockdown and an
+  // answer that failed verification cannot, so they stop here instead of
+  // spending eight attempts. Matched by name so this module stays free of the
+  // SDK.
+  if (e instanceof Error && e.name === "GmintRefusal") {
+    const refusal = e as Error & { code?: string; retryable?: boolean };
+    if (refusal.retryable) return e;
+    return ApplicationFailure.nonRetryable(
+      `gmint ${refusal.code ?? "refused"}: ${e.message}`,
+      "GmintRefused"
+    );
+  }
   // Transient, and the one case where we know when a retry can work: not
   // before the window resets. Without this the SDK's own schedule (2s doubling
   // to 2 minutes, 8 attempts) gives up long before an hourly quota comes back.
