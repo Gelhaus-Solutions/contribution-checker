@@ -32,7 +32,7 @@ RUN git config --global --add safe.directory /app \
     && echo "Worker Build ID: $(cat /app/.build-id)"
 ENV NEXT_TELEMETRY_DISABLED=1
 # Persist Next.js's webpack cache across builds for much faster rebuilds.
-# build:worker bundles the Temporal worker to dist/worker.mjs (esbuild) — a
+# build:worker bundles the Temporal worker to dist/worker.mjs (esbuild), a
 # single self-contained ESM module, so the runtime needs no tsx/path-alias
 # resolution and avoids the Node 24 require(esm) cycle the raw .ts graph hits.
 RUN --mount=type=cache,id=next-cache,target=/app/.next/cache \
