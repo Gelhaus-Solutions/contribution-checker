@@ -94,7 +94,11 @@ export async function onClaCoverageChanged(args: {
   let rechecked = 0;
   for (const check of checks) {
     if (check.repo.installationId == null) continue;
-    const ref = repoRef(check.repo.fullName, check.repo.installationId);
+    const ref = repoRef(
+      check.repo.fullName,
+      check.repo.installationId,
+      check.repo.projectId,
+    );
     try {
       const decision: PrDecision = await decideForRepo({
         repo: check.repo,
@@ -251,7 +255,11 @@ export async function onClaCoverageRevoked(args: {
   let regated = 0;
   for (const check of checks) {
     if (check.repo.installationId == null) continue;
-    const ref = repoRef(check.repo.fullName, check.repo.installationId);
+    const ref = repoRef(
+      check.repo.fullName,
+      check.repo.installationId,
+      check.repo.projectId,
+    );
     try {
       const decision: PrDecision = await decideForRepo({
         repo: check.repo,
@@ -391,7 +399,11 @@ export async function reapplyClaGateForApprovedAuthor(args: {
   let gated = 0;
   for (const check of checks) {
     if (check.repo.installationId == null) continue;
-    const ref = repoRef(check.repo.fullName, check.repo.installationId);
+    const ref = repoRef(
+      check.repo.fullName,
+      check.repo.installationId,
+      check.repo.projectId,
+    );
     try {
       const decision: PrDecision = await decideForRepo({
         repo: check.repo,
@@ -542,7 +554,9 @@ export async function notifyPendingApplicantsOnPrs(args: {
       prNumber: true,
       authorGhId: true,
       authorGhLogin: true,
-      repo: { select: { fullName: true, installationId: true } },
+      repo: {
+        select: { fullName: true, installationId: true, projectId: true },
+      },
     },
     take: 200,
   });
@@ -558,7 +572,11 @@ export async function notifyPendingApplicantsOnPrs(args: {
   let commented = 0;
   for (const check of checks) {
     if (check.repo.installationId == null) continue;
-    const ref = repoRef(check.repo.fullName, check.repo.installationId);
+    const ref = repoRef(
+      check.repo.fullName,
+      check.repo.installationId,
+      check.repo.projectId,
+    );
     try {
       // Dedup: don't re-ping a PR that already carries an awaiting-review note.
       if (

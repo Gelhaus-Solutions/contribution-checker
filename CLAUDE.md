@@ -528,6 +528,23 @@ GitHub request budget (`src/lib/github/budget.ts`):
   remaining item is refused and logged one by one (`reconcileProjectClosedPrs`).
 - GraphQL is used where it collapses calls: the quality account snapshot is one
   query instead of a user lookup plus up to three searches, falling back to REST.
+
+Installation tokens from GMint (`src/lib/github/gmint-tokens.ts`, E11-03):
+- For an App whose id is in `GMINT_GITHUB_APP_IDS`, GMint holds the private key
+  and mints each token for one signed grant, `<purpose>-<installation id>`, with
+  a ceiling of repositories and permissions. `getInstallationOctokit(id, need,
+  tenant)` therefore takes the need (purpose, repositories by name, permissions;
+  `metadata: read` is added) and the tenant (`project:<id>`, or `instance`),
+  and the token carries exactly that. Any other App mints with its own key and
+  the need is not used. The needs of `pr-actions.ts` are its `PR_*`, `PULLS_*`,
+  `CONTENTS_*` and `CHECKS_*` constants; `RepoRef` carries the tenant.
+- Purposes: `pr-actions`, `check-run`, `staging`, `quality`, `cla`,
+  `repo-link` (org-scoped, the repo link page). A new purpose, or a wider
+  permission, is a new GMint policy before it works.
+- No App JWT for such an App: no `getGitHubApp()`, no `GET /app/...`. The
+  permission feature-detects (`installationHasChecksWrite`/`ContentsWrite`) ask
+  GMint for the token the publish will use instead. Tokens are reused while
+  more than 5 minutes are left; a GitHub 401 forgets the installation's.
   A refused request there propagates rather than caching an empty snapshot.
 
 GitHub side effects (all Octokit calls):
@@ -596,7 +613,8 @@ Audit, notifications, jobs:
 - **JSON columns are strings.** Always parse via the helpers in
   `src/lib/quality/registry.ts` (or write a Zod schema in
   `src/lib/*/schema.ts`). Never `JSON.parse` and trust the result.
-- **Octokit calls** go through `getInstallationOctokit(installationId)`. When
+- **Octokit calls** go through `getInstallationOctokit(installationId, need,
+  tenant)`, naming exactly what the call needs (see GMint above). When
   rate-limit-sensitive, cache results following the LRU pattern in
   `collaborators.ts`.
 - **Side effects on PRs** (close/reopen/label/comment/check) should be
@@ -789,7 +807,7 @@ id only.
   resolve if the memo is ever unavailable, so it cannot report a signed-in user
   as signed out.
 - Org roles (super-admin, can-create-project) are **Hexclave project
-  permissions** (`super_admin` / `create_project`) — Hexclave is the source of
+  permissions** (`super_admin` / `create_project`); Hexclave is the source of
   truth. `User.isSuperAdmin` / `User.canCreateProj` are mirror cache columns
   read on the hot path; reconciled on sign-in from `SUPER_ADMINS`/
   `PROJECT_CREATORS` (additive) and managed via `/admin/allowlist`, which

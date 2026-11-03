@@ -30,7 +30,12 @@ vi.mock("@/lib/github/pr-actions", () => ({
 
 import { syncQaLabels } from "@/lib/qa/labels";
 
-const REF = { owner: "acme", repo: "app", installationId: 1 };
+const REF = {
+  owner: "acme",
+  repo: "app",
+  installationId: 1,
+  tenant: "project:p1" as const,
+};
 const ARGS = {
   ref: REF,
   batchId: "batch1",

@@ -149,7 +149,9 @@ async function loadPayload(input: AiRunInput): Promise<Loaded | null> {
           labels: true,
           batch: {
             select: {
-              repo: { select: { fullName: true, installationId: true } },
+              repo: {
+                select: { fullName: true, installationId: true, projectId: true },
+              },
             },
           },
         },
@@ -161,9 +163,9 @@ async function loadPayload(input: AiRunInput): Promise<Loaded | null> {
       // discovering what the database already knew.
       if (item.qaSteps && item.qaSteps.trim().length > 0) return null;
 
-      const { fullName, installationId } = item.batch.repo;
+      const { fullName, installationId, projectId } = item.batch.repo;
       if (!installationId) return null;
-      const ref = repoRef(fullName, installationId);
+      const ref = repoRef(fullName, installationId, projectId);
 
       // Two GitHub calls, on an explicit button press, for one PR. Deliberately
       // not folded into the reconcile: that runs on every push across the whole
@@ -192,11 +194,17 @@ async function loadPayload(input: AiRunInput): Promise<Loaded | null> {
         select: {
           id: true,
           prNumber: true,
-          repo: { select: { fullName: true, installationId: true } },
+          repo: {
+            select: { fullName: true, installationId: true, projectId: true },
+          },
         },
       });
       if (!check?.repo.installationId) return null;
-      const ref = repoRef(check.repo.fullName, check.repo.installationId);
+      const ref = repoRef(
+        check.repo.fullName,
+        check.repo.installationId,
+        check.repo.projectId,
+      );
 
       const [pr, files] = await Promise.all([
         getPullRequest(ref, check.prNumber),
@@ -250,7 +258,11 @@ async function loadPayload(input: AiRunInput): Promise<Loaded | null> {
       // than reusing the reconcile's copy because that runs on a push and this
       // runs on a button, and threading a large in-memory diff between them
       // would mean putting it in workflow history.
-      const ref = repoRef(batch.repo.fullName, batch.repo.installationId);
+      const ref = repoRef(
+        batch.repo.fullName,
+        batch.repo.installationId,
+        batch.repo.project.id,
+      );
       const cmp = await compareBranches(ref, base, cfg.stagingBranch);
       if (!cmp) return null;
 

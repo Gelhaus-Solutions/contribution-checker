@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { requireProjectRole } from "@/lib/authz";
 import { getInstallationOctokit } from "@/lib/github/app";
+import { projectTenant } from "@/lib/github/gmint-tokens";
 import { prisma } from "@/lib/db";
 import { env } from "@/lib/env";
 import {
@@ -38,7 +39,14 @@ export default async function LinkRepos({
   }
 
   const installationId = Number(installation_id);
-  const octokit = await getInstallationOctokit(installationId);
+  // Which repositories the installation reaches is the question, so none can
+  // be named: an org-scoped token with `metadata: read` alone, enough to list
+  // them and to read nothing else.
+  const octokit = await getInstallationOctokit(
+    installationId,
+    { purpose: "repo-link", permissions: {} },
+    projectTenant(id),
+  );
   const { data } = await octokit.request(
     "GET /installation/repositories",
     { per_page: 100 }

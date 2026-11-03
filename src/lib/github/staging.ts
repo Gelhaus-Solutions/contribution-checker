@@ -828,7 +828,7 @@ async function ensureStagingBranch(args: {
   // Feature-detect before writing: installations created before this feature
   // hold Contents: Read, and probing once every 5 minutes beats a 403 on every
   // single event until the owner accepts the upgrade.
-  if (!(await installationHasContentsWrite(args.ref.installationId))) {
+  if (!(await installationHasContentsWrite(args.ref))) {
     logger.warn(
       { ref: args.ref, stagingBranch: args.stagingBranch },
       "staging branch create skipped: installation missing contents:write",
@@ -961,7 +961,7 @@ export async function applyStagingRouting(ctx: {
       };
     }
 
-    const ref = repoRef(repo.fullName, repo.installationId);
+    const ref = repoRef(repo.fullName, repo.installationId, project.id);
     const defaultBranch = await resolveDefaultBranch({
       repoId: repo.id,
       ref,
@@ -1248,7 +1248,7 @@ async function syncStagingWithDefault(args: {
   aheadBy: number;
 }): Promise<StagingSyncResult> {
   try {
-    if (!(await installationHasContentsWrite(args.ref.installationId))) {
+    if (!(await installationHasContentsWrite(args.ref))) {
       logger.warn(
         { ref: args.ref, stagingBranch: args.stagingBranch },
         "staging sync skipped: installation missing contents:write",
@@ -1547,7 +1547,7 @@ export async function reconcileStagingBatch(args: {
     // PR is on". The two halves are gated individually below.
     if (!cfg.anyEnabled) return NOTHING_DONE;
 
-    const ref = repoRef(repo.fullName, repo.installationId);
+    const ref = repoRef(repo.fullName, repo.installationId, project.id);
     const defaultBranch = await resolveDefaultBranch({
       repoId: repo.id,
       ref,

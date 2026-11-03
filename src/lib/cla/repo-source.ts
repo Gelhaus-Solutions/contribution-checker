@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { prisma } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { getInstallationOctokit } from "@/lib/github/app";
+import { projectTenant } from "@/lib/github/gmint-tokens";
 import { recordAudit } from "@/lib/audit";
 import { notifyProjectReviewers } from "@/lib/notifications/inbox";
 import { storeFor } from "@/lib/cla/store";
@@ -15,6 +16,8 @@ import { onClaCoverageRevoked } from "@/lib/cla/post-sign";
  */
 export async function fetchRepoFile(args: {
   installationId: number;
+  /** The project whose CLA this is: GMint's tenant. */
+  projectId: string;
   fullName: string;
   path: string;
   ref?: string | null;
@@ -22,7 +25,15 @@ export async function fetchRepoFile(args: {
   const [owner, repo] = args.fullName.split("/");
   if (!owner || !repo) return null;
   try {
-    const octokit = await getInstallationOctokit(args.installationId);
+    const octokit = await getInstallationOctokit(
+      args.installationId,
+      {
+        purpose: "cla",
+        repositories: [repo],
+        permissions: { contents: "read" },
+      },
+      projectTenant(args.projectId),
+    );
     const res = await octokit.request(
       "GET /repos/{owner}/{repo}/contents/{path}",
       {
@@ -133,6 +144,7 @@ async function detectAndApply(args: {
 
   const fetched = await fetchRepoFile({
     installationId: repo.installationId,
+    projectId: project.id,
     fullName: repo.fullName,
     path: v.sourcePath,
     ref: v.sourceRef,

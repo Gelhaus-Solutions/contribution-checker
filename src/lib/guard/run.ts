@@ -183,7 +183,7 @@ async function runGuardInner(args: {
     return DID_NOT_RUN;
   }
 
-  const ref = repoRef(args.repoFullName, args.installationId);
+  const ref = repoRef(args.repoFullName, args.installationId, project.id);
 
   // A label the bot did not witness an approver adding is worth nothing, and
   // one added by a non-approver is taken straight back off: leaving it there

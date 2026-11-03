@@ -206,6 +206,7 @@ export async function runQualityForPrCheck(args: {
 
   const fetched = await fetchPrContext({
     installationId: args.installationId,
+    projectId: args.project.id,
     owner,
     repo,
     prNumber: args.prNumber,
@@ -299,6 +300,7 @@ export async function runQualityForPrCheck(args: {
       try {
         await postQualityWarningComment({
           installationId: args.installationId,
+          projectId: args.project.id,
           repoFullName: args.repoFullName,
           prNumber: args.prNumber,
           summary,
@@ -331,13 +333,14 @@ export async function runQualityForPrCheck(args: {
 
 async function postQualityWarningComment(args: {
   installationId: number;
+  projectId: string;
   repoFullName: string;
   prNumber: number;
   summary: ScoreSummary;
   signals: SignalsRaw;
   config: Record<string, HeuristicSetting>;
 }): Promise<void> {
-  const ref = repoRef(args.repoFullName, args.installationId);
+  const ref = repoRef(args.repoFullName, args.installationId, args.projectId);
   // Only signals about the pull request itself are named in public. Signals
   // about the author's account (username, profile, email) and the AI verdict
   // are profiling outputs about a person and stay on the maintainers'

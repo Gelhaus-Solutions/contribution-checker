@@ -19,6 +19,7 @@ import {
   setLabels,
   repoRef,
 } from "@/lib/github/pr-actions";
+import { projectTenant } from "@/lib/github/gmint-tokens";
 import {
   publishDecisionCheck,
   publishClaCheck,
@@ -122,12 +123,21 @@ async function attachInstallationToManualRepos(args: {
  */
 async function checkDco(args: {
   installationId: number;
+  projectId: string;
   owner: string;
   repo: string;
   prNumber: number;
 }): Promise<{ ok: boolean }> {
   try {
-    const octokit = await getInstallationOctokit(args.installationId);
+    const octokit = await getInstallationOctokit(
+      args.installationId,
+      {
+        purpose: "pr-actions",
+        repositories: [args.repo],
+        permissions: { pull_requests: "read" },
+      },
+      projectTenant(args.projectId),
+    );
     const commits: { sha: string; message: string }[] = [];
     const COMMIT_PAGE_SIZE = 100;
     const COMMIT_PAGE_LIMIT = 3; // 300 commits max (mirrors quality/fetch.ts)
@@ -177,6 +187,7 @@ async function applyDcoGate(args: {
   decision: PrDecision & { repoId?: string; projectId?: string };
   dcoEnabled: boolean;
   installationId: number;
+  projectId: string;
   repoFullName: string;
   prNumber: number;
 }): Promise<PrDecision & { repoId?: string; projectId?: string }> {
@@ -194,6 +205,7 @@ async function applyDcoGate(args: {
   if (!owner || !name) return decision;
   const dco = await checkDco({
     installationId: args.installationId,
+    projectId: args.projectId,
     owner,
     repo: name,
     prNumber: args.prNumber,
@@ -470,13 +482,14 @@ async function postDecisionSideEffects(args: {
 
 async function ensureProjectLabels(args: {
   installationId: number;
+  projectId: string;
   fullName: string;
   pending: string;
   approved: string;
   denied: string;
   evaluate: string;
 }): Promise<void> {
-  const ref = repoRef(args.fullName, args.installationId);
+  const ref = repoRef(args.fullName, args.installationId, args.projectId);
   await Promise.all([
     ensureLabel(ref, args.pending, "fbca04", "Awaiting application review"),
     ensureLabel(ref, args.approved, "0e8a16", "Approved contributor"),
@@ -957,7 +970,7 @@ export async function reGatePr(args: {
 }): Promise<void> {
   const repo = await prisma.repo.findUnique({
     where: { ghRepoId: args.ghRepoId },
-    select: { fullName: true, installationId: true },
+    select: { fullName: true, installationId: true, projectId: true },
   });
   if (!repo || repo.installationId == null) return;
   const [owner, name] = repo.fullName.split("/");
@@ -971,7 +984,15 @@ export async function reGatePr(args: {
     labels?: Array<{ name?: string }>;
   };
   try {
-    const octokit = await getInstallationOctokit(repo.installationId);
+    const octokit = await getInstallationOctokit(
+      repo.installationId,
+      {
+        purpose: "pr-actions",
+        repositories: [name],
+        permissions: { pull_requests: "read" },
+      },
+      projectTenant(repo.projectId),
+    );
     const res = await octokit.request(
       "GET /repos/{owner}/{repo}/pulls/{pull_number}",
       { owner, repo: name, pull_number: args.prNumber },
@@ -1111,6 +1132,7 @@ export async function convergePr(ctx: {
     decision,
     dcoEnabled: project.dcoEnabled,
     installationId,
+    projectId: project.id,
     repoFullName,
     prNumber,
   });
@@ -1167,7 +1189,7 @@ export async function convergePr(ctx: {
     // belong to the previous SHA and can't be moved (GitHub's check-run update
     // ignores head_sha), so clear them: both publishers must create fresh runs
     // on the new SHA. Without this they'd PATCH the old runs and leave the
-    // required contexts "Expected — Waiting for status to be reported".
+    // required contexts "Expected - Waiting for status to be reported".
     const shaAdvanced =
       !!headSha && prior?.headSha != null && prior.headSha !== headSha;
     const prCheck = await prisma.prCheck.upsert({
@@ -1196,13 +1218,14 @@ export async function convergePr(ctx: {
     prCheckId = prCheck.id;
   }
 
-  const ref = repoRef(repoFullName, installationId);
+  const ref = repoRef(repoFullName, installationId, project.id);
   const applyUrl = `${env.PUBLIC_BASE_URL.replace(/\/$/, "")}/p/${project.slug}`;
   const claUrl = `${applyUrl}/cla`;
 
   if (project.labelsEnabled) {
     await ensureProjectLabels({
       installationId,
+      projectId: project.id,
       fullName: repoFullName,
       pending: project.labelPending,
       approved: project.labelApproved,
@@ -1621,7 +1644,7 @@ async function publishMergeGroupGuardCheck(args: {
   const cfg = resolveGuardConfig(project);
   if (!cfg.enabled) return;
 
-  const checkProject = { checksEnabled: project.checksEnabled };
+  const checkProject = { id: project.id, checksEnabled: project.checksEnabled };
   const defaultBranch = repo.defaultBranch ?? "";
   const baseRef = shortBranchName(args.baseRef);
 
@@ -1669,7 +1692,7 @@ async function publishMergeGroupGuardCheck(args: {
  * builds a temporary `gh-readonly-queue/...` branch with a fresh head commit and
  * asks (action `checks_requested`) for required checks to be reported against
  * THAT commit. The pull_request-driven checks only ever land on the PR head SHA,
- * so without this handler the queue waits forever ("Expected — Waiting for
+ * so without this handler the queue waits forever ("Expected - Waiting for
  * status to be reported"). Here we re-evaluate each PR in the group and
  * republish both check runs on the merge-group head SHA.
  *
@@ -1779,9 +1802,17 @@ export async function handleMergeGroupEvent(payload: MergeGroupPayload) {
     let id = prior?.authorGhId ?? null;
     if (login == null || id == null) {
       try {
-        const octokit = await getInstallationOctokit(installationId);
         const [owner, name] = repoFullName.split("/");
         if (owner && name) {
+          const octokit = await getInstallationOctokit(
+            installationId,
+            {
+              purpose: "pr-actions",
+              repositories: [name],
+              permissions: { pull_requests: "read" },
+            },
+            projectTenant(project.id),
+          );
           const res = await octokit.request(
             "GET /repos/{owner}/{repo}/pulls/{pull_number}",
             { owner, repo: name, pull_number: prNumber },
@@ -1808,6 +1839,7 @@ export async function handleMergeGroupEvent(payload: MergeGroupPayload) {
       decision,
       dcoEnabled: project.dcoEnabled,
       installationId,
+      projectId: project.id,
       repoFullName,
       prNumber,
     });

@@ -337,6 +337,7 @@ export async function publishClaVersion(formData: FormData) {
     }
     const fetched = await fetchRepoFile({
       installationId: repo.installationId,
+      projectId: parsed.projectId,
       fullName: repo.fullName,
       path: parsed.sourcePath,
       ref: parsed.sourceRef,
@@ -606,6 +607,7 @@ export async function approvePendingChange(formData: FormData) {
   }
   const head = await fetchRepoFile({
     installationId: repo.installationId,
+    projectId: parsed.projectId,
     fullName: repo.fullName,
     path: pending.sourcePath,
     ref: pending.sourceRef,
@@ -775,6 +777,7 @@ export async function fetchClaRepoSource(
 
   const fetched = await fetchRepoFile({
     installationId: repo.installationId,
+    projectId,
     fullName: repo.fullName,
     path: version.sourcePath,
     ref: version.sourceRef,
@@ -821,6 +824,7 @@ export async function previewRepoFile(args: {
   }
   const fetched = await fetchRepoFile({
     installationId: repo.installationId,
+    projectId: args.projectId,
     fullName: repo.fullName,
     path: args.path,
     ref: args.ref,

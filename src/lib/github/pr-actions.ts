@@ -1,9 +1,69 @@
 import * as Sentry from "@sentry/nextjs";
-import { getInstallationOctokit } from "@/lib/github/app";
+import {
+  appTokensFromGmint,
+  getGitHubApp,
+  getInstallationOctokit,
+} from "@/lib/github/app";
+import {
+  projectTenant,
+  type GithubPermissions,
+  type GithubTenant,
+  type GmintPurpose,
+} from "@/lib/github/gmint-tokens";
 import { logger } from "@/lib/logger";
 import type { CompareFile } from "@/lib/github/staging-digest";
 
-export type RepoRef = { owner: string; repo: string; installationId: number };
+/**
+ * One repository the bot acts on, and who for: `tenant` is the project the work
+ * is for (D-42), which GMint checks against the grant's tenants.
+ */
+export type RepoRef = {
+  owner: string;
+  repo: string;
+  installationId: number;
+  tenant: GithubTenant;
+};
+
+/*
+ * What each call below asks GitHub for (E11-03). For an App whose key GMint
+ * holds, the token is minted for exactly this on the one repository; for any
+ * other App it is the installation's own token and these are not used.
+ * `metadata: read` comes with every token. GMint's grant per purpose and
+ * installation must allow the widest of them:
+ *
+ *   pr-actions  pull_requests: write, issues: write
+ *   staging     contents: write, pull_requests: write
+ *   check-run   checks: write
+ *
+ * The issue-comment and label endpoints accept either `issues` or
+ * `pull_requests`; both are asked, at the same level, so every write on a PR
+ * shares one token and works whichever GitHub checks.
+ */
+const PR_READ: GithubPermissions = { pull_requests: "read" };
+const PR_WRITE: GithubPermissions = { pull_requests: "write", issues: "write" };
+const COMMENTS_READ: GithubPermissions = {
+  pull_requests: "read",
+  issues: "read",
+};
+const PULLS_WRITE: GithubPermissions = { pull_requests: "write" };
+const CONTENTS_READ: GithubPermissions = { contents: "read" };
+const CONTENTS_WRITE: GithubPermissions = { contents: "write" };
+const METADATA_ONLY: GithubPermissions = {};
+const CHECKS_READ: GithubPermissions = { checks: "read" };
+const CHECKS_WRITE: GithubPermissions = { checks: "write" };
+
+/** The installation Octokit for one call on `ref`'s repository. */
+function octokitFor(
+  ref: RepoRef,
+  purpose: GmintPurpose,
+  permissions: GithubPermissions,
+) {
+  return getInstallationOctokit(
+    ref.installationId,
+    { purpose, repositories: [ref.repo], permissions },
+    ref.tenant,
+  );
+}
 
 function recordGithubMetric(
   op: string,
@@ -28,9 +88,14 @@ function splitFullName(fullName: string): { owner: string; repo: string } {
   return { owner, repo };
 }
 
-export function repoRef(fullName: string, installationId: number): RepoRef {
+/** The repository `fullName` on `installationId`, acted on for `projectId`. */
+export function repoRef(
+  fullName: string,
+  installationId: number,
+  projectId: string,
+): RepoRef {
   const { owner, repo } = splitFullName(fullName);
-  return { owner, repo, installationId };
+  return { owner, repo, installationId, tenant: projectTenant(projectId) };
 }
 
 function statusOf(e: unknown): number | undefined {
@@ -63,7 +128,7 @@ export async function closePullRequest(
   prNumber: number,
   comment?: string,
 ): Promise<void> {
-  const octokit = await getInstallationOctokit(ref.installationId);
+  const octokit = await octokitFor(ref, "pr-actions", PR_WRITE);
   if (comment) {
     await octokit
       .request("POST /repos/{owner}/{repo}/issues/{issue_number}/comments", {
@@ -97,7 +162,7 @@ export async function reopenPullRequest(
   prNumber: number,
   comment?: string,
 ): Promise<void> {
-  const octokit = await getInstallationOctokit(ref.installationId);
+  const octokit = await octokitFor(ref, "pr-actions", PR_WRITE);
   try {
     await octokit.request("PATCH /repos/{owner}/{repo}/pulls/{pull_number}", {
       owner: ref.owner,
@@ -185,7 +250,7 @@ export async function setPullRequestBase(
   prNumber: number,
   base: string,
 ): Promise<void> {
-  const octokit = await getInstallationOctokit(ref.installationId);
+  const octokit = await octokitFor(ref, "staging", PULLS_WRITE);
   try {
     await octokit.request("PATCH /repos/{owner}/{repo}/pulls/{pull_number}", {
       owner: ref.owner,
@@ -205,7 +270,7 @@ export async function getPullRequest(
   ref: RepoRef,
   prNumber: number,
 ): Promise<PrSummary | null> {
-  const octokit = await getInstallationOctokit(ref.installationId);
+  const octokit = await octokitFor(ref, "pr-actions", PR_READ);
   try {
     const res = await octokit.request(
       "GET /repos/{owner}/{repo}/pulls/{pull_number}",
@@ -249,7 +314,7 @@ export async function listPullRequestFiles(
   prNumber: number,
   opts?: { pageLimit?: number },
 ): Promise<{ files: PrFileSummary[]; truncated: boolean } | null> {
-  const octokit = await getInstallationOctokit(ref.installationId);
+  const octokit = await octokitFor(ref, "pr-actions", PR_READ);
   const pageLimit = Math.max(1, opts?.pageLimit ?? 1);
   const out: PrFileSummary[] = [];
   try {
@@ -320,7 +385,7 @@ export async function listPullRequestReviews(
   ref: RepoRef,
   prNumber: number,
 ): Promise<PrReviewSummary[]> {
-  const octokit = await getInstallationOctokit(ref.installationId);
+  const octokit = await octokitFor(ref, "pr-actions", PR_READ);
   const effective = new Map<string, PrReviewSummary>();
   try {
     for (let page = 1; page <= PR_PAGE_LIMIT; page++) {
@@ -386,7 +451,7 @@ export async function listPullRequests(
   ref: RepoRef,
   opts: { base?: string; head?: string; state?: "open" | "closed" | "all" },
 ): Promise<PrSummary[]> {
-  const octokit = await getInstallationOctokit(ref.installationId);
+  const octokit = await octokitFor(ref, "staging", PR_READ);
   const out: PrSummary[] = [];
   try {
     for (let page = 1; page <= PR_PAGE_LIMIT; page++) {
@@ -426,7 +491,7 @@ export async function createPullRequest(
   ref: RepoRef,
   input: { title: string; head: string; base: string; body: string },
 ): Promise<{ number: number } | { failure: CreatePrFailure }> {
-  const octokit = await getInstallationOctokit(ref.installationId);
+  const octokit = await octokitFor(ref, "staging", PULLS_WRITE);
   try {
     const res = await octokit.request("POST /repos/{owner}/{repo}/pulls", {
       owner: ref.owner,
@@ -460,7 +525,7 @@ export async function updatePullRequestBody(
   prNumber: number,
   body: string,
 ): Promise<void> {
-  const octokit = await getInstallationOctokit(ref.installationId);
+  const octokit = await octokitFor(ref, "staging", PULLS_WRITE);
   try {
     await octokit.request("PATCH /repos/{owner}/{repo}/pulls/{pull_number}", {
       owner: ref.owner,
@@ -543,7 +608,7 @@ export async function compareBranches(
   base: string,
   head: string,
 ): Promise<CompareResult | null> {
-  const octokit = await getInstallationOctokit(ref.installationId);
+  const octokit = await octokitFor(ref, "staging", CONTENTS_READ);
   try {
     const res = await octokit.request(
       "GET /repos/{owner}/{repo}/compare/{basehead}",
@@ -601,7 +666,7 @@ export async function getBranchSha(
   ref: RepoRef,
   branch: string,
 ): Promise<string | null> {
-  const octokit = await getInstallationOctokit(ref.installationId);
+  const octokit = await octokitFor(ref, "staging", CONTENTS_READ);
   try {
     const res = await octokit.request(
       "GET /repos/{owner}/{repo}/git/ref/{ref}",
@@ -626,7 +691,7 @@ export async function createBranch(
   branch: string,
   sha: string,
 ): Promise<boolean> {
-  const octokit = await getInstallationOctokit(ref.installationId);
+  const octokit = await octokitFor(ref, "staging", CONTENTS_WRITE);
   try {
     await octokit.request("POST /repos/{owner}/{repo}/git/refs", {
       owner: ref.owner,
@@ -662,7 +727,7 @@ export async function fastForwardBranch(
   branch: string,
   sha: string,
 ): Promise<boolean> {
-  const octokit = await getInstallationOctokit(ref.installationId);
+  const octokit = await octokitFor(ref, "staging", CONTENTS_WRITE);
   try {
     await octokit.request("PATCH /repos/{owner}/{repo}/git/refs/{ref}", {
       owner: ref.owner,
@@ -695,7 +760,7 @@ export async function mergeBranch(
   head: string,
   commitMessage: string,
 ): Promise<{ merged: boolean } | { failure: MergeFailure }> {
-  const octokit = await getInstallationOctokit(ref.installationId);
+  const octokit = await octokitFor(ref, "staging", CONTENTS_WRITE);
   try {
     const res = await octokit.request("POST /repos/{owner}/{repo}/merges", {
       owner: ref.owner,
@@ -736,7 +801,7 @@ export async function getRepoDefaultBranch(
   const now = Date.now();
   const hit = defaultBranchCache.get(key);
   if (hit && hit.expiresAt > now) return hit.value;
-  const octokit = await getInstallationOctokit(ref.installationId);
+  const octokit = await octokitFor(ref, "staging", METADATA_ONLY);
   try {
     const res = await octokit.request("GET /repos/{owner}/{repo}", {
       owner: ref.owner,
@@ -763,7 +828,7 @@ export async function ensureLabel(
   color = "ededed",
   description?: string,
 ): Promise<void> {
-  const octokit = await getInstallationOctokit(ref.installationId);
+  const octokit = await octokitFor(ref, "pr-actions", PR_WRITE);
   try {
     await octokit.request("GET /repos/{owner}/{repo}/labels/{name}", {
       owner: ref.owner,
@@ -794,7 +859,7 @@ export async function setLabels(
   prNumber: number,
   labels: string[],
 ): Promise<void> {
-  const octokit = await getInstallationOctokit(ref.installationId);
+  const octokit = await octokitFor(ref, "pr-actions", PR_WRITE);
   // Preserve any labels not managed by the bot. The bot only ever owns
   // `contribution:*` labels, so we drop those from the existing set and
   // re-apply the requested ones, leaving user/team labels untouched.
@@ -825,7 +890,7 @@ export async function addLabel(
   prNumber: number,
   label: string,
 ): Promise<void> {
-  const octokit = await getInstallationOctokit(ref.installationId);
+  const octokit = await octokitFor(ref, "pr-actions", PR_WRITE);
   await octokit.request(
     "POST /repos/{owner}/{repo}/issues/{issue_number}/labels",
     {
@@ -842,7 +907,7 @@ export async function removeLabelIfPresent(
   prNumber: number,
   label: string,
 ): Promise<void> {
-  const octokit = await getInstallationOctokit(ref.installationId);
+  const octokit = await octokitFor(ref, "pr-actions", PR_WRITE);
   await octokit
     .request(
       "DELETE /repos/{owner}/{repo}/issues/{issue_number}/labels/{name}",
@@ -863,7 +928,7 @@ export async function commentOnPr(
   prNumber: number,
   body: string,
 ): Promise<void> {
-  const octokit = await getInstallationOctokit(ref.installationId);
+  const octokit = await octokitFor(ref, "pr-actions", PR_WRITE);
   await octokit.request(
     "POST /repos/{owner}/{repo}/issues/{issue_number}/comments",
     {
@@ -888,7 +953,7 @@ export async function prHasCommentContaining(
   needle: string,
 ): Promise<boolean> {
   try {
-    const octokit = await getInstallationOctokit(ref.installationId);
+    const octokit = await octokitFor(ref, "pr-actions", COMMENTS_READ);
     // Single page (up to 100). The DB-state check is the primary dedup; this is
     // a secondary net, so one page is an acceptable bound on API cost.
     const res = await octokit.request(
@@ -945,7 +1010,7 @@ export async function upsertCheckRun(
   input: CheckRunInput,
   existingId: string | null,
 ): Promise<string | null> {
-  const octokit = await getInstallationOctokit(ref.installationId);
+  const octokit = await octokitFor(ref, "check-run", CHECKS_WRITE);
   const body = {
     name: input.name,
     head_sha: input.headSha,
@@ -1075,7 +1140,7 @@ export async function findCheckRunIdByName(
   headSha: string,
   name: string,
 ): Promise<string | null> {
-  const octokit = await getInstallationOctokit(ref.installationId);
+  const octokit = await octokitFor(ref, "check-run", CHECKS_READ);
   try {
     const res = await octokit.request(
       "GET /repos/{owner}/{repo}/commits/{ref}/check-runs",
@@ -1108,6 +1173,9 @@ const PERMS_TTL_MS = 5 * 60 * 1000;
  * The installation's permission map, cached 5 min. One probe backs every
  * permission feature-detect. A failed probe negative-caches an empty map, so
  * callers degrade to "not granted" rather than retrying in a hot loop.
+ *
+ * An App-level call (`GET /app/installations/{id}` takes the App JWT), so only
+ * for an App that mints with its own key; see `gmintGrants` for the other.
  */
 async function installationPermissions(
   installationId: number,
@@ -1115,9 +1183,9 @@ async function installationPermissions(
   const now = Date.now();
   const hit = permsCache.get(installationId);
   if (hit && hit.expiresAt > now) return hit.value;
-  const octokit = await getInstallationOctokit(installationId);
+  const app = await getGitHubApp();
   try {
-    const res = await octokit.request(
+    const res = await app.octokit.request(
       "GET /app/installations/{installation_id}",
       {
         installation_id: installationId,
@@ -1137,15 +1205,57 @@ async function installationPermissions(
   }
 }
 
+/** Until when a GMint feature-detect stays answered "no", per need. */
+const gmintRefusedUntil = new Map<string, number>();
+
+/**
+ * The feature-detect for an App whose key GMint holds, which has no App JWT to
+ * read the permission map with. GitHub mints a token only for permissions the
+ * installation has, and GMint only inside its policy, so getting the very token
+ * the publish will use is the answer; it stays cached for that publish. A
+ * refusal is remembered for 5 min, like a failed probe above.
+ */
+async function gmintGrants(
+  ref: RepoRef,
+  purpose: GmintPurpose,
+  permissions: GithubPermissions,
+): Promise<boolean> {
+  const key = JSON.stringify([
+    ref.installationId,
+    ref.repo,
+    purpose,
+    permissions,
+    ref.tenant,
+  ]);
+  const now = Date.now();
+  const until = gmintRefusedUntil.get(key);
+  if (until && until > now) return false;
+  try {
+    await octokitFor(ref, purpose, permissions);
+    gmintRefusedUntil.delete(key);
+    return true;
+  } catch (e) {
+    logger.warn(
+      { err: e, ref, purpose },
+      "GMint gave no token for the feature-detect",
+    );
+    gmintRefusedUntil.set(key, now + PERMS_TTL_MS);
+    return false;
+  }
+}
+
 /**
  * Feature-detect whether the installation grants `checks:write`. Used to avoid
  * 403s and to silently no-op when permission isn't granted (existing installs
  * that haven't accepted).
  */
 export async function installationHasChecksWrite(
-  installationId: number,
+  ref: RepoRef,
 ): Promise<boolean> {
-  return (await installationPermissions(installationId)).checks === "write";
+  if (await appTokensFromGmint()) {
+    return gmintGrants(ref, "check-run", CHECKS_WRITE);
+  }
+  return (await installationPermissions(ref.installationId)).checks === "write";
 }
 
 /**
@@ -1155,7 +1265,12 @@ export async function installationHasChecksWrite(
  * so this is checked before attempting the write rather than after a 403.
  */
 export async function installationHasContentsWrite(
-  installationId: number,
+  ref: RepoRef,
 ): Promise<boolean> {
-  return (await installationPermissions(installationId)).contents === "write";
+  if (await appTokensFromGmint()) {
+    return gmintGrants(ref, "staging", CONTENTS_WRITE);
+  }
+  return (
+    (await installationPermissions(ref.installationId)).contents === "write"
+  );
 }

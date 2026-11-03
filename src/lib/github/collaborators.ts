@@ -1,4 +1,5 @@
 import { getInstallationOctokit } from "@/lib/github/app";
+import { projectTenant } from "@/lib/github/gmint-tokens";
 
 const cache = new Map<string, { value: boolean; expiresAt: number }>();
 const TTL_MS = 5 * 60 * 1000;
@@ -8,9 +9,13 @@ const TTL_MS = 5 * 60 * 1000;
  * repo+login for 5 minutes. Used to auto-bypass repo collaborators.
  *
  * Note: GitHub returns 204 if the user IS a collaborator and 404 otherwise.
+ * GitHub documents this call under `metadata: read`, which every token
+ * carries, so the GMint need names no other permission.
  */
 export async function isCollaborator(args: {
   installationId: number;
+  /** The project whose gate asks: GMint's tenant. */
+  projectId: string;
   owner: string;
   repo: string;
   ghLogin: string;
@@ -20,7 +25,11 @@ export async function isCollaborator(args: {
   const hit = cache.get(key);
   if (hit && hit.expiresAt > now) return hit.value;
 
-  const octokit = await getInstallationOctokit(args.installationId);
+  const octokit = await getInstallationOctokit(
+    args.installationId,
+    { purpose: "pr-actions", repositories: [args.repo], permissions: {} },
+    projectTenant(args.projectId),
+  );
   let value = false;
   try {
     await octokit.request(

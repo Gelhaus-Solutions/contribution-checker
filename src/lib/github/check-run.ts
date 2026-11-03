@@ -176,7 +176,8 @@ export async function publishDecisionCheck(args: {
 }): Promise<void> {
   if (!args.project.checksEnabled) return;
   if (!args.headSha) return;
-  if (!(await installationHasChecksWrite(args.installationId))) return;
+  const ref = repoRef(args.repoFullName, args.installationId, args.project.id);
+  if (!(await installationHasChecksWrite(ref))) return;
 
   const payload = buildDecisionCheckPayload({
     decision: args.decision,
@@ -197,7 +198,6 @@ export async function publishDecisionCheck(args: {
     }
   }
 
-  const ref = repoRef(args.repoFullName, args.installationId);
   try {
     const newId = await upsertCheckRun(
       ref,
@@ -310,7 +310,8 @@ export async function publishClaCheck(args: {
 }): Promise<void> {
   if (!args.project.checksEnabled) return;
   if (!args.headSha) return;
-  if (!(await installationHasChecksWrite(args.installationId))) return;
+  const ref = repoRef(args.repoFullName, args.installationId, args.project.id);
+  if (!(await installationHasChecksWrite(ref))) return;
 
   const payload = buildClaCheckPayload({
     state: args.state,
@@ -329,7 +330,6 @@ export async function publishClaCheck(args: {
     }
   }
 
-  const ref = repoRef(args.repoFullName, args.installationId);
   try {
     const newId = await upsertCheckRun(
       ref,
@@ -392,7 +392,8 @@ export async function publishQaCheck(args: {
 }): Promise<void> {
   if (!args.project.checksEnabled || !args.project.qaCheckEnabled) return;
   if (!args.headSha) return;
-  if (!(await installationHasChecksWrite(args.installationId))) return;
+  const ref = repoRef(args.repoFullName, args.installationId, args.project.id);
+  if (!(await installationHasChecksWrite(ref))) return;
 
   const payload = buildQaCheckPayload({
     items: args.items,
@@ -415,7 +416,6 @@ export async function publishQaCheck(args: {
       ? batch.qaCheckRunId
       : null;
 
-  const ref = repoRef(args.repoFullName, args.installationId);
   try {
     const newId = await upsertCheckRun(
       ref,
@@ -459,15 +459,15 @@ async function publishStandaloneQaCheck(args: {
   installationId: number;
   repoFullName: string;
   headSha: string | null;
-  project: { checksEnabled: boolean; qaCheckEnabled: boolean };
+  project: { id: string; checksEnabled: boolean; qaCheckEnabled: boolean };
   payload: QaCheckPayload;
   detailsUrl?: string;
 }): Promise<void> {
   if (!args.project.checksEnabled || !args.project.qaCheckEnabled) return;
   if (!args.headSha) return;
-  if (!(await installationHasChecksWrite(args.installationId))) return;
+  const ref = repoRef(args.repoFullName, args.installationId, args.project.id);
+  if (!(await installationHasChecksWrite(ref))) return;
 
-  const ref = repoRef(args.repoFullName, args.installationId);
   try {
     const existingId = await findCheckRunIdByName(
       ref,
@@ -598,7 +598,8 @@ export async function publishGuardCheck(args: {
 }): Promise<void> {
   if (!args.project.checksEnabled) return;
   if (!args.headSha) return;
-  if (!(await installationHasChecksWrite(args.installationId))) return;
+  const ref = repoRef(args.repoFullName, args.installationId, args.project.id);
+  if (!(await installationHasChecksWrite(ref))) return;
 
   const row = args.prCheckId
     ? await prisma.prCheck.findUnique({
@@ -611,7 +612,6 @@ export async function publishGuardCheck(args: {
       ? row.guardCheckRunId
       : null;
 
-  const ref = repoRef(args.repoFullName, args.installationId);
   try {
     const newId = await upsertCheckRun(
       ref,
@@ -663,14 +663,14 @@ export async function publishStandaloneGuardCheck(args: {
   installationId: number;
   repoFullName: string;
   headSha: string | null;
-  project: { checksEnabled: boolean };
+  project: { id: string; checksEnabled: boolean };
   payload: GuardCheckPayload;
 }): Promise<void> {
   if (!args.project.checksEnabled) return;
   if (!args.headSha) return;
-  if (!(await installationHasChecksWrite(args.installationId))) return;
+  const ref = repoRef(args.repoFullName, args.installationId, args.project.id);
+  if (!(await installationHasChecksWrite(ref))) return;
 
-  const ref = repoRef(args.repoFullName, args.installationId);
   try {
     const existingId = await findCheckRunIdByName(
       ref,

@@ -17,7 +17,7 @@ const RECONCILE_BATCH_CAP = 200;
 
 /**
  * App-mode safety net: re-evaluate PRs we previously closed and reopen any that
- * now pass. This is belt-and-suspenders for the webhook path — normally a PR is
+ * now pass. This is belt-and-suspenders for the webhook path: normally a PR is
  * reopened the instant its author's application is approved, but a dropped
  * webhook, a manual-decision change applied while the bot was down, or a
  * bypass-list edit could leave a closed PR that should be open. CI-mode repos
@@ -63,7 +63,7 @@ export async function reconcileProjectClosedPrs(
       take: RECONCILE_BATCH_CAP,
     });
 
-    const ref = repoRef(repo.fullName, repo.installationId);
+    const ref = repoRef(repo.fullName, repo.installationId, repo.projectId);
 
     for (const check of closed) {
       evaluated += 1;
@@ -108,7 +108,7 @@ export async function reconcileProjectClosedPrs(
   return { reopened, evaluated };
 }
 
-/** Every project that has at least one active App-mode repo — the work-list for
+/** Every project that has at least one active App-mode repo, the work-list for
  * the scheduled reconcile sweep. */
 export async function projectIdsWithAppRepos(): Promise<string[]> {
   const rows = await prisma.repo.findMany({

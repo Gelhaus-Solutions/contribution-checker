@@ -59,13 +59,26 @@ export async function onApplicationApproved(args: {
       status: { in: ["PENDING", "DENIED"] },
       closedByApp: true,
     },
-    include: { repo: { select: { id: true, fullName: true, installationId: true } } },
+    include: {
+      repo: {
+        select: {
+          id: true,
+          fullName: true,
+          installationId: true,
+          projectId: true,
+        },
+      },
+    },
   });
 
   let reopened = 0;
   for (const check of reopens) {
     if (check.repo.installationId == null) continue;
-    const ref = repoRef(check.repo.fullName, check.repo.installationId);
+    const ref = repoRef(
+      check.repo.fullName,
+      check.repo.installationId,
+      check.repo.projectId,
+    );
     try {
       await reopenPullRequest(
         ref,
@@ -132,7 +145,16 @@ export async function onApplicationDenied(args: {
       status: "PENDING",
       closedByApp: true,
     },
-    include: { repo: { select: { id: true, fullName: true, installationId: true } } },
+    include: {
+      repo: {
+        select: {
+          id: true,
+          fullName: true,
+          installationId: true,
+          projectId: true,
+        },
+      },
+    },
   });
   if (checks.length === 0) return { updated: 0 };
 
@@ -151,7 +173,11 @@ export async function onApplicationDenied(args: {
   let updated = 0;
   for (const check of checks) {
     if (check.repo.installationId == null) continue;
-    const ref = repoRef(check.repo.fullName, check.repo.installationId);
+    const ref = repoRef(
+      check.repo.fullName,
+      check.repo.installationId,
+      check.repo.projectId,
+    );
     try {
       await commentOnPr(ref, check.prNumber, body);
       if (app.project.labelsEnabled) {
@@ -210,13 +236,26 @@ export async function onApplicationRevokedWithClose(args: {
       authorGhId: app.user.ghId,
       status: "APPROVED",
     },
-    include: { repo: { select: { id: true, fullName: true, installationId: true } } },
+    include: {
+      repo: {
+        select: {
+          id: true,
+          fullName: true,
+          installationId: true,
+          projectId: true,
+        },
+      },
+    },
   });
 
   let closed = 0;
   for (const check of checks) {
     if (check.repo.installationId == null) continue;
-    const ref = repoRef(check.repo.fullName, check.repo.installationId);
+    const ref = repoRef(
+      check.repo.fullName,
+      check.repo.installationId,
+      check.repo.projectId,
+    );
     // The revocation reason is confidential: not posted publicly on the PR. The
     // applicant can still read it on their status page (and via email); link
     // there instead of inlining it.

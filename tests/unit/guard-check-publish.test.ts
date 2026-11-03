@@ -147,7 +147,7 @@ describe("publishStandaloneGuardCheck", () => {
       installationId: 1,
       repoFullName: "acme/app",
       headSha: "queue-sha",
-      project: { checksEnabled: true },
+      project: { id: "p1", checksEnabled: true },
       payload: PAYLOAD,
     });
     expect(findCheckRunIdByName).toHaveBeenCalledWith(
@@ -166,7 +166,7 @@ describe("publishStandaloneGuardCheck", () => {
       installationId: 1,
       repoFullName: "acme/app",
       headSha: "queue-sha",
-      project: { checksEnabled: true },
+      project: { id: "p1", checksEnabled: true },
       payload: PAYLOAD,
     });
     expect(upsertCheckRun).not.toHaveBeenCalled();

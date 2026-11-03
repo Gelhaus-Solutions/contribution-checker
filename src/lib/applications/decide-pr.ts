@@ -190,6 +190,7 @@ export async function decideForRepo(args: {
         name &&
         (await isCollaborator({
           installationId: repo.installationId,
+          projectId: repo.projectId,
           owner,
           repo: name,
           ghLogin: args.prAuthorGhLogin,

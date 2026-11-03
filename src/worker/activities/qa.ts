@@ -92,16 +92,18 @@ export async function toggleQaTask(args: {
       prNumber: true,
       batch: {
         select: {
-          repo: { select: { fullName: true, installationId: true } },
+          repo: {
+            select: { fullName: true, installationId: true, projectId: true },
+          },
         },
       },
     },
   });
   if (!item || item.prNumber == null) return { ok: false, reason: "not_found" };
 
-  const { fullName, installationId } = item.batch.repo;
+  const { fullName, installationId, projectId } = item.batch.repo;
   if (installationId == null) return { ok: false, reason: "not_found" };
-  const ref = repoRef(fullName, installationId);
+  const ref = repoRef(fullName, installationId, projectId);
 
   const pr = await getPullRequest(ref, item.prNumber);
   if (!pr) return { ok: false, reason: "not_found" };

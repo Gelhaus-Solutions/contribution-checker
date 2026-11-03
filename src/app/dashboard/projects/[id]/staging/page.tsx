@@ -63,18 +63,19 @@ const UNKNOWN: RepoLiveState = {
 const LIVE_PROBE_LIMIT = 25;
 
 async function probeRepo(args: {
+  projectId: string;
   fullName: string;
   installationId: number;
   defaultBranch: string | null;
   cfg: ResolvedStagingConfig;
 }): Promise<RepoLiveState> {
   if (!args.defaultBranch) return UNKNOWN;
-  const ref = repoRef(args.fullName, args.installationId);
+  const ref = repoRef(args.fullName, args.installationId, args.projectId);
   const [cmp, contentsWrite] = await Promise.all([
     compareBranches(ref, args.defaultBranch, args.cfg.stagingBranch).catch(
       () => undefined,
     ),
-    installationHasContentsWrite(args.installationId).catch(() => null),
+    installationHasContentsWrite(ref).catch(() => null),
   ]);
   if (cmp === undefined) return { ...UNKNOWN, contentsWrite: contentsWrite ?? null };
   // compareBranches returns null when a branch is missing, which here means
@@ -175,6 +176,7 @@ export default async function StagingSettings({
     const states = await Promise.all(
       probed.map(({ repo, cfg }) =>
         probeRepo({
+          projectId: id,
           fullName: repo.fullName,
           installationId: repo.installationId as number,
           defaultBranch: repo.defaultBranch,

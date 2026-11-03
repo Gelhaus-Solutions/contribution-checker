@@ -1,4 +1,5 @@
 import { getInstallationOctokit } from "@/lib/github/app";
+import { projectTenant } from "@/lib/github/gmint-tokens";
 import { logger } from "@/lib/logger";
 import { isBudgetError } from "@/lib/github/budget";
 import type {
@@ -58,12 +59,25 @@ const TEMPLATE_PATHS = [
  */
 export async function fetchPrContext(args: {
   installationId: number;
+  /** The project the score is for: GMint's tenant. */
+  projectId: string;
   owner: string;
   repo: string;
   prNumber: number;
   enabledHeuristicIds?: Set<string>;
 }): Promise<FetchedPrContext | null> {
-  const octokit = await getInstallationOctokit(args.installationId);
+  // The PR, its files and commits, and the PR template from the repo. The
+  // account snapshot reads public user data and search, which need no
+  // permission on the installation.
+  const octokit = await getInstallationOctokit(
+    args.installationId,
+    {
+      purpose: "quality",
+      repositories: [args.repo],
+      permissions: { pull_requests: "read", contents: "read" },
+    },
+    projectTenant(args.projectId),
+  );
   const { owner, repo, prNumber } = args;
   const want = args.enabledHeuristicIds;
 
