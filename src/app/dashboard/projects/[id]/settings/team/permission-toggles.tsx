@@ -9,9 +9,9 @@ export type ToggleCandidate = { id: string; label: string; granted: boolean };
 
 /**
  * Per-member "extra access" toggles: grant a reviewer explicit leaf permissions
- * (e.g. View audit log) beyond their role preset. Each toggle dual-writes to
- * Stack Auth via the server action; the page revalidates to reflect the new
- * cached set.
+ * (e.g. View audit log) beyond their role preset. Each toggle writes the
+ * member's leaf set through the server action; the page revalidates to
+ * reflect it.
  */
 export function PermissionToggles({
   projectId,

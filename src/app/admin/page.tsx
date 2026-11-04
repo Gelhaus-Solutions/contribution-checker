@@ -8,14 +8,12 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { SubmitButton } from "@/components/ui/submit-button";
 import { env } from "@/lib/env";
 import { getAppSlug } from "@/lib/github/app";
 import { PageHeader } from "@/components/page-header";
 import { SHELL_MEDIUM } from "@/lib/ui/layout";
 import { StatusBadge } from "@/components/status-badge";
 import { lockdown, stageStatus } from "@/lib/lockdown";
-import { provisionStackAuthAction } from "./actions";
 
 export default async function AdminHome() {
   await requireSuperAdmin();
@@ -106,28 +104,6 @@ export default async function AdminHome() {
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Stack Auth permissions</CardTitle>
-            <CardDescription>
-              Reconcile the project permission hierarchy and seed the Instance
-              Admin team. Idempotent; re-run after changing the permission
-              catalog. Requires the super-secret admin key.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            {env.stackAdminConfigured ? (
-              <form action={provisionStackAuthAction}>
-                <SubmitButton size="sm">Provision permissions</SubmitButton>
-              </form>
-            ) : (
-              <p className="text-sm text-muted-foreground">
-                Set <code>STACK_SUPER_SECRET_ADMIN_KEY</code> to enable
-                provisioning.
-              </p>
-            )}
-          </CardContent>
-        </Card>
       </main>
     </>
   );

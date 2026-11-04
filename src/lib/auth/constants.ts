@@ -1,48 +1,22 @@
 /**
- * Auth constants shared between the server-only runtime (src/lib/stack.ts,
- * sync-user.ts) and the standalone backfill script (prisma/backfill-stack-users.ts).
- * Kept free of any "server-only" import so the script can use it under tsx.
+ * The project permission catalogue, shared between the server runtime and
+ * standalone scripts. Kept free of any "server-only" import so a script can
+ * use it under tsx.
  */
 
-/** Project-level Hexclave permission ids (global, not team-scoped). */
-export const SUPER_ADMIN_PERMISSION = "super_admin";
-export const CREATE_PROJECT_PERMISSION = "create_project";
-
-/** GitHub provider config id in Hexclave + the OAuth scopes we require so the
- * connected-account token can read the numeric id, login, and primary email. */
-export const GITHUB_PROVIDER_CONFIG_ID = "github";
-export const GITHUB_OAUTH_SCOPES = ["read:user", "user:email"];
-
 // ===========================================================================
-// Project permission catalog (Hexclave TEAM permissions, one team per project)
+// Project permission catalog
 // ===========================================================================
 //
-// Each project maps to one Hexclave team. A member's project ROLE is the single
-// role-bundle team permission they hold in that team; granular LEAF permissions
-// gate each per-project surface/action. Bundles contain the next tier via
-// Hexclave `containedPermissionIds`, so granting `project_admin` recursively
-// confers every `project_reviewer` leaf.
-//
-// This module is the SINGLE source of truth: the SA provisioner derives the
-// permission DEFINITIONS (containedPermissionIds) from PERMISSION_CATALOG, and
-// the local cache derives a member's effective leaf set from permissionsForRole.
-// They can never drift because both read this map. Kept free of any
-// `server-only` import so the standalone tsx backfill scripts can import it.
+// A member's project ROLE is one role bundle; granular LEAF permissions gate
+// each per-project surface/action. Bundles contain the next tier, so
+// `project_admin` confers every `project_reviewer` leaf. ProjectMember stores
+// the expanded leaf set (permissionsForRole) plus any explicit extras. These
+// were Hexclave team permissions until the move to GPID; the ids are kept so
+// the rows already stored keep their meaning.
 
 /** The three project role names (mirrors ProjectMember.role / authz Role). */
 export type ProjectRoleName = "OWNER" | "ADMIN" | "REVIEWER";
-
-/** Role bundle (team) permission ids. */
-export const PROJECT_OWNER_PERMISSION = "project_owner";
-export const PROJECT_ADMIN_PERMISSION = "project_admin";
-export const PROJECT_REVIEWER_PERMISSION = "project_reviewer";
-
-/** Map a project role to its single role-bundle team permission id. */
-export const ROLE_PERMISSION: Record<ProjectRoleName, string> = {
-  OWNER: PROJECT_OWNER_PERMISSION,
-  ADMIN: PROJECT_ADMIN_PERMISSION,
-  REVIEWER: PROJECT_REVIEWER_PERMISSION,
-};
 
 /** All granular leaf permission ids. */
 export const PROJECT_LEAF_PERMISSIONS = [
@@ -90,10 +64,10 @@ const ADMIN_LEAVES: ProjectLeafPermission[] = [
 ];
 
 /**
- * Fully-expanded effective LEAF set for a role, mirroring SA recursive
- * containment. Written to ProjectMember.permissions so the hot path can gate by
- * leaf without an SA round-trip. OWNER's leaf set equals ADMIN's (owner-only
- * operations are role checks, not gateable leaves).
+ * Fully-expanded effective LEAF set for a role, the bundles' containment
+ * worked out. Written to ProjectMember.permissions so the hot path can gate by
+ * leaf. OWNER's leaf set equals ADMIN's (owner-only operations are role
+ * checks, not gateable leaves).
  */
 export function permissionsForRole(role: ProjectRoleName): ProjectLeafPermission[] {
   switch (role) {
@@ -104,38 +78,6 @@ export function permissionsForRole(role: ProjectRoleName): ProjectLeafPermission
       return [...REVIEWER_LEAVES, ...ADMIN_LEAVES];
   }
 }
-
-/**
- * Permission DEFINITIONS for the SA provisioner, in dependency order (a
- * permission can only contain/grant another that already exists): leaves first,
- * then project_reviewer, project_admin, project_owner.
- */
-export const PERMISSION_CATALOG: {
-  id: string;
-  description: string;
-  containedPermissionIds: string[];
-}[] = [
-  ...PROJECT_LEAF_PERMISSIONS.map((id) => ({
-    id,
-    description: `Project leaf permission: ${id}`,
-    containedPermissionIds: [] as string[],
-  })),
-  {
-    id: PROJECT_REVIEWER_PERMISSION,
-    description: "Project reviewer (read + review applications)",
-    containedPermissionIds: [...REVIEWER_LEAVES],
-  },
-  {
-    id: PROJECT_ADMIN_PERMISSION,
-    description: "Project admin (manage settings, repos, CLA, members)",
-    containedPermissionIds: [PROJECT_REVIEWER_PERMISSION, ...ADMIN_LEAVES],
-  },
-  {
-    id: PROJECT_OWNER_PERMISSION,
-    description: "Project owner (full control incl. transfer/delete)",
-    containedPermissionIds: [PROJECT_ADMIN_PERMISSION],
-  },
-];
 
 /** Human labels for leaf permissions (extra-access toggles UI). */
 export const LEAF_LABELS: Record<ProjectLeafPermission, string> = {

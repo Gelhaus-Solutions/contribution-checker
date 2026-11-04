@@ -60,7 +60,7 @@ export type AuditKind =
   | "cla.signatures_exported"
   | "cla.notify_unsigned_started"
   | "cla.notify_unsigned_completed"
-  // Stack Auth (Hexclave) teams/permissions migration
+  // Stack Auth (Hexclave) teams/permissions, before the move to GPID; kept for the rows already written
   | "team.provisioned"
   | "team.provision_failed"
   | "team.reconciled"
@@ -71,6 +71,9 @@ export type AuditKind =
   | "instance_admins_seeded"
   | "user.superadmin_granted"
   | "user.superadmin_revoked"
+  // The allowlist since the move off Hexclave: the role columns are the truth
+  | "user.creator_granted"
+  | "user.creator_revoked"
   | "vault.resolution_failed"
   | "vault.cache_invalidated"
   // QA on the staging batch
