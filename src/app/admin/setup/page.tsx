@@ -20,13 +20,10 @@ export default async function GitHubAppSetup() {
   const base = env.PUBLIC_BASE_URL.replace(/\/$/, "");
   const slug = env.githubAppConfigured ? await getAppSlug() : null;
   const webhookUrl = `${base}/api/github/webhook`;
-  const stackBackend = (
-    env.STACK_API_URL ?? "https://<your-hexclave-backend>"
-  ).replace(/\/$/, "");
-  // GitHub OAuth (login) is owned by Hexclave now, so the App's OAuth callback
-  // points at the Hexclave backend, not this app.
-  const oauthCallbackUrl = `${stackBackend}/api/v1/auth/oauth/callback/github`;
-  const stackWebhookUrl = `${base}/api/stack/webhook`;
+  // Sign-in is GitHub through GPlatform Identity, whose own GitHub provider
+  // owns the OAuth round trip; this app only registers where GPID sends the
+  // browser back.
+  const signInCallbackUrl = `${base}/auth/callback`;
   const homepageUrl = base;
 
   return (
@@ -37,8 +34,8 @@ export default async function GitHubAppSetup() {
           <h1 className="text-2xl font-semibold tracking-tight">GitHub App setup</h1>
           <p className="text-sm text-muted-foreground">
             Manual setup. The GitHub App handles repo automation (installation
-            tokens); human sign-in is handled by Hexclave (see the Hexclave
-            card below), which uses this App&apos;s OAuth client id/secret.
+            tokens); human sign-in is GitHub through GPlatform Identity (see
+            the Identity card below).
           </p>
           {slug && (
             <div className="mt-3 rounded-md border border-success/40 bg-success/10 px-3 py-2 text-sm">
@@ -60,59 +57,38 @@ export default async function GitHubAppSetup() {
           <CardContent className="space-y-3 text-sm">
             <Field label="Homepage URL" value={homepageUrl} />
             <Field label="Webhook URL" value={webhookUrl} />
-            <Field
-              label="OAuth Callback URL"
-              value={oauthCallbackUrl}
-              hint="Goes in the App's OAuth callback URLs section. Points at your Hexclave backend (it owns login)."
-            />
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Hexclave (login) setup</CardTitle>
+            <CardTitle className="text-base">GPlatform Identity (login) setup</CardTitle>
             <CardDescription>
-              Human login runs on your self-hosted Hexclave instance.
+              Everybody signs in with GitHub through GPlatform Identity (GPID),
+              where this app is enrolled as a native product.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3 text-sm">
             <ol className="list-decimal space-y-3 pl-5">
               <li>
-                Stand up a Hexclave instance (its own Postgres; optional email +
-                Svix). Create a project and copy its{" "}
-                <strong>Project ID</strong>, <strong>Publishable client key</strong>,
-                and <strong>Secret server key</strong>.
-              </li>
-              <li>
-                In Hexclave, add <strong>GitHub</strong> as a sign-in provider
-                using this App&apos;s <code>Client ID</code>/<code>Client secret</code>.
-                Its callback URL is the OAuth Callback URL above
-                (<code>{oauthCallbackUrl}</code>). Request scopes{" "}
-                <code>read:user</code> and <code>user:email</code>.
-              </li>
-              <li>
-                Define two <strong>project permissions</strong>:{" "}
-                <code>super_admin</code> and <code>create_project</code>. These
-                back the app&apos;s org roles.
-              </li>
-              <li>
-                Add a <strong>webhook</strong> for <code>user.*</code> events
-                pointing at <code>{stackWebhookUrl}</code>; put its signing
-                secret in <code>STACK_WEBHOOK_SECRET</code>.
+                On GPID&apos;s host, from <code>sso/</code>, enrol the app and
+                register its sign-in callback:
+                <CodeBlock className="mt-2" language="sh" code={`node scripts/register-app.mjs native contribution-checker "Contribution Checker"
+node scripts/register-app.mjs --redirect contribution-checker ${signInCallbackUrl}`} />
+                Keep the secret the first command prints.
               </li>
               <li>
                 Fill in your <code>.env</code>:
-                <CodeBlock className="mt-2" language=".env" code={`STACK_PROJECT_ID="<project id>"
-STACK_PUBLISHABLE_CLIENT_KEY="<publishable client key>"
-STACK_SECRET_SERVER_KEY="<secret server key>"   # may live in Vault
-STACK_API_URL="${stackBackend}"
-STACK_WEBHOOK_SECRET="<svix signing secret>"`} />
+                <CodeBlock className="mt-2" language=".env" code={`GPID_URL="<GPID's address>"
+GPID_APP_SECRET="<the secret the enrolment printed>"   # may live in Vault
+GPID_CHROME_TOKEN="<issued for contribution-checker on GPID's product screen>"`} />
               </li>
               <li>
-                Migrate existing users:{" "}
-                <code>DRY_RUN=1 pnpm db:backfill:stack</code> to preview, then{" "}
-                <code>pnpm db:backfill:stack</code> to pre-create + link Hexclave
-                users by GitHub id.
+                Moving accounts over from Hexclave: export and import them by
+                GPID&apos;s runbook (<code>sso/docs/migration.md</code>), then
+                give each account its subject from the map the import printed:{" "}
+                <code>DRY_RUN=1 pnpm db:backfill:sso-subjects subjects.json</code>{" "}
+                to preview, then without <code>DRY_RUN</code> to write.
               </li>
             </ol>
           </CardContent>
@@ -241,10 +217,7 @@ GITHUB_APP_CLIENT_ID="<Client ID>"
 GITHUB_APP_CLIENT_SECRET="<Client secret>"
 GITHUB_APP_WEBHOOK_SECRET="<the random secret you generated>"
 # PEM with literal \\n between lines, all on one line, in double quotes:
-GITHUB_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\\n...\\n-----END RSA PRIVATE KEY-----\\n"
-
-# These Client ID/Secret are also what you paste into Hexclave's GitHub
-# sign-in provider (see the Hexclave card above).`} />
+GITHUB_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\\n...\\n-----END RSA PRIVATE KEY-----\\n"`} />
               </li>
               <li>
                 Restart the server. Confirm this page shows the green

@@ -38,8 +38,9 @@ The bot runs in two modes per repo:
 
 - Next.js 15 App Router + React 19
 - Prisma + PostgreSQL
-- Hexclave (self-hosted Stack Auth fork, `@hexclave/next`) for human login;
-  GitHub OAuth is configured inside Hexclave. Cookie sessions + edge middleware.
+- GPlatform Identity (GPID, `@ghub/gpsso-sdk`) for human login: GitHub only,
+  through GPID's provider flow, with GPID's session token in an httpOnly
+  cookie. Hexclave was the login until 2026-11-04.
 - `@octokit/app` + `@octokit/webhooks` for the App
 - `jose` for verifying GitHub Actions OIDC JWTs
 - Tailwind v4 + shadcn-style UI primitives
@@ -580,7 +581,8 @@ Privacy requests (GDPR Art. 17, Art. 21 after an objection):
   kind of data, keep, pseudonymise or delete. `src/lib/account-erasure.ts` is
   this product's side: `PRIVACY_CATALOGUE` (what we hold and what we can do
   with each kind) and `runPrivacyPlan` (dry run unless `execute`, one
-  transaction, then the Hexclave identities and Terms' `closeSubject`).
+  transaction, then Terms' `closeSubject`). The person's GPID account is
+  Identity's and is erased by a request there; this side cuts `ssoSubject`.
 - Pseudonymising is a keyed hash (HMAC-SHA256 under `PRIVACY_PSEUDONYM_KEY`),
   never a plain hash: a login is guessable, so an unkeyed hash of it is not a
   pseudonym. CLA signatures and manual decisions are never touched here.
@@ -745,10 +747,9 @@ Every route is dynamic (`export const dynamic = "force-dynamic"` in the root
 layout, which is load-bearing; see the comment there), so nothing is amortized
 by a cache and per-request work is paid on every page view. Two rules follow:
 
-- **Do not stack independent awaits.** The root layout issues `auth()`, the
-  Hexclave app and `cookies()` together; the project layout issues
-  `getProjectForViewer` and `getProjectPermissions` together; `resolveOrgRoles`
-  issues its two permission reads and its team read together. Each of these was
+- **Do not stack independent awaits.** The root layout issues `auth()`,
+  `cookies()` and the brand together; the project layout issues
+  `getProjectForViewer` and `getProjectPermissions` together. Each of these was
   a serial chain in front of the first byte of every page.
 - **Session and membership reads are memoized, not repeated.** See the
   `auth()` / `getProjectMembership` note under Auth & roles.
@@ -772,49 +773,43 @@ id only.
 
 ## Auth & roles
 
-- Login is Hexclave (`@hexclave/next`). `auth()` (`src/auth.ts`) reads the
-  Hexclave cookie session, resolves it to the local `User` row by
-  `stackUserId`, and returns the same `session.user` shape as before, so
-  consumers and `requireSession()`/`requireProjectRole()` are unchanged.
+- Login is GitHub through GPID (`@ghub/gpsso-sdk`, `src/lib/sso.ts`), the
+  only way in since 2026-11-04 (Hexclave before). `/auth/github` asks GPID
+  for GitHub's authorize address and sends the browser there; GPID brings it
+  back to `/auth/callback` with a handoff code, which this server exchanges,
+  holding `GPID_APP_SECRET`, for a GPID session token in the httpOnly
+  `cc_session` cookie. `/auth/sign-out` (POST) and the `signOut()` shim drop
+  the cookie and the SDK's cached answer. Old `/handler/*` links redirect.
+  Outcomes that sign nobody in land on `/?signin=cancelled|confirm|failed|unavailable`.
+- `auth()` (`src/auth.ts`) resolves the token with `sso.resolve()` on every
+  request, cached by the SDK for exactly GPID's `revalidateWithin`, so a
+  lockdown or revocation at GPID lands inside that window. It resolves the
+  person to the local `User` by `ssoSubject`, then by GitHub id, then by
+  address (`src/lib/auth/resolve-user.ts`), and returns the same
+  `session.user` shape as before. A row bound to another subject is never
+  taken over (`AccountConflict`, signed out). The GitHub id and login come
+  from GPID's link (`links` on introspection, native products only); the id
+  is never rewritten once set, the login follows renames.
 - Onboarding gate: `requireSession()` redirects to `/welcome` until the user
-  has a linked GitHub identity (`ghId`); `/welcome` forces a GitHub connect for
-  non-GitHub signups. No country is collected: the geo capture was removed on
-  2026-10-01 because nothing used it (GDPR Art. 5(1)(c)) and the stored values
-  were cleared. Do not bring it back without a purpose and a privacy notice
-  that names it. Edge `middleware.ts` does a fast cookie-presence gate for
-  `/dashboard` and `/admin`.
-- **Onboarding must never require a connected-account OAuth token.** Hexclave
-  issues none when its GitHub provider runs on shared OAuth keys: the
-  `createProviderAccessToken` call fails. Both sides of `/welcome` therefore key
-  on the provider LINK only: `syncGitHubIdentity` reads the numeric id from
-  `listOAuthProviders()`'s `accountId`, and `WelcomeClient` checks
-  `useOAuthProviders()` for `type === "github"`, calling `linkConnectedAccount`
-  when it is missing. Do not reintroduce `useConnectedAccount` /
-  `getConnectedAccount` / `useOrLinkConnectedAccount` here: those resolve a
-  token, treat a perfectly good link as unconnected, and with `or: "redirect"`
-  either bounce the user through GitHub forever or throw out of the render into
-  `error.tsx`. That is what made sign-up impossible for real applicants, and it
-  shows up as a client-side "Something went wrong" with **no digest**.
+  has a GitHub identity (`ghId`). Signing in with GitHub fills it on the way
+  in, so `/welcome` is reached only by a GPID session without a GitHub link,
+  and asks for the GitHub sign-in. No country is collected: the geo capture
+  was removed on 2026-10-01 because nothing used it (GDPR Art. 5(1)(c)). Do
+  not bring it back without a purpose and a privacy notice that names it.
 - `auth()` is memoized per request with React `cache()`. A page calls it from
   the root layout, `SiteHeader`, `requireSession()` and again from the page's
-  `requireProjectRole()`; unmemoized, each call repeated the local-user lookup
-  and the role mirror write, and the Hexclave SDK only
-  holds its own reads for ~5s. `getProjectMembership` is memoized for the same
-  reason. `cookies()` inside a `cache()` scope is fine: Next only rejects it
-  under `"use cache"` / `unstable_cache(...)`, which is a different scope
-  type (see `dist/server/request/cookies.js`). An earlier revert blamed
-  `cache()` for a sign-in loop; the wrapper now falls back to an uncached
-  resolve if the memo is ever unavailable, so it cannot report a signed-in user
-  as signed out.
-- Org roles (super-admin, can-create-project) are **Hexclave project
-  permissions** (`super_admin` / `create_project`); Hexclave is the source of
-  truth. `User.isSuperAdmin` / `User.canCreateProj` are mirror cache columns
-  read on the hot path; reconciled on sign-in from `SUPER_ADMINS`/
-  `PROJECT_CREATORS` (additive) and managed via `/admin/allowlist`, which
-  grants/revokes the Hexclave permission. The operator must define these two
-  project permissions in Hexclave.
-- Per-project: `ProjectMember.role` ∈ {`OWNER`, `ADMIN`, `REVIEWER`} stays
-  **local**. `requireProjectRole(projectId, minRole)` enforces this in server
+  `requireProjectRole()`; unmemoized, each call repeated the local-user
+  lookup. `getProjectMembership` is memoized for the same reason. `cookies()`
+  inside a `cache()` scope is fine: Next only rejects it under `"use cache"` /
+  `unstable_cache(...)`. The wrapper falls back to an uncached resolve if the
+  memo is ever unavailable, so it cannot report a signed-in user as signed out.
+- Org roles (super-admin, can-create-project) are this app's own columns,
+  `User.isSuperAdmin` / `User.canCreateProj`, managed via `/admin/allowlist`.
+  `SUPER_ADMINS` / `PROJECT_CREATORS` seed them once, when an account first
+  gets that GitHub login (`seededRoles`), never again, so a revocation sticks.
+- Per-project: `ProjectMember.role` ∈ {`OWNER`, `ADMIN`, `REVIEWER`} and its
+  leaf permissions are **local** (they were mirrored to Hexclave teams;
+  `Project.teamId` is the record of that). `requireProjectRole(projectId, minRole)` enforces this in server
   components and actions.
 - Approval/denial requires REVIEWER. Settings/team/quality/people require
   ADMIN. Project deletion requires OWNER.
@@ -863,15 +858,15 @@ report, all over the app's own pinned TLS identity.
   requests are never left stuck by a lockdown aimed at people.
 - **`auth()` says why there is no session** (`lockedOut()`, from the same
   memoized resolve). `signInPath()` in `src/lib/authz.ts` turns that into
-  `/lockdown` or the sign-in page, and every page that used to redirect to
-  `/handler/sign-in` itself goes through it. Sending a refused person to sign
+  `/lockdown` or the sign-in, and every page that used to redirect to the
+  sign-in itself goes through it. Sending a refused person to sign
   in only brings them back, which is the loop this replaced.
 - **`/lockdown` and the header strip say what is refused, never why**: no rung,
   no source, no time. A decoy trip raises the stage too, and whoever tripped it
   must learn nothing from the page. The rung is for the console.
 - **Honeytokens (L97).** `GLOCKDOWN_DECOY_LOGIN` (emails or GitHub logins) and
   `GLOCKDOWN_DECOY_KEY_SHA256` (hashes only; a malformed one fails the boot).
-  `auth()` checks the Hexclave email **before** the identity is resolved,
+  `auth()` checks GPID's email **before** the identity is resolved,
   linked or created, and the local GitHub login right after; a hit is refused
   exactly as no session. Every API route that takes a credential calls
   `presentsDecoyKey(req)` at the top and refuses a hit **at the point an
