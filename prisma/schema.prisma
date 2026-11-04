@@ -41,10 +41,9 @@ model User {
   // 20261001120000_privacy_minimisation migration emptied it.
   country String?
 
-  // Authorization flags. With the Hexclave migration these mirror the
-  // project-level Hexclave permissions `super_admin` / `create_project`
-  // (reconciled on every sign-in from SUPER_ADMINS/PROJECT_CREATORS); Hexclave
-  // is the source of truth, these columns are a query-convenience cache.
+  // Authorization flags, the truth since the move to GPID: changed in
+  // /admin/allowlist, seeded once from SUPER_ADMINS/PROJECT_CREATORS when an
+  // account first gets its GitHub login (src/lib/auth/sync-user.ts).
   isSuperAdmin  Boolean @default(false)
   canCreateProj Boolean @default(false)
 
@@ -341,10 +340,9 @@ model Project {
   // ----- DCO (Developer Certificate of Origin): independent of CLA -----
   dcoEnabled Boolean @default(false)
 
-  // Hexclave (Stack Auth) team backing this project. Stack Auth is the source
-  // of truth for membership/roles; this maps the project to its team. Null for
-  // legacy/unmigrated projects or when team creation failed (reconciled by the
-  // backfill/webhook). Unique: one project = one team.
+  // The Hexclave (Stack Auth) team that mirrored this project's membership
+  // until the move to GPID. Nothing reads it now: ProjectMember is the truth.
+  // Kept as a record; null for projects made since, or never mirrored.
   teamId String? @unique
 
   createdAt DateTime @default(now())

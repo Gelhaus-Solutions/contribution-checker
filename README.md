@@ -5,7 +5,7 @@ Self-hosted Node.js app that gates pull requests behind a contributor applicatio
 ## Stack
 
 - Next.js 15 (App Router) + Prisma + SQLite
-- Auth.js v5 (GitHub OAuth) for sign-in
+- GPlatform Identity (GPID) for sign-in: GitHub only, through GPID's provider flow (`@ghub/gpsso-sdk`)
 - GitHub App for repo automation (PR close/reopen/comment/label)
 - Tailwind v4 + shadcn-style UI primitives
 - Vitest for unit tests
@@ -16,9 +16,9 @@ Self-hosted Node.js app that gates pull requests behind a contributor applicatio
 ```bash
 pnpm install
 cp .env.example .env
-# Fill in AUTH_SECRET (openssl rand -base64 32), AUTH_GITHUB_ID/SECRET
-# (create an OAuth app at https://github.com/settings/developers)
-# Add your GitHub login to SUPER_ADMINS so you can manage allowlist + setup.
+# Fill in GPID_URL and GPID_APP_SECRET (enrol the app on GPID first; see
+# "Sign-in" below). Add your GitHub login to SUPER_ADMINS so you can manage
+# allowlist + setup.
 pnpm exec prisma migrate dev
 pnpm dev
 # Open http://localhost:3000, sign in with GitHub.
@@ -29,7 +29,7 @@ pnpm dev
 
 ```bash
 cp .env.example .env
-# Fill AUTH_SECRET, AUTH_GITHUB_ID/SECRET, PUBLIC_BASE_URL, SUPER_ADMINS, SMTP_*.
+# Fill GPID_URL, GPID_APP_SECRET, GPID_CHROME_TOKEN, PUBLIC_BASE_URL, SUPER_ADMINS, SMTP_*.
 # Update docker/Caddyfile with your domain.
 docker compose -f docker/docker-compose.yml up -d
 # 1) Visit https://your-domain.example/admin/setup as a super-admin.
@@ -39,18 +39,26 @@ docker compose -f docker/docker-compose.yml up -d
 # 5) Confirm at /admin. The App is now configured.
 ```
 
+## Sign-in
+
+Everybody signs in with GitHub through GPlatform Identity (GPID), Gelhaus Solutions' identity service, where the instance is enrolled as a native product. There is no other way in: since 2026-11-04 this app has no login of its own (Hexclave was removed), so an instance needs an enrolment at GPID, and a self-hosted instance without one has no sign-in. On GPID's host, from `sso/`:
+
+```bash
+node scripts/register-app.mjs native contribution-checker "Contribution Checker"
+node scripts/register-app.mjs --redirect contribution-checker https://your-domain.example/auth/callback
+```
+
+Put the printed secret in `GPID_APP_SECRET` (it may live in Vault) and GPID's address in `GPID_URL`. `SUPER_ADMINS` and `PROJECT_CREATORS` apply once, when an account first signs in with that GitHub login; after that `/admin/allowlist` is the truth. Moving accounts over from Hexclave is GPID's runbook (`sso/docs/migration.md`) plus `pnpm db:backfill:sso-subjects subjects.json`.
+
 ## GitHub App setup walkthrough
 
-The GitHub App is what gives the system permission to receive PR webhooks and to close/reopen/label PRs. It's separate from the OAuth App used for human sign-in. Set it up **once per instance**.
+The GitHub App is what gives the system permission to receive PR webhooks and to close/reopen/label PRs. Sign-in does not use it: GitHub sign-in runs through GPID's own GitHub provider. Set it up **once per instance**.
 
 ### 1. Prerequisites
 
 - The instance is reachable on a public URL (`PUBLIC_BASE_URL` in `.env`). Local development with a tunnel like `ngrok` works too; just use the tunnel URL.
 - Your GitHub login is in `SUPER_ADMINS` in `.env`. Sign in once so the flag gets applied.
 
-> **Single-App mode (recommended):** one GitHub App handles both human sign-in and repo automation. Leave `AUTH_GITHUB_ID/SECRET` blank; the App's OAuth `client_id/secret` are reused for sign-in. The manifest at `/admin/setup` registers the right OAuth callback automatically.
->
-> **Two-App mode:** if you want a separate OAuth App for sign-in, create one at https://github.com/settings/developers with callback `https://your-domain.example/api/auth/callback/github` and put its credentials in `AUTH_GITHUB_ID/SECRET`. Those take precedence over the App's OAuth credentials when set.
 
 ### 2. Create the App on GitHub (manual)
 
@@ -61,7 +69,6 @@ The GitHub App is what gives the system permission to receive PR webhooks and to
 | Homepage URL | `${PUBLIC_BASE_URL}` |
 | Webhook URL | `${PUBLIC_BASE_URL}/api/github/webhook` |
 | Webhook secret | random string (`openssl rand -hex 32`), stored in `GITHUB_APP_WEBHOOK_SECRET` |
-| Callback URL | `${PUBLIC_BASE_URL}/api/auth/callback/github` |
 
 Permissions:
 
@@ -86,7 +93,6 @@ After creating the App:
    GITHUB_APP_WEBHOOK_SECRET="..."
    # PEM on a single line with literal \n between lines, in double quotes:
    GITHUB_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVATE KEY-----\n"
-   # Single-App mode: leave AUTH_GITHUB_ID/SECRET blank.
    ```
 4. Restart the server. `/admin/setup` should now show a green "Configured" badge.
 
@@ -207,11 +213,12 @@ See [`.env.example`](./.env.example). Highlights:
 
 - `DATABASE_URL`: SQLite file path (e.g. `file:./data/contribution-checker.db`)
 - `PUBLIC_BASE_URL`: your canonical URL, used for emails/webhooks/redirects
-- `AUTH_SECRET`: Auth.js session secret (`openssl rand -base64 32`)
-- `AUTH_GITHUB_ID/SECRET`: OAuth app credentials for human sign-in (separate from the GitHub App)
+- `GPID_URL`, `GPID_APP_SECRET`: GPlatform Identity's address and this app's enrolment secret, for sign-in
+- `GPID_CHROME_TOKEN`: optional, GPID's header controls (apps picker and account popup)
+- `AUTH_SECRET`: keeps Server Action ids stable across rebuilds (`next.config.ts`), unless `NEXT_SERVER_ACTIONS_ENCRYPTION_KEY` is set
 - `GITHUB_APP_*`: GitHub App credentials, populated by `/admin/setup`
-- `SUPER_ADMINS`: comma-separated GitHub logins, granted super-admin on first sign-in
-- `PROJECT_CREATORS`: comma-separated logins, granted project-creation rights on first sign-in
+- `SUPER_ADMINS`: comma-separated GitHub logins, granted super-admin when the account is first created
+- `PROJECT_CREATORS`: comma-separated logins, granted project-creation rights when the account is first created
 - `SMTP_*`: optional, SMTP transport for email notifications
 - `VAULT_*`: optional, source secrets from HashiCorp Vault (see below)
 - `CC_LOCKDOWN`, `GLOCKDOWN_*`: optional, GLockdown's kill switch, its edge and
@@ -254,13 +261,12 @@ node dist/glockdown.mjs hash-key < key  # the SHA-256 to set for a decoy key
 When `VAULT_ADDR` is set, the following values can be sourced from Vault
 instead of plain env vars: `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`,
 `GITHUB_APP_WEBHOOK_SECRET`, `GITHUB_APP_CLIENT_ID`,
-`GITHUB_APP_CLIENT_SECRET`, `GITHUB_APP_SLUG`, `AUTH_GITHUB_ID`,
-`AUTH_GITHUB_SECRET`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`,
-`SMTP_FROM`.
+`GITHUB_APP_CLIENT_SECRET`, `GITHUB_APP_SLUG`, `GPID_APP_SECRET`,
+`SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`.
 
-`DATABASE_URL` and `AUTH_SECRET` remain env-only: they're consumed
-synchronously at module load (Prisma client and Auth.js cookie crypto), and
-moving them behind Vault would require a wider refactor.
+`DATABASE_URL` remains env-only: it is consumed synchronously at module load
+by the Prisma client, and moving it behind Vault would require a wider
+refactor.
 
 ### Auth methods
 
@@ -355,14 +361,14 @@ src/
 │   │   └── templates/         user's saved form templates
 │   ├── admin/                 super-admin (allowlist, GitHub App setup, GLockdown console)
 │   ├── lockdown/              public page for people GLockdown's kill switch refuses
+│   ├── auth/                  GitHub sign-in through GPID: start, callback, sign-out
 │   └── api/
-│       ├── auth/              Auth.js v5 handlers
 │       └── github/            App webhook + post-install + manifest callback
 ├── lib/
 │   ├── applications/          form schema, submission lifecycle, PR decision logic
 │   ├── github/                Octokit App, PR actions, collaborator cache, webhook dispatch
 │   ├── notifications/         in-app inbox, SMTP email, outbound webhooks
-│   ├── auth.ts / auth.config.ts   Auth.js setup (split for edge-safe middleware)
+│   ├── sso.ts                 the GPID client and the session cookie
 │   ├── authz.ts               role-based authz helpers (requireProjectRole etc.)
 │   ├── audit.ts               append-only audit log writer
 │   ├── lockdown.ts            GLockdown: stage, escalation, honeytokens, decoy report

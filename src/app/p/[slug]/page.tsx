@@ -64,8 +64,8 @@ export default async function PublicProjectPage({
 
   const session = await auth();
   // An application is matched to pull requests by the GitHub account, and the
-  // CLA is signed as it: someone signed in without one linked (an email or
-  // Google sign-up) links it first and comes back here. Without this they
+  // CLA is signed as it: someone signed in without one linked (a GPID account
+  // with no GitHub link) links it first and comes back here. Without this they
   // could apply with no GitHub account and so without signing.
   if (session?.user && !session.user.restricted && !session.user.ghId) {
     redirect(welcomeFor(`/p/${slug}`));

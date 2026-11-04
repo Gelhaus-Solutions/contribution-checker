@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
-// An applicant signed in without a linked GitHub account (an email or Google
-// sign-up) could apply, and so skip the CLA the project requires: the CLA is
+// An applicant signed in without a linked GitHub account (once an email or
+// Google sign-up, now a GPID account with no GitHub link) could apply, and so skip the CLA the project requires: the CLA is
 // signed as the GitHub account, and the requirement was only checked when
 // there was one. Their applications showed "(no login)". Applying now needs
 // the account linked, and a row with the id but not the login gets the login.

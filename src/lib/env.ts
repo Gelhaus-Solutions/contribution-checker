@@ -52,9 +52,9 @@ const schema = z.object({
   GPTERMS_URL: optionalUrl,
   GPTERMS_API_KEY: z.string().optional(),
 
-  // Legacy NextAuth vars. No longer used since login moved off NextAuth (to
-  // Hexclave, then GPID); kept optional for backward compat and removed in a
-  // later cleanup. AUTH_SECRET is no longer required.
+  // Legacy NextAuth vars, unused for login since it moved off NextAuth (to
+  // Hexclave, then GPID). AUTH_SECRET still pins the Server Action ids in
+  // next.config.ts unless NEXT_SERVER_ACTIONS_ENCRYPTION_KEY is set.
   AUTH_SECRET: z.string().min(16).optional(),
   AUTH_URL: z.string().url().optional(),
   AUTH_TRUST_HOST: z.string().optional(),
