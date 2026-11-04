@@ -7,13 +7,7 @@ import { StatusPage } from "@/components/status-page";
 import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { STAGE_COPY, botStopped, lockdown, signInClosed, stageStatus } from "@/lib/lockdown";
-
-/**
- * Hexclave's session cookies, as the middleware knows them. At `full` the app
- * refuses before it asks Hexclave anything, so whether the visitor still holds
- * a Hexclave session is read from the cookie alone.
- */
-const HEXCLAVE_SESSION_COOKIE = /^(__Host-)?(hexclave|stack)-(refresh|access)/;
+import { SESSION_COOKIE } from "@/lib/sso";
 
 export const metadata: Metadata = {
   title: "Lockdown",
@@ -23,7 +17,7 @@ export const metadata: Metadata = {
 /**
  * Where GLockdown's kill switch sends the people it refuses
  * (src/lib/lockdown.ts): `requireSession()`, every page that would otherwise
- * send them to sign in again, and the Hexclave handler once signing in is
+ * send them to sign in again, and the GitHub sign-in once signing in is
  * closed. Public, and it reads nothing but the stage, so it answers while the
  * rest of the app is refusing.
  *
@@ -36,9 +30,9 @@ export default async function LockdownPage() {
   const copy = STAGE_COPY[stage];
   // The same memoized resolve the header already ran: no second round trip.
   const [session, cookieStore] = await Promise.all([auth(), cookies()]);
-  // Refused while still signed in to Hexclave: offer the way out.
-  const refused =
-    !session?.user && cookieStore.getAll().some((c) => HEXCLAVE_SESSION_COOKIE.test(c.name));
+  // Refused while still holding a session: offer the way out. At `full` the
+  // app refuses before it asks GPID anything, so the cookie alone says so.
+  const refused = !session?.user && cookieStore.has(SESSION_COOKIE);
   const closed = signInClosed();
 
   return (
@@ -75,14 +69,16 @@ export default async function LockdownPage() {
           </Button>
         ) : !closed ? (
           <Button asChild size="sm">
-            <Link href="/handler/sign-in">Sign in</Link>
+            <Link href="/auth/github">Sign in</Link>
           </Button>
         ) : null}
         {refused ? (
-          // Signing out works at every stage; the handler lets it through.
-          <Button asChild size="sm" variant="outline">
-            <Link href="/handler/sign-out">Sign out</Link>
-          </Button>
+          // Signing out works at every stage.
+          <form action="/auth/sign-out" method="post">
+            <Button type="submit" size="sm" variant="outline">
+              Sign out
+            </Button>
+          </form>
         ) : null}
         <Button asChild size="sm" variant="outline">
           <Link href="/for-contributors">For contributors</Link>

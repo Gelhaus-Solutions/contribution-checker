@@ -1,13 +1,11 @@
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
-import { StackProvider, StackTheme } from "@hexclave/next";
 import { GeistSans } from "geist/font/sans";
 import { GeistMono } from "geist/font/mono";
 import "./globals.css";
 import { auth } from "@/auth";
 import { BrandProvider } from "@/components/brand";
 import { cn } from "@/lib/cn";
-import { getStackServerApp } from "@/lib/stack";
 import { env } from "@/lib/env";
 import { ownBrand } from "@/lib/own-brand";
 import {
@@ -61,10 +59,10 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 // Force every route to render at request time. The app is built into a generic
-// image with NO Hexclave env (STACK_*), so at build time auth() short-circuits
+// image with NO GPID env (GPID_*), so at build time auth() short-circuits
 // to null BEFORE reading cookies -> Next would prerender auth-gated pages like
 // /dashboard, /admin and /welcome as STATIC and bake their unauthenticated
-// "redirect to /handler/sign-in" into the output, which is then served to every
+// "redirect to the sign-in" into the output, which is then served to every
 // signed-in user (the redirect loop). Rendering dynamically makes auth() run at
 // runtime with the real session. The whole app depends on the session anyway.
 export const dynamic = "force-dynamic";
@@ -76,19 +74,15 @@ export default async function RootLayout({
 }) {
   // All three are independent, and this layout gates the render of every page,
   // so they are issued together rather than one after another. `auth()` is the
-  // long pole (it talks to Hexclave); making the theme cookie and the provider
+  // long pole (it talks to GPID); making the theme cookie and the brand
   // wait behind it added latency to every request for nothing.
-  //
-  // Only build/mount the Hexclave provider when configured, so unconfigured
-  // deploys and the build phase don't require a live instance.
   //
   // Reading a cookie is free here: the app is force-dynamic anyway, and it
   // keeps the theme server-readable. Stamping "dark" is what makes a pinned
   // dark theme flash-free; "system" is resolved by ThemeScript before paint,
   // which is why <html> needs suppressHydrationWarning.
-  const [session, stackApp, cookieStore, brand] = await Promise.all([
+  const [session, cookieStore, brand] = await Promise.all([
     auth(),
-    env.stackConfigured ? getStackServerApp() : null,
     cookies(),
     ownBrand(),
   ]);
@@ -127,13 +121,7 @@ export default async function RootLayout({
         <RuntimeEnvScript />
       </head>
       <body className="min-h-screen font-sans antialiased">
-        {stackApp ? (
-          <StackProvider app={stackApp}>
-            <StackTheme>{content}</StackTheme>
-          </StackProvider>
-        ) : (
-          content
-        )}
+        {content}
       </body>
     </html>
   );

@@ -1,7 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
 
 /**
- * Public routes only. Everything behind auth needs a Hexclave session, which
+ * Public routes only. Everything behind auth needs a GPID session, which
  * this suite deliberately does not try to fake.
  */
 const PUBLIC_ROUTES = [

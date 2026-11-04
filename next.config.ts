@@ -36,9 +36,9 @@ const config: NextConfig = {
   },
   async headers() {
     // The Content-Security-Policy is deliberately NOT set here: these header
-    // rules are baked into routes-manifest.json at `next build`, but the CSP's
-    // connect-src must include the operator's Hexclave backend (STACK_API_URL),
-    // which is only known at container runtime in our generic CI image. The CSP
+    // rules are baked into routes-manifest.json at `next build`, but the CSP
+    // carries values only known at container runtime in our generic CI image
+    // (GPID_URL, CSP_EXTRA_DOMAINS, the Sentry report endpoint). The CSP
     // (and its Report-To) is therefore set per-request in src/middleware.ts
     // (see src/lib/security/csp.ts). The static headers below are constant and
     // safe to bake.

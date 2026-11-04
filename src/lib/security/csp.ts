@@ -1,10 +1,10 @@
 /**
  * Content-Security-Policy built at RUNTIME (in middleware), not baked into the
- * build manifest by next.config's headers(). The connect-src must include the
- * operator's Hexclave backend (STACK_API_URL), which is only known at container
+ * build manifest by next.config's headers(). Its runtime inputs (GPID_URL,
+ * CSP_EXTRA_DOMAINS, the Sentry report endpoint) are only known at container
  * runtime in our generic CI-built image, so it can't be set at `next build`.
  *
- * Edge-safe: only string building + process.env reads, no Node/Hexclave/Vault.
+ * Edge-safe: only string building + process.env reads, no Node/Vault.
  */
 
 function originOf(url: string | undefined): string | null {
@@ -45,17 +45,14 @@ export function cspReportEndpoint(): string | null {
 }
 
 export function buildCsp(): string {
-  // The browser-side Hexclave SDK (mounted app-wide via <StackProvider>) calls
-  // the backend directly, so its origin must be allowed in connect-src. The SDK
-  // also bundles Stripe (Hexclave billing), which loads js.stripe.com and talks
-  // to api.stripe.com / renders Stripe iframes, so those hosts are allowed too.
-  const stackOrigin = originOf(process.env.STACK_API_URL);
+  // No sign-in backend is reached from the browser: GPID is spoken to by this
+  // server only (src/lib/sso.ts), so nothing of it is in connect-src.
 
   // Operator-added domains, appended to the resource directives so an allowed
   // domain works wherever the page needs it (connect/img/script/style/font/
-  // frame/media/worker). `data:`/`blob:` are in connect-src because the Hexclave
-  // SDK fetch()es data:/blob: URLs (e.g. avatar images on the account-settings
-  // page); a Fetch is governed by connect-src, not img-src.
+  // frame/media/worker). `data:`/`blob:` stay in connect-src for client code
+  // that fetch()es a data: or blob: URL; a Fetch is governed by connect-src,
+  // not img-src.
   const extra = extraDomains();
   // GPlatform Identity, where the instance reads its catalogue (GPID_URL): the
   // header draws the catalogue's mark, the favicon links it, and the apps
@@ -82,7 +79,6 @@ export function buildCsp(): string {
       "'unsafe-inline'",
       "'unsafe-eval'",
       "blob:",
-      "https://js.stripe.com",
       ...extra,
     ],
     ["worker-src", "'self'", "blob:", ...extra],
@@ -97,17 +93,9 @@ export function buildCsp(): string {
       "https://*.ingest.sentry.io",
       "https://*.ingest.us.sentry.io",
       "https://*.ingest.de.sentry.io",
-      "https://api.stripe.com",
-      stackOrigin,
       ...extra,
     ],
-    [
-      "frame-src",
-      "'self'",
-      "https://js.stripe.com",
-      "https://hooks.stripe.com",
-      ...extra,
-    ],
+    ["frame-src", "'self'", ...extra],
     ["frame-ancestors", "'none'"],
     ["base-uri", "'self'"],
     ["form-action", "'self'"],

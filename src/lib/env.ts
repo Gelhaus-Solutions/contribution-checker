@@ -52,9 +52,9 @@ const schema = z.object({
   GPTERMS_URL: optionalUrl,
   GPTERMS_API_KEY: z.string().optional(),
 
-  // Legacy NextAuth vars. No longer used after the Hexclave migration (login is
-  // handled by Hexclave); kept optional for backward compat and removed in the
-  // post-cutover cleanup. AUTH_SECRET is no longer required.
+  // Legacy NextAuth vars. No longer used since login moved off NextAuth (to
+  // Hexclave, then GPID); kept optional for backward compat and removed in a
+  // later cleanup. AUTH_SECRET is no longer required.
   AUTH_SECRET: z.string().min(16).optional(),
   AUTH_URL: z.string().url().optional(),
   AUTH_TRUST_HOST: z.string().optional(),
@@ -102,27 +102,12 @@ const schema = z.object({
   SUPER_ADMINS: z.string().optional(),
   PROJECT_CREATORS: z.string().optional(),
 
-  // Hexclave (self-hosted Stack Auth fork): human login. Deliberately NOT
-  // prefixed NEXT_PUBLIC_: the project id and publishable client key are
-  // public, but we ship a single generic Docker image built in CI and configure
-  // it at container runtime, so nothing may be inlined at `next build`. These
-  // are read server-side at runtime and reach the browser via <StackProvider>'s
-  // toClientJson serialization (runtime), not via build-time inlining. The
-  // secret server key may live in Vault (resolved via getSecret at request
-  // time). STACK_API_URL points the SDK at the operator's self-hosted backend.
-  STACK_PROJECT_ID: z.string().optional(),
-  STACK_PUBLISHABLE_CLIENT_KEY: z.string().optional(),
-  STACK_SECRET_SERVER_KEY: z.string().optional(),
-  STACK_API_URL: z.string().url().optional(),
-  // Svix signing secret for verifying Hexclave webhooks (user.created, etc.).
-  STACK_WEBHOOK_SECRET: z.string().optional(),
-  // Super-secret admin key for the StackAdminApp. Required only for managing
-  // permission DEFINITIONS (the project permission hierarchy) and the Instance
-  // Admin team; the normal request path never needs it. May live in Vault.
-  STACK_SUPER_SECRET_ADMIN_KEY: z.string().optional(),
-  // Optional pin for the Instance Admin team. When unset, the team is discovered
-  // by its server-only `instanceAdmin` metadata marker (see stack-provisioning).
-  STACK_INSTANCE_ADMIN_TEAM_ID: z.string().optional(),
+  // GPlatform Identity (GPID): human login, GitHub only, through GPID's
+  // provider flow (src/lib/sso.ts). GPID_URL is shared with the header chrome
+  // below. The slug is this app's at GPID; the secret is the one GPID's
+  // `register-app.mjs` printed at enrolment and may live in Vault.
+  GPID_APP_SLUG: z.string().min(1).default("contribution-checker"),
+  GPID_APP_SECRET: z.string().optional(),
 
   SMTP_HOST: z.string().optional(),
   SMTP_PORT: z.coerce.number().int().positive().default(587),
@@ -404,21 +389,10 @@ export const env = {
   glockdownDecoyLogins: csv(raw.GLOCKDOWN_DECOY_LOGIN),
   glockdownDecoyKeys: csv(raw.GLOCKDOWN_DECOY_KEY_SHA256).map((h) => h.toLowerCase()),
   projectCreators: csv(raw.PROJECT_CREATORS).map((s) => s.toLowerCase()),
-  // Hexclave is "configured" when the public identifiers are present and the
-  // secret server key is available (env or Vault). The auth layer short-circuits
-  // when this is false the same way the webhook path does for GitHub.
-  stackConfigured:
-    !!raw.STACK_PROJECT_ID &&
-    !!raw.STACK_PUBLISHABLE_CLIENT_KEY &&
-    presentInEnvOrVault("STACK_SECRET_SERVER_KEY"),
-  // Admin-app capable: the StackAdminApp can be built (permission-definition
-  // provisioning + Instance Admin team management). The hot path never needs
-  // this; provisioning/bootstrap short-circuits with a log when it's false.
-  stackAdminConfigured:
-    !!raw.STACK_PROJECT_ID &&
-    !!raw.STACK_PUBLISHABLE_CLIENT_KEY &&
-    presentInEnvOrVault("STACK_SECRET_SERVER_KEY") &&
-    presentInEnvOrVault("STACK_SUPER_SECRET_ADMIN_KEY"),
+  // GPID is "configured" when its address is set and the app secret is
+  // available (env or Vault). The auth layer short-circuits to signed out when
+  // this is false, which keeps build, tests and unconfigured deploys safe.
+  gpidConfigured: !!raw.GPID_URL && presentInEnvOrVault("GPID_APP_SECRET"),
   // An App whose key GMint holds needs no private key here.
   githubAppConfigured:
     presentInEnvOrVault("GITHUB_APP_ID") &&

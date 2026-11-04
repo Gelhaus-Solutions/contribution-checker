@@ -2,7 +2,7 @@ import type { TermsKind } from "@/lib/terms";
 
 /**
  * Local session shape. Previously this came from the `next-auth` module
- * augmentation in src/auth.ts; after the Hexclave migration the `auth()` shim
+ * augmentation in src/auth.ts; the `auth()` shim (GPID since the move off Hexclave)
  * returns this exact shape so the ~46 downstream consumers (which read
  * `session.user.{id,ghId,ghLogin,isSuperAdmin,canCreateProj,...}`) are unchanged.
  */
@@ -18,10 +18,11 @@ export type SessionUser = {
   country?: string | null;
   isSuperAdmin: boolean;
   canCreateProj: boolean;
-  /** Hexclave has verified `email`. Only a verified address is reported to
+  /** GPID has verified `email`. Only a verified address is reported to
    * GPlatform Identity (src/app/api/identity-chrome/route.ts). */
   emailVerified?: boolean;
-  /** True only when the user is restricted BY AN ADMINISTRATOR in Stack Auth.
+  /** True only when the user is restricted BY AN ADMINISTRATOR. Nothing sets it
+   * since the move to GPID; kept so the /restricted route keeps its meaning.
    * When set, all protected surfaces/actions must route to /restricted. */
   restricted?: boolean;
   /** The admin's public reason string (from `restrictedByAdminReason`), shown on

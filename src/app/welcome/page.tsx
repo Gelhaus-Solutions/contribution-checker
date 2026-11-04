@@ -1,9 +1,10 @@
-import { Suspense } from "react";
 import { redirect } from "next/navigation";
-import { auth } from "@/auth";
+import Link from "next/link";
+import { auth, signInUrl } from "@/auth";
 import { signInPath } from "@/lib/authz";
 import { safeNextPath } from "@/lib/auth/next-path";
 import { SiteHeader } from "@/components/site-header";
+import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -11,14 +12,13 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { WelcomeClient } from "./welcome-client";
 
 /**
- * Post-login onboarding interstitial. Enforced for protected routes by
- * requireSession() (redirects here until the GitHub identity is linked). Forces
- * a GitHub connection (client-side) and then completes onboarding server-side:
- * binds ghId/ghLogin, reconciles permissions, and captures the country code in
- * the background (no user prompt).
+ * The onboarding gate's landing. requireSession() sends a person here while
+ * their account has no GitHub identity (ghId). Signing in with GitHub through
+ * GPID fills it on the way in (auth() takes it from GPID's link), so this is
+ * reached only by an account whose GPID sign-in carries no GitHub link: it
+ * asks for the GitHub sign-in, which links it.
  *
  * Uses auth() directly (never requireSession) so it can't redirect-loop into
  * itself. `next` brings the person back where they came from (the project
@@ -27,9 +27,9 @@ import { WelcomeClient } from "./welcome-client";
 export default async function WelcomePage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string; next?: string }>;
+  searchParams: Promise<{ next?: string }>;
 }) {
-  const { error, next: asked } = await searchParams;
+  const { next: asked } = await searchParams;
   const next = safeNextPath(asked);
   const here = next === null ? "/welcome" : `/welcome?next=${encodeURIComponent(next)}`;
   const session = await auth();
@@ -40,38 +40,24 @@ export default async function WelcomePage({
     redirect(next ?? "/dashboard");
   }
 
-
   return (
     <>
       <SiteHeader />
       <main className="mx-auto max-w-md p-6">
-        {/*
-         * WelcomeClient uses Hexclave client hooks (useUser/useConnectedAccount
-         * with `or: "redirect"`) that call suspendIfSsr() internally. For users
-         * without GitHub connected (email/Google sign-ups) those hooks bail to
-         * client-side rendering, which Next requires a Suspense boundary for;
-         * without it the page 500s with NoSuspenseBoundaryError.
-         */}
-        <Suspense fallback={<WelcomeFallback />}>
-          <WelcomeClient error={error} next={next} />
-        </Suspense>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Finishing setup</CardTitle>
+            <CardDescription>
+              Contribution Checker needs your GitHub account. Sign in with GitHub once to link it.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button asChild>
+              <Link href={signInUrl(next ?? "/dashboard")}>Continue with GitHub</Link>
+            </Button>
+          </CardContent>
+        </Card>
       </main>
     </>
-  );
-}
-
-function WelcomeFallback() {
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-base">Finishing setup</CardTitle>
-        <CardDescription>
-          Linking your GitHub identity. This only takes a moment.
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <p className="text-sm text-muted-foreground">Loading…</p>
-      </CardContent>
-    </Card>
   );
 }

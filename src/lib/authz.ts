@@ -1,5 +1,5 @@
 import { cache } from "react";
-import { auth, lockedOut } from "@/auth";
+import { auth, lockedOut, signInUrl } from "@/auth";
 import { prisma } from "@/lib/db";
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
@@ -37,9 +37,7 @@ export function roleAtLeast(actual: Role, required: Role): boolean {
  */
 export async function signInPath(returnTo?: string): Promise<string> {
   if ((await lockedOut()) || signInClosed()) return "/lockdown";
-  return returnTo
-    ? `/handler/sign-in?after_auth_return_to=${encodeURIComponent(returnTo)}`
-    : "/handler/sign-in";
+  return signInUrl(returnTo);
 }
 
 export async function requireSession(): Promise<Session> {
@@ -52,7 +50,7 @@ export async function requireSession(): Promise<Session> {
   // Onboarding gate: every user must have a linked GitHub identity (ghId)
   // before using protected surfaces (the country code is captured in the
   // background, best-effort, and is not gated on). Enforced here (not in edge
-  // middleware) because it depends on DB/Hexclave state. The /welcome flow uses
+  // middleware) because it depends on DB and GPID state. The /welcome flow uses
   // auth() directly, so it never re-enters this gate (no redirect loop).
   if (!session.user.ghId) redirect("/welcome");
   await requireTermsStanding(session);
@@ -130,7 +128,7 @@ export const getProjectMembership = cache(async function getProjectMembership(
 
 /**
  * Resolve the viewer's effective LEAF permissions for a project, reading the
- * synced ProjectMember.permissions cache (no Stack Auth round-trip). Super-admins
+ * member's ProjectMember.permissions (the truth, held here). Super-admins
  * get the full leaf set regardless of membership. Returns [] for a non-member
  * non-super-admin. Used by the project layout/nav.
  */

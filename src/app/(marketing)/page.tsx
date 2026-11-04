@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { Metadata } from "next";
 import { auth, signIn } from "@/auth";
+import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { SubmitButton } from "@/components/ui/submit-button";
 import { Section, Steps } from "@/components/marketing/section";
@@ -30,8 +31,40 @@ const EXAMPLE = {
   claUrl: "https://checker.example.com/p/acme-router/cla",
 };
 
-export default async function Home() {
+/**
+ * What the GitHub sign-in through GPID came back with, when it did not sign
+ * anybody in (src/app/auth/callback/route.ts). Shown above the hero's buttons.
+ */
+const SIGN_IN_NOTICES: Record<string, { variant: "info" | "warning"; title: string; text: string }> = {
+  confirm: {
+    variant: "info",
+    title: "Check your mailbox",
+    text: "Your GitHub address already belongs to a G Platform account. We sent it a link to connect GitHub; open it, then log in again.",
+  },
+  cancelled: {
+    variant: "info",
+    title: "Sign-in cancelled",
+    text: "GitHub did not sign you in. Log in again whenever you are ready.",
+  },
+  failed: {
+    variant: "warning",
+    title: "Sign-in did not work",
+    text: "Something went wrong signing you in with GitHub. Please try again.",
+  },
+  unavailable: {
+    variant: "warning",
+    title: "Sign-in is unavailable",
+    text: "We could not reach the sign-in service. Please try again in a few minutes.",
+  },
+};
+
+export default async function Home({
+  searchParams,
+}: {
+  searchParams: Promise<{ signin?: string }>;
+}) {
   const session = await auth();
+  const notice = SIGN_IN_NOTICES[(await searchParams).signin ?? ""];
 
   // Every artifact on this page is produced by the same functions the webhook
   // calls. Nothing here is retyped marketing copy.
@@ -77,6 +110,11 @@ export default async function Home() {
               the pull request and leaves a comment pointing at your application
               form. When you approve them, it reopens the pull request.
             </p>
+            {notice && !session?.user ? (
+              <Alert variant={notice.variant} title={notice.title} className="mt-7 max-w-2xl">
+                <p>{notice.text}</p>
+              </Alert>
+            ) : null}
             <div className="mt-7 flex flex-wrap items-center gap-3">
               <Button asChild>
                 <Link href="/how-it-works">Read how it works</Link>

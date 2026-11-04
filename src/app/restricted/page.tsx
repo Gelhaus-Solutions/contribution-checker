@@ -12,7 +12,8 @@ import {
 } from "@/components/ui/card";
 
 /**
- * Shown to users an administrator has restricted in Stack Auth. Uses auth()
+ * Shown to users an administrator has restricted. Nothing sets that since the
+ * move to GPID, where a suspended account simply has no session. Uses auth()
  * DIRECTLY (never requireSession) so it can't redirect-loop into itself:
  * requireSession() and the per-action guards send restricted users here, and a
  * non-restricted visitor is bounced back to /dashboard. The only action offered

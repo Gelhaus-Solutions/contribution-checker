@@ -1,15 +1,8 @@
 import "server-only";
 import * as Sentry from "@sentry/nextjs";
-import type { ServerUser } from "@hexclave/next";
 import { prisma } from "@/lib/db";
+import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
-import {
-  CREATE_PROJECT_PERMISSION,
-  GITHUB_PROVIDER_CONFIG_ID,
-  getStackServerApp,
-  SUPER_ADMIN_PERMISSION,
-} from "@/lib/stack";
-import { isInstanceAdminTeam } from "@/lib/stack-provisioning";
 
 type GithubUser = {
   id: number;
@@ -20,17 +13,15 @@ type GithubUser = {
 };
 
 /**
- * Fetch a GitHub account's PUBLIC profile by numeric id. Unlike `/user` (which
- * needs an authenticated token), `GET /user/{id}` resolves login/name/avatar for
- * any account with no auth. We use it so onboarding never depends on a
- * connected-account access token, which is unavailable when Hexclave's GitHub
- * provider runs on shared OAuth keys (the token call fails and onboarding would
- * otherwise throw before persisting ghId, gating the user out forever).
+ * A GitHub account's PUBLIC profile by numeric id. `GET /user/{id}` resolves
+ * login, name and avatar for any account with no auth, so nothing here needs a
+ * GitHub token of the person's. GPID already hands over the numeric id and the
+ * login on its link; this adds the name and the picture, best effort.
  *
  * A server token (GITHUB_TOKEN) is attached when present only to lift the 60/hr
  * unauthenticated rate limit; it is not required.
  */
-async function fetchGithubUserById(id: number): Promise<GithubUser> {
+export async function fetchGithubUserById(id: number): Promise<GithubUser> {
   const headers: Record<string, string> = {
     Accept: "application/vnd.github+json",
     "User-Agent": "contribution-checker",
@@ -44,135 +35,11 @@ async function fetchGithubUserById(id: number): Promise<GithubUser> {
   return (await res.json()) as GithubUser;
 }
 
-/** True if the Hexclave user has a GitHub OAuth provider connected. */
-export function isGithubConnected(stackUser: ServerUser): boolean {
-  return stackUser.oauthProviders.some(
-    (p) => p.id === GITHUB_PROVIDER_CONFIG_ID,
-  );
-}
-
-/**
- * Pull the GitHub identity (numeric id + login) from the connected account and
- * persist it onto the local User row.
- *
- * Handles the lazy-link merge case: if another local row already owns this
- * `ghId` (the real pre-existing account, while this session created a fresh
- * row), re-point `stackUserId` to the original row and discard the fresh,
- * relation-less row. Returns the id of the row the session should be bound to.
- */
-export async function syncGitHubIdentity(
-  stackUser: ServerUser,
-  localUserId: string,
-): Promise<{ userId: string; ghId: number; ghLogin: string | null }> {
-  // The GitHub numeric id comes straight from Stack's stored OAuth provider
-  // link (its `accountId`). This is authoritative and needs no connected-account
-  // access token, so it works even when Hexclave's GitHub provider runs on
-  // shared OAuth keys (where getAccessToken is never available).
-  //
-  // Match on the provider `type` ("github"): the SDK's `getOAuthProvider(id)`
-  // keys on the per-connection instance id, NOT the provider type, so it never
-  // finds "github". listOAuthProviders() exposes `{ type, accountId }`.
-  const providers = await stackUser.listOAuthProviders();
-  const provider = providers.find(
-    (p) => p.type === GITHUB_PROVIDER_CONFIG_ID && p.accountId,
-  );
-  const accountId = provider?.accountId?.trim();
-  if (!accountId) {
-    throw new Error(
-      "GitHub OAuth provider is not linked to the Hexclave user (no accountId)",
-    );
-  }
-  const ghId = Number(accountId);
-  if (!Number.isInteger(ghId) || ghId <= 0) {
-    throw new Error(`GitHub accountId is not a numeric id: ${accountId}`);
-  }
-
-  // The login + profile are public and resolved by numeric id (no token). This
-  // is best-effort: if GitHub is unreachable/rate-limited we still persist ghId
-  // below so the onboarding gate is satisfied, and ghLogin backfills on a later
-  // sign-in (the gate keys on ghId only).
-  let ghLogin: string | null = null;
-  let ghName: string | null = null;
-  let ghAvatar: string | null = null;
-  try {
-    const gh = await fetchGithubUserById(ghId);
-    ghLogin = gh.login || null;
-    ghName = gh.name;
-    ghAvatar = gh.avatar_url;
-  } catch (e) {
-    logger.warn(
-      { err: e, "stack.user_id": stackUser.id, "github.id": ghId },
-      "auth: could not fetch GitHub profile by id; persisting ghId only",
-    );
-  }
-
-  const owner = await prisma.user.findUnique({ where: { ghId } });
-  if (owner && owner.id !== localUserId) {
-    // Re-point the Hexclave link to the pre-existing GitHub-identified row and
-    // drop the freshly-created session row (it has no relations yet).
-    await prisma.$transaction(async (tx) => {
-      await tx.user.update({
-        where: { id: localUserId },
-        data: { stackUserId: null },
-      });
-      await tx.user.update({
-        where: { id: owner.id },
-        data: {
-          stackUserId: stackUser.id,
-          ...(ghLogin ? { ghLogin } : {}),
-          name: owner.name ?? ghName,
-          image: owner.image ?? ghAvatar,
-        },
-      });
-      await tx.user.delete({ where: { id: localUserId } }).catch(() => {
-        // Keep the row if it unexpectedly has relations; harmless, just logged.
-      });
-    });
-    logger.warn(
-      {
-        "stack.user_id": stackUser.id,
-        "github.id": ghId,
-        "merged.from": localUserId,
-        "merged.into": owner.id,
-      },
-      "auth: merged fresh session row into existing GitHub-identified user",
-    );
-    return { userId: owner.id, ghId, ghLogin: owner.ghLogin ?? ghLogin };
-  }
-
-  // Normal path: write the GitHub identity onto the current row. ghId is the
-  // gating field and must persist; ghLogin is unique, so if it collides with a
-  // row we did not match by ghId (e.g. a since-renamed GitHub account), fall
-  // back to writing ghId alone rather than blocking the user out of the app.
-  try {
-    await prisma.user.update({
-      where: { id: localUserId },
-      data: {
-        ghId,
-        ...(ghLogin ? { ghLogin } : {}),
-        ...(ghName ? { name: ghName } : {}),
-        ...(ghAvatar ? { image: ghAvatar } : {}),
-      },
-    });
-  } catch (e) {
-    logger.warn(
-      { err: e, "stack.user_id": stackUser.id, "github.id": ghId },
-      "auth: persisting full GitHub identity failed; retrying with ghId only",
-    );
-    await prisma.user.update({
-      where: { id: localUserId },
-      data: { ghId },
-    });
-    return { userId: localUserId, ghId, ghLogin: null };
-  }
-  return { userId: localUserId, ghId, ghLogin };
-}
-
 /**
  * The GitHub login of a user whose row has the GitHub id but not the login:
- * onboarding persists the id even when GitHub cannot be asked for the profile,
- * and nothing asked again, so the login stayed empty. Resolved by id now and
- * kept; null when GitHub still does not answer, or the login is another row's.
+ * an account from before GPID kept logins, or one whose login was taken by
+ * another row when it was written. Resolved by id now and kept; null when
+ * GitHub still does not answer, or the login is another row's.
  */
 export async function fillGithubLogin(
   userId: string,
@@ -198,128 +65,31 @@ export async function fillGithubLogin(
 export type OrgRoles = { isSuperAdmin: boolean; canCreateProj: boolean };
 
 /**
- * Resolve a user's org roles (super-admin / can-create-project). Stack Auth is
- * the source of truth and the live authority is:
- *   - SUPER-ADMIN: membership in the Instance Admin team (server-trusted by the
- *     `instanceAdmin` serverMetadata marker or the STACK_INSTANCE_ADMIN_TEAM_ID
- *     env pin; see isInstanceAdminTeam), with the global `super_admin` project
- *     permission kept only as an explicit break-glass fallback.
- *   - CAN-CREATE-PROJECT: the global `create_project` permission, or implied by
- *     super-admin.
- *
- * The SUPER_ADMINS / PROJECT_CREATORS env CSVs are NO LONGER a live grant: they
- * only seed the Instance Admin team once (see bootstrapInstanceAdmins). The
- * previous client-settable team-metadata `grantedRoles` path is removed (it was
- * a privilege-escalation hole). Pure: reads only, no writes. auth() keeps the
- * local cache columns in sync from this.
+ * The org roles a GitHub login starts with: SUPER_ADMINS makes a super-admin,
+ * PROJECT_CREATORS a project creator. Applied once, when an account first
+ * gets that login, never again: the columns on `User` are the truth since the
+ * move off Hexclave, and /admin/allowlist changes them, so a revocation there
+ * must not be undone by the environment at the next sign-in.
  */
-export async function resolveOrgRoles(
-  stackUser: ServerUser,
-): Promise<OrgRoles> {
-  // Three independent Hexclave reads. Issued concurrently: run in sequence they
-  // cost three round-trips on the auth path of every request, and none of them
-  // feeds the others. Each is guarded on its own so one failing read degrades to
-  // "no privilege from this source" instead of discarding a sibling's answer.
-  const read = async <T>(
-    run: () => Promise<T>,
-    what: string,
-  ): Promise<T | null> => {
-    try {
-      return await run();
-    } catch (e) {
-      logger.warn({ err: e, "stack.user_id": stackUser.id }, `auth: ${what}`);
-      return null;
-    }
+export function seededRoles(ghLogin: string | null): OrgRoles {
+  const login = ghLogin?.toLowerCase() ?? null;
+  const isSuperAdmin = login !== null && env.superAdmins.includes(login);
+  return {
+    isSuperAdmin,
+    canCreateProj: isSuperAdmin || (login !== null && env.projectCreators.includes(login)),
   };
-
-  const [superAdminPerm, createProjectPerm, teams] = await Promise.all([
-    // Global project (break-glass) permissions.
-    read(
-      () => stackUser.getPermission(SUPER_ADMIN_PERMISSION),
-      "reading the super-admin project permission failed",
-    ),
-    read(
-      () => stackUser.getPermission(CREATE_PROJECT_PERMISSION),
-      "reading the create-project permission failed",
-    ),
-    // Instance Admin team membership = super-admin (the primary live authority).
-    read(() => stackUser.listTeams(), "reading team memberships failed"),
-  ]);
-
-  const isSuperAdmin =
-    !!superAdminPerm || !!teams?.some((team) => isInstanceAdminTeam(team));
-  // Super-admin always implies project creation.
-  const canCreateProj = isSuperAdmin || !!createProjectPerm;
-
-  return { isSuperAdmin, canCreateProj };
-}
-
-/**
- * Resolve roles and mirror them to the local cache columns. Used by the
- * onboarding flow and the Hexclave webhook for immediacy; auth() also keeps the
- * mirror current on each request.
- */
-export async function reconcileOrgPermissions(
-  stackUser: ServerUser,
-  localUserId: string,
-): Promise<void> {
-  const roles = await resolveOrgRoles(stackUser);
-  await prisma.user.update({
-    where: { id: localUserId },
-    data: { isSuperAdmin: roles.isSuperAdmin, canCreateProj: roles.canCreateProj },
-  });
-}
-
-/**
- * Remove a country code written by the old geo capture from the user's
- * Hexclave clientReadOnlyMetadata. Nothing ever read it, so it was collected
- * without a purpose (GDPR Art. 5(1)(c)); the local column was emptied by the
- * 20261001120000_privacy_minimisation migration and this clears the canonical
- * copy. A no-op once the key is gone, so the steady state costs no write.
- */
-export async function clearGeoCountry(stackUser: ServerUser): Promise<void> {
-  const existing =
-    (stackUser.clientReadOnlyMetadata as Record<string, unknown> | null) ?? {};
-  if (!("country" in existing)) return;
-  const rest = { ...existing };
-  delete rest.country;
-  await stackUser.update({
-    clientReadOnlyMetadata: rest as typeof stackUser.clientReadOnlyMetadata,
-  });
 }
 
 /** Emit the auth.signin metric (preserved from the old NextAuth signIn event). */
 export function recordSignInMetric(isNewUser: boolean): void {
   Sentry.metrics.count("auth.signin", 1, {
-    attributes: { provider: "hexclave", "auth.is_new_user": isNewUser },
+    attributes: { provider: "gpid", "auth.is_new_user": isNewUser },
   });
 }
 
-/** Emit the auth.signout metric (preserved from the old NextAuth signOut event).
- * Fired from the signOut() shim, which is what the app's "Sign out" button
- * calls (the same trigger the old metric had). */
+/** Emit the auth.signout metric, from the sign-out route and the signOut() shim. */
 export function recordSignOutMetric(): void {
   Sentry.metrics.count("auth.signout", 1, {
-    attributes: { provider: "hexclave" },
+    attributes: { provider: "gpid" },
   });
-}
-
-/**
- * Grant or revoke a project-level Hexclave permission for a linked user
- * (Hexclave is the source of truth). Used by /admin/allowlist. Idempotent: only
- * writes when the desired state differs. Throws if the Hexclave user is missing.
- */
-export async function setOrgPermission(
-  stackUserId: string,
-  permissionId: string,
-  granted: boolean,
-): Promise<void> {
-  const stackApp = await getStackServerApp();
-  const stackUser = await stackApp.getUser(stackUserId);
-  if (!stackUser) {
-    throw new Error(`Hexclave user not found for ${stackUserId}`);
-  }
-  const has = await stackUser.hasPermission(permissionId);
-  if (granted && !has) await stackUser.grantPermission(permissionId);
-  if (!granted && has) await stackUser.revokePermission(permissionId);
 }

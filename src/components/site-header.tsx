@@ -70,7 +70,7 @@ export async function SiteHeader({
         ) : null}
         <nav className="flex items-center gap-3 text-sm">
           {/* Outside the session branch on purpose: signed-out visitors and
-              deployments with no Hexclave config (where UserCluster renders
+              deployments with no GPID config (where UserCluster renders
               nothing) still get a theme switcher. */}
           <ThemeToggle />
           {session?.user ? (
@@ -86,7 +86,7 @@ export async function SiteHeader({
               <UserCluster
                 isSuperAdmin={session.user.isSuperAdmin}
                 unread={unread}
-                stackConfigured={env.stackConfigured}
+                gpidConfigured={env.gpidConfigured}
                 identityChrome={identityChrome !== null}
                 person={{
                   id: session.user.id,

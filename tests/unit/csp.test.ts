@@ -1,13 +1,11 @@
 import { describe, expect, it, afterEach } from "vitest";
 import { buildCsp, reportToHeader } from "@/lib/security/csp";
 
-const origStack = process.env.STACK_API_URL;
 const origReport = process.env.SENTRY_CSP_ENDPOINT;
 const origExtra = process.env.CSP_EXTRA_DOMAINS;
 const origGpid = process.env.GPID_URL;
 
 afterEach(() => {
-  process.env.STACK_API_URL = origStack;
   process.env.SENTRY_CSP_ENDPOINT = origReport;
   if (origExtra === undefined) delete process.env.CSP_EXTRA_DOMAINS;
   else process.env.CSP_EXTRA_DOMAINS = origExtra;
@@ -17,7 +15,6 @@ afterEach(() => {
 
 describe("buildCsp", () => {
   it("always allows self + Sentry ingest in connect-src", () => {
-    delete process.env.STACK_API_URL;
     const csp = buildCsp();
     expect(csp).toContain("connect-src 'self'");
     expect(csp).toContain("https://*.ingest.sentry.io");
@@ -25,19 +22,15 @@ describe("buildCsp", () => {
     expect(csp).toContain("frame-ancestors 'none'");
   });
 
-  it("includes the Hexclave backend ORIGIN (not the full URL) when configured", () => {
-    process.env.STACK_API_URL = "https://auth.egelhaus.de/some/path";
+  it("names no sign-in backend or Stripe: the browser never talks to either", () => {
+    process.env.STACK_API_URL = "https://auth.egelhaus.de";
     const csp = buildCsp();
-    expect(csp).toContain("https://auth.egelhaus.de");
-    expect(csp).not.toContain("https://auth.egelhaus.de/some/path");
+    expect(csp).not.toContain("auth.egelhaus.de");
+    expect(csp).not.toContain("stripe.com");
+    delete process.env.STACK_API_URL;
   });
 
-  it("ignores an invalid STACK_API_URL", () => {
-    process.env.STACK_API_URL = "not a url";
-    expect(buildCsp()).toContain("connect-src 'self'");
-  });
-
-  it("allows data:/blob: in connect-src (Hexclave fetch()es data: avatars)", () => {
+  it("allows data:/blob: in connect-src", () => {
     const csp = buildCsp();
     const connect = csp
       .split("; ")

@@ -53,7 +53,7 @@ describe("env under the production build phase", () => {
     // The placeholder exists only to let the full schema run; nothing should
     // read it as a real connection string, and no secret should look present.
     expect(env.githubAppConfigured).toBe(false);
-    expect(env.stackConfigured).toBe(false);
+    expect(env.gpidConfigured).toBe(false);
   });
 
   it("prefers a real value over the default when one is set", async () => {

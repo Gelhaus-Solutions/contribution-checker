@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 /**
  * Every place that draws the product's mark, name, title or favicon goes
  * through the brand the root layout reads (GPLATSSO-36), and the header swaps
- * Hexclave's user button for Identity's controls only where they are set up.
+ * a plain sign-out for Identity's controls only where they are set up.
  *
  * SOURCE guards: these files are `.tsx` and this suite runs `.ts` in node.
  * What a regression would change is an import or a prop, and that is what is
@@ -96,9 +96,9 @@ describe("the header", () => {
     );
   });
 
-  it("draws Identity's controls where they are set up, and Hexclave's button elsewhere", () => {
+  it("draws Identity's controls where they are set up, and a plain sign-out elsewhere", () => {
     const cluster = read("components/user-cluster.tsx");
     expect(cluster).toMatch(/if \(identityChrome\) \{[\s\S]*<HeaderChrome /u);
-    expect(cluster).toMatch(/<UserButton /u);
+    expect(cluster).toMatch(/<form action="\/auth\/sign-out" method="post">/u);
   });
 });

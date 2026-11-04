@@ -50,13 +50,8 @@ export const KNOWN_SECRET_NAMES = [
   // Key for pseudonymising a person's identifiers on a privacy request
   // (src/lib/account-erasure.ts). Read only when a plan pseudonymises.
   "PRIVACY_PSEUDONYM_KEY",
-  // Hexclave (Stack Auth). The publishable client key and project id are public
-  // and read directly from process.env; the secret/admin keys and the webhook
-  // signing secret may live in Vault, so they're listed here to pre-warm and to
-  // surface on the /admin/vault status page.
-  "STACK_SECRET_SERVER_KEY",
-  "STACK_SUPER_SECRET_ADMIN_KEY",
-  "STACK_WEBHOOK_SECRET",
+  // GPlatform Identity: the app secret GPID's enrolment printed (src/lib/sso.ts).
+  "GPID_APP_SECRET",
   // Temporal mTLS material. The client certificate, its private key, and the
   // (optional) CA bundle used to verify the Temporal frontend. Resolved once at
   // worker/client startup; PEM strings are passed straight to the SDK's TLS
