@@ -3,9 +3,7 @@ import { createHmac } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import { recordAudit } from "@/lib/audit";
 import { prisma } from "@/lib/db";
-import { env } from "@/lib/env";
 import { closeAccount } from "@/lib/gpterms";
-import { logger } from "@/lib/logger";
 import { getSecret } from "@/lib/vault/resolver";
 
 /**
@@ -48,7 +46,7 @@ export const PRIVACY_CATALOGUE: readonly PrivacyCategory[] = [
     id: "account",
     label: "Account",
     detail:
-      "Name, email address, image, GitHub login and id, and the sign-in identity in Hexclave. Pseudonymise keeps the account row with every identifier replaced, so applications and checks can stay; the Hexclave identity is deleted either way. Delete removes the account with its applications, notifications and memberships.",
+      "Name, email address, image, GitHub login and id, and the link to the person's GPlatform Identity account. Pseudonymise keeps the account row with every identifier replaced, so applications and checks can stay; the link to Identity is cut either way. Delete removes the account with its applications, notifications and memberships. The Identity account itself is GPlatform Identity's, and is erased by a request there.",
     actions: ["keep", "pseudonymise", "delete"],
     default: "pseudonymise",
     takesWithIt: ["applications", "applicationText", "notifications"],
@@ -177,7 +175,7 @@ export async function runPrivacyPlan(
         ...(github ? [{ ghLogin: { equals: github, mode: "insensitive" as const } }] : []),
       ],
     },
-    select: { id: true, email: true, ghLogin: true, ghId: true, stackUserId: true },
+    select: { id: true, email: true, ghLogin: true, ghId: true },
   });
   const userIds = users.map((u) => u.id);
   const logins = unique([github, ...users.map((u) => u.ghLogin?.toLowerCase() ?? null)]);
@@ -362,6 +360,7 @@ export async function runPrivacyPlan(
             image: null,
             country: null,
             stackUserId: null,
+            ssoSubject: null,
             ghLogin: p.text,
             ghId: p.id,
           },
@@ -371,9 +370,10 @@ export async function runPrivacyPlan(
     } else count("account", 0);
   });
 
-  if (action("account") !== "keep") {
-    const removed = await deleteHexclaveIdentities(users, emails);
-    notes2.push(`Sign-in identities deleted in Hexclave: ${String(removed)}.`);
+  if (action("account") !== "keep" && users.length > 0) {
+    notes2.push(
+      "The person's GPlatform Identity account is not erased here: it is Identity's, and a request there erases it.",
+    );
   }
 
   await recordAudit({
@@ -410,48 +410,4 @@ function unique(values: (string | null | undefined)[]): string[] {
 /** Case-insensitive replacement of a literal, for JSON text where a login may appear in any case. */
 function replaceAll(text: string, needle: string, replacement: string): string {
   return text.replace(new RegExp(needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi"), replacement);
-}
-
-/**
- * The person's identities in this instance's Hexclave project, deleted: the
- * one each account links to, and any other with the same address (a second
- * sign-up leaves one no local row points at). Over Hexclave's REST API, since
- * `@hexclave/next` imports `next/navigation`, which plain Node cannot resolve.
- */
-async function deleteHexclaveIdentities(
-  users: { stackUserId: string | null }[],
-  emails: string[],
-): Promise<number> {
-  if (!env.stackConfigured) return 0;
-  const base = (process.env.STACK_API_URL ?? "https://api.stack-auth.com").replace(/\/+$/, "");
-  const secret = await getSecret("STACK_SECRET_SERVER_KEY");
-  if (!secret) throw new Error("STACK_SECRET_SERVER_KEY is not available, so Hexclave identities cannot be deleted");
-  const headers = {
-    "x-stack-access-type": "server",
-    "x-stack-project-id": process.env.STACK_PROJECT_ID ?? "",
-    "x-stack-secret-server-key": secret,
-  };
-  const call = async (path: string, method = "GET") => {
-    const response = await fetch(`${base}/api/v1${path}`, { method, headers, cache: "no-store" });
-    if (response.status === 404) return null;
-    if (!response.ok) throw new Error(`Hexclave ${method} ${path.split("?")[0]} answered ${response.status}`);
-    return method === "DELETE" ? {} : ((await response.json()) as Record<string, unknown>);
-  };
-  const ids = new Set(users.map((u) => u.stackUserId).filter((v): v is string => !!v));
-  for (const address of emails) {
-    const page = await call(`/users?query=${encodeURIComponent(address)}&limit=20`);
-    for (const item of (page?.items ?? []) as { id: string; primary_email?: string | null }[]) {
-      if (item.primary_email?.toLowerCase() === address) ids.add(item.id);
-    }
-  }
-  let removed = 0;
-  for (const id of ids) {
-    try {
-      if ((await call(`/users/${encodeURIComponent(id)}`, "DELETE")) !== null) removed += 1;
-    } catch (error) {
-      logger.error({ err: error }, "privacy: deleting a Hexclave identity failed");
-      throw error;
-    }
-  }
-  return removed;
 }

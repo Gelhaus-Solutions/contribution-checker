@@ -8,8 +8,8 @@ import { claHeldInLegalFor } from "@/lib/cla/store";
  * Every query is an explicit `select`, never a bare row, so a column added to a
  * model later is NOT exported until it is listed here and judged. Internal
  * secrets and credentials are never selected: no QA board token or API key, no
- * webhook secret (those are project secrets, encrypted at rest), no Hexclave
- * link, no raw model prompts or raw model output. Other people appear only as a
+ * webhook secret (those are project secrets, encrypted at rest), no sign-in
+ * link (the Hexclave id, the GPID subject), no raw model prompts or raw model output. Other people appear only as a
  * GitHub login (a reviewer, a decider), never by internal id or email.
  */
 

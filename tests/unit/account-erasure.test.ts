@@ -5,7 +5,7 @@ const secrets = vi.hoisted(() => ({ value: "test-key" as string | null }));
 vi.mock("@/lib/db", () => db);
 vi.mock("@/lib/gpterms", () => ({ closeAccount: vi.fn() }));
 vi.mock("@/lib/vault/resolver", () => ({ getSecret: vi.fn(async () => secrets.value) }));
-vi.mock("@/lib/env", () => ({ env: { stackConfigured: false } }));
+vi.mock("@/lib/env", () => ({ env: { gpidConfigured: false } }));
 
 import { PRIVACY_CATALOGUE, planProblems, pseudonymOf, runPrivacyPlan } from "@/lib/account-erasure";
 
@@ -57,7 +57,7 @@ describe("runPrivacyPlan, dry run", () => {
       $transaction: f() as unknown as Record<string, unknown>,
     };
     const m = (model: string, fn: string) => db.prisma[model][fn] as ReturnType<typeof vi.fn>;
-    m("user", "findMany").mockResolvedValue([{ id: "u1", email: "a@example.org", ghLogin: "Someone", ghId: 7, stackUserId: "s1" }]);
+    m("user", "findMany").mockResolvedValue([{ id: "u1", email: "a@example.org", ghLogin: "Someone", ghId: 7 }]);
     m("application", "findMany").mockResolvedValue([{ id: "app1" }]);
     m("prCheck", "findMany").mockResolvedValue([{ id: "pr1" }]);
     for (const [model, n] of Object.entries({ applicationAppeal: 0, applicationNote: 1, applicationReview: 0, prQuality: 1, aiResult: 0, notification: 3, auditEvent: 2, stagingBatchItem: 0, claSignature: 1, manualDecision: 0 })) {

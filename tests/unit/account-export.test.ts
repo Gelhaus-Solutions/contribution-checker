@@ -95,7 +95,7 @@ describe("buildAccountExport", () => {
       ),
     );
     for (const forbidden of [
-      "token", "apiKey", "secret", "stackUserId", "rawOutput", "inputHash",
+      "token", "apiKey", "secret", "stackUserId", "ssoSubject", "rawOutput", "inputHash",
       "fetchedRaw", "qaBoardLink", "webhook", "prompt", "checkRunId",
       "addedById", "grantedById", "revokedById", "decidedById", "authorId",
     ]) {
@@ -112,7 +112,7 @@ describe("buildAccountExport", () => {
     ]);
     fn(db.prisma.aiResult.findMany).mockResolvedValue([]);
     const out = JSON.stringify(await buildAccountExport("u1"));
-    for (const s of ["vault:v1", "stackUserId", "rawOutput", "apiKey"]) {
+    for (const s of ["vault:v1", "stackUserId", "ssoSubject", "rawOutput", "apiKey"]) {
       expect(out).not.toContain(s);
     }
   });
