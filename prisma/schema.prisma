@@ -25,6 +25,13 @@ model User {
   // src/lib/auth/sync-user.ts). Null until a user has authenticated post-migration.
   stackUserId String? @unique
 
+  // GPID (GPlatform SSO) subject, the identity the move off Hexclave resolves
+  // a session to: pairwise, stable for this app, unchanged when GPID merges or
+  // promotes the account. Set by the backfill after the import (GPlatform's
+  // sso/docs/migration.md, step 3), or on a first sign-in through GPID. Null
+  // until then; `stackUserId` goes once the swap has landed.
+  ssoSubject String? @unique
+
   // GitHub identity (populated on first sign-in via OAuth profile)
   ghId    Int?    @unique
   ghLogin String? @unique
