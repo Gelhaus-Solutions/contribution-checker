@@ -668,10 +668,11 @@ Audit, notifications, jobs:
   dates through `src/lib/ui/format.ts`. Do not write a local variant map or
   `.toISOString().slice(0, 10)` in a page. Both modules are JSX-free so they
   stay testable under the node-environment vitest config.
-- **Selects and checkboxes stay native.** Nearly every one is inside a
-  `<form action={serverAction}>` or the public application form, which must
-  work with JS disabled. `ui/switch` is Radix and is only for booleans that
-  apply immediately.
+- **In-house components, not native ones** (operator, 2026-11-08). Selects,
+  checkboxes, switches and every other control come from `src/components/ui`,
+  never a bare native element. This replaces the rule that kept selects and
+  checkboxes native so the server-action forms and the public application form
+  worked with JavaScript disabled: they now need JavaScript.
 - **Marketing pages generate their artifacts from the real modules**:
   `buildDecisionMessage`, `buildDecisionCheckPayload` and `ALL_HEURISTICS`.
   Do not retype a bot comment or a heuristic list into a page; if the copy
