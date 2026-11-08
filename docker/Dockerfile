@@ -51,6 +51,11 @@ RUN --mount=type=cache,id=next-cache,target=/app/.next/cache \
 #     prisma is a runtime dep (migrations); the worker ships pre-bundled so no
 #     tsx is needed at runtime. The Prisma client is generated here. ---
 FROM base AS prod-deps
+# openssl as in the runner: prisma generate fetches the schema engine for the
+# platform it detects, and without openssl that is not the one the runner
+# looks for (seen on arm64).
+RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 COPY package.json pnpm-lock.yaml .npmrc ./
 RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
     pnpm install --prod --frozen-lockfile
@@ -98,6 +103,9 @@ COPY --from=build --chown=app:app /app/.build-id ./.build-id
 COPY --chmod=755 docker/entrypoint.sh /usr/local/bin/cc-start
 
 RUN mkdir -p /app/data && chown app:app /app/data
+# The CLI fetches the schema engine for this platform when it is missing
+# (prisma migrate deploy needs it at start), and the build fails if it cannot.
+RUN node_modules/.bin/prisma --version
 
 USER app
 EXPOSE 3000
