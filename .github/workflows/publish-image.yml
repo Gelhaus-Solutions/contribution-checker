@@ -6,10 +6,13 @@
 # (contribute-checker-app-1 on docker-prod) is the ONLY thing left that pulls
 # from that registry.
 #
-# ubuntu-latest and NOT the self-hosted runner, deliberately. This repository is
-# public, so a pull request from a fork can run whatever it likes in the job it
-# triggers. A self-hosted runner would put that on the LAN, next to Proxmox.
-# GitHub-hosted runners are disposable and outside the network.
+# Every job runs on github-runner, the self-hosted pool on the LAN. This
+# repository is public, and a fork's pull request could run whatever it likes
+# in the job it triggers, so every job skips a pull request whose head is not
+# in this repository: a fork's pull request gets no CI here.
+#
+# This publishes the amd64 image docker-prod pulls. The arm64 image for AWS is
+# built by a workflow in aws-configs, which checks this repository out at a ref.
 name: publish image
 
 on:
@@ -28,14 +31,30 @@ env:
 
 jobs:
   verify:
-    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, linux]
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
-          cache: pnpm
+          package-manager-cache: false
+      # No GitHub cache: the pnpm store lives in the runner's shared folder
+      # (GHA_LOCAL_CACHE), or in the checkout on a runner without one. A cache
+      # only makes the job faster, so a folder that cannot be made falls back
+      # rather than failing.
+      - name: pnpm store
+        run: |
+          store="${GHA_LOCAL_CACHE:-$GITHUB_WORKSPACE/.cache}/pnpm-store"
+          mkdir -p "$store" 2>/dev/null || store="$GITHUB_WORKSPACE/.cache/pnpm-store"
+          echo "npm_config_store_dir=$store" >> "$GITHUB_ENV"
+      # corepack activates the pnpm that `packageManager` in package.json pins.
+      - name: pnpm
+        env:
+          COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
+        run: |
+          corepack enable
+          corepack prepare --activate
       - run: pnpm install --frozen-lockfile
       # prisma generate first: typecheck reads the generated client.
       - run: pnpm run db:generate
@@ -49,11 +68,10 @@ jobs:
 
   image:
     needs: verify
-    runs-on: ubuntu-latest
-    # A fork's pull request has no write access to the registry, and pushing an
-    # image built from unreviewed code would be the point of the exercise for an
-    # attacker. Build on PRs to prove the Dockerfile still works; push only from
-    # this repository's own main and tags.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, linux]
+    # Pull requests build to prove the Dockerfile still works; only this
+    # repository's main and tags push.
     permissions:
       contents: read
       packages: write
@@ -63,8 +81,6 @@ jobs:
           # The Dockerfile derives its Temporal Build ID from `git rev-parse` in
           # the build context, so the checkout needs to be a real repository.
           fetch-depth: 0
-
-      - uses: docker/setup-buildx-action@v3
 
       - name: log in to ghcr
         if: github.event_name != 'pull_request'
@@ -87,19 +103,18 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
             type=ref,event=tag
 
+      # No setup-buildx-action and no cache-from/cache-to: its docker-container
+      # builder starts empty every run. The default docker driver keeps the
+      # layers and the Dockerfile's cache mounts (pnpm store, Next webpack
+      # cache) in the runner's own Docker between runs.
       - name: build and push
         uses: docker/build-push-action@v6
         with:
           context: .
           file: docker/Dockerfile
+          platforms: linux/amd64
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             BUILD_ID=${{ github.sha }}
-          # The Dockerfile's `--mount=type=cache` layers (pnpm store, Next
-          # webpack cache) are BuildKit caches and do not survive a fresh
-          # runner. gha cache carries them between runs instead; without it
-          # every build re-downloads the @temporalio native core-bridge.
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
