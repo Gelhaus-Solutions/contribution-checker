@@ -24,7 +24,7 @@ const ECS_CREDENTIALS_HOST = "http://169.254.170.2";
 const CREDENTIALS_REFRESH_LEEWAY_MS = 5 * 60_000;
 
 export type AwsCredentialProviderOptions = {
-  env?: NodeJS.ProcessEnv;
+  env?: Readonly<Record<string, string | undefined>>;
   fetchImpl?: typeof fetch;
   now?: () => number;
   timeoutMs?: number;
@@ -32,7 +32,7 @@ export type AwsCredentialProviderOptions = {
 
 export class AwsCredentialProvider {
   private cached: { credentials: AwsCredentials; refreshAt: number } | null = null;
-  private readonly env: NodeJS.ProcessEnv;
+  private readonly env: Readonly<Record<string, string | undefined>>;
   private readonly fetchImpl: typeof fetch;
   private readonly now: () => number;
   private readonly timeoutMs: number;
