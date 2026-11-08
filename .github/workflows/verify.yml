@@ -1,0 +1,49 @@
+# Typecheck and tests on every push to main and every pull request.
+#
+# GitHub-hosted, never the home runners: this repository is public, and a
+# pull request, a fork's included, runs whatever it likes in the job it
+# triggers. The job holds no secret and a read-only token. No cache.
+#
+# Images are built by aws-configs' images workflow, which checks this
+# repository out at a ref.
+name: verify
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          package-manager-cache: false
+      # corepack activates the pnpm that `packageManager` in package.json pins.
+      - name: pnpm
+        env:
+          COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
+        run: |
+          corepack enable
+          corepack prepare --activate
+      - run: pnpm install --frozen-lockfile
+      # prisma generate first: typecheck reads the generated client.
+      - run: pnpm run db:generate
+      - run: pnpm run typecheck
+      # `pnpm run lint` is not here: no ESLint config exists, so `next lint`
+      # opens its interactive setup and exits 1.
+      - run: pnpm run test
