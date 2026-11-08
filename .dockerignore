@@ -30,7 +30,8 @@ coverage
 *.log
 npm-debug.log*
 
-# Docker + CI files (not needed inside the image)
+# Docker + CI files (not needed inside the image), except the start script
 docker
+!docker/entrypoint.sh
 .dockerignore
 Dockerfile*

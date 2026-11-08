@@ -1,8 +1,8 @@
 # syntax=docker/dockerfile:1.7
 
-# Debian (glibc), NOT alpine: Temporal's native core-bridge ships a glibc
-# prebuild (x86_64-unknown-linux-gnu) that needs ld-linux-x86-64.so.2, which
-# musl/alpine lacks. glibc is also Temporal's officially supported target.
+# Debian (glibc), NOT alpine: Temporal's native core-bridge ships glibc
+# prebuilds (x86_64- and aarch64-unknown-linux-gnu), which musl/alpine cannot
+# load. glibc is also Temporal's officially supported target.
 FROM node:24-slim AS base
 # pnpm keeps its content-addressable store under $PNPM_HOME/store. Pointing it
 # at a stable path lets the BuildKit cache mounts below persist downloaded
@@ -13,8 +13,16 @@ ENV PATH="$PNPM_HOME:$PATH"
 RUN corepack enable
 WORKDIR /app
 
-# --- build stage: full deps, compiles Next + Prisma client ---
-FROM base AS build
+# --- build stage: full deps, compiles Next + Prisma client. Runs on the build
+#     machine's platform: what the runner takes from it (.next, the esbuild
+#     bundles in dist with packages external, src, prisma) is plain JS, so an
+#     arm64 image built under QEMU on an amd64 runner emulates only prod-deps,
+#     not the Next build. Repeats base's lines, as base is the target platform. ---
+FROM --platform=$BUILDPLATFORM node:24-slim AS build
+ENV PNPM_HOME="/pnpm"
+ENV PATH="$PNPM_HOME:$PATH"
+RUN corepack enable
+WORKDIR /app
 # git is used only to derive the Worker Deployment Build ID from the checkout.
 # Installed before the source COPY so this layer stays cached across commits.
 RUN apt-get update && apt-get install -y --no-install-recommends git \
@@ -87,14 +95,15 @@ COPY --from=build --chown=app:app /app/src ./src
 COPY --from=build --chown=app:app /app/tsconfig.json ./tsconfig.json
 # The derived Build ID (6-char commit sha). Read into TEMPORAL_BUILD_ID at start.
 COPY --from=build --chown=app:app /app/.build-id ./.build-id
+COPY --chmod=755 docker/entrypoint.sh /usr/local/bin/cc-start
 
 RUN mkdir -p /app/data && chown app:app /app/data
 
 USER app
 EXPOSE 3000
 
-# Export the baked Build ID, run migrations, then the web server AND the Temporal
-# worker side by side. `concurrently -k` ties their lifecycles: if either exits
-# the container exits, so the orchestrator restarts the whole unit (a dead worker
-# must never leave the gate silently down).
-CMD ["sh", "-c", "export TEMPORAL_BUILD_ID=\"$(cat /app/.build-id 2>/dev/null || echo dev)\" && pnpm exec prisma migrate deploy && pnpm exec concurrently -k -n web,worker \"pnpm exec next start -H 0.0.0.0 -p 3000\" \"pnpm run worker\""]
+# cc-start (docker/entrypoint.sh) exports the baked Build ID and starts one of:
+# `all` (migrations, then web and worker side by side under `concurrently -k`,
+# so if either exits the container exits and a dead worker never leaves the gate
+# silently down), `web` (migrations, then the web server) or `worker`.
+CMD ["cc-start", "all"]
