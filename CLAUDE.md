@@ -382,7 +382,9 @@ External QA boards (`src/lib/qa/board/`, Notion and Trello, two-way):
   one exception is the webhook endpoint form on the settings page, which has
   always shown the secret to the admins who edit it and now decrypts it
   server-side for that field. A new column of this kind goes through the same
-  two helpers, and its reader goes in the list above.
+  two helpers, and its reader goes in the list above. It also goes on the
+  edge's `readonly.hidden` list (aws-configs `config/projects/edge.yaml`)
+  before it ships, or Postiz Ops' read-only login can read it.
 - Trello models status as **list membership**, not labels, because dragging a
   card between columns is what people actually do on a QA board. `targetId` is
   the board id and the status map holds list names, which are created on demand.
