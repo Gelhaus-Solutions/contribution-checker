@@ -275,6 +275,9 @@ Set `VAULT_AUTH_METHOD` to one of:
 - `token` (default): provide `VAULT_TOKEN`. Easiest for dev and small deployments.
 - `approle`: provide `VAULT_APPROLE_ROLE_ID` + `VAULT_APPROLE_SECRET_ID`
   (and optionally `VAULT_APPROLE_MOUNT`, default `approle`).
+- `aws`: provide `VAULT_AWS_ROLE` (and optionally `VAULT_AWS_MOUNT`, default
+  `aws`, and `VAULT_AWS_IAM_SERVER_ID`). Logs in with the AWS credentials in
+  the environment, otherwise the ECS task role.
 
 `VAULT_NAMESPACE` is supported for Vault Enterprise namespaces.
 

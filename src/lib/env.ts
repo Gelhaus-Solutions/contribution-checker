@@ -139,7 +139,7 @@ const schema = z.object({
   // inside src/lib/vault/config.ts.
   VAULT_ADDR: z.string().url().optional(),
   VAULT_NAMESPACE: z.string().optional(),
-  VAULT_AUTH_METHOD: z.enum(["token", "approle"]).optional(),
+  VAULT_AUTH_METHOD: z.enum(["token", "approle", "aws"]).optional(),
   VAULT_CACHE_TTL_SECONDS: z.coerce.number().int().positive().optional(),
   VAULT_REVALIDATE_INTERVAL_SECONDS: z.coerce.number().int().min(0).optional(),
   VAULT_TIMEOUT_MS: z.coerce.number().int().positive().optional(),

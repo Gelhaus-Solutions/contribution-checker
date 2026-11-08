@@ -1,3 +1,9 @@
+import {
+  AwsCredentialsError,
+  buildVaultAwsLoginBody,
+  defaultAwsCredentials,
+  type AwsCredentials,
+} from "./aws-iam";
 import type { VaultConfig } from "./config";
 
 export class VaultError extends Error {
@@ -75,7 +81,8 @@ export class VaultClient {
     private readonly config: VaultConfig,
     private readonly timeoutMs: number = DEFAULT_TIMEOUT_MS,
     private readonly fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis),
-    private readonly sleepImpl: (ms: number) => Promise<void> = realSleep
+    private readonly sleepImpl: (ms: number) => Promise<void> = realSleep,
+    private readonly awsCredentials: () => Promise<AwsCredentials> = defaultAwsCredentials
   ) {}
 
   /**
@@ -96,14 +103,22 @@ export class VaultClient {
       };
       return this.token.value;
     }
-    // AppRole login.
-    const { roleId, secretId, mountPath } = this.config.auth;
+    const auth = this.config.auth;
+    const label = auth.method === "aws" ? "AWS IAM" : "AppRole";
+    const body =
+      auth.method === "aws"
+        ? buildVaultAwsLoginBody({
+            role: auth.role,
+            credentials: await this.getAwsCredentials(),
+            iamServerId: auth.iamServerId,
+          })
+        : { role_id: auth.roleId, secret_id: auth.secretId };
     const res = await this.request(
-      `/v1/auth/${mountPath}/login`,
+      `/v1/auth/${auth.mountPath}/login`,
       {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ role_id: roleId, secret_id: secretId }),
+        body: JSON.stringify(body),
       },
       false
     );
@@ -113,7 +128,7 @@ export class VaultClient {
     const clientToken = json.auth?.client_token;
     const leaseSeconds = json.auth?.lease_duration ?? 0;
     if (!clientToken) {
-      throw new VaultAuthError("AppRole login returned no client_token");
+      throw new VaultAuthError(`${label} login returned no client_token`);
     }
     this.token = {
       value: clientToken,
@@ -121,6 +136,16 @@ export class VaultClient {
         leaseSeconds > 0 ? Date.now() + leaseSeconds * 1000 : Number.MAX_SAFE_INTEGER,
     };
     return clientToken;
+  }
+
+  /** A failing credential endpoint is retried like Vault being down; missing configuration is not. */
+  private async getAwsCredentials(): Promise<AwsCredentials> {
+    try {
+      return await this.awsCredentials();
+    } catch (e) {
+      if (!(e instanceof AwsCredentialsError)) throw e;
+      throw e.transient ? new VaultNetworkError(e.message) : new VaultAuthError(e.message);
+    }
   }
 
   /**
@@ -253,7 +278,7 @@ export class VaultClient {
    * Centralized request: handles timeout, namespace header, token header
    * (when authed), and status-to-error mapping. When `authed=true` and the
    * cached token returns 403, we drop it and retry once after re-login.
-   * This covers AppRole tokens that expire mid-process.
+   * This covers AppRole and AWS IAM tokens that expire mid-process.
    */
   private async request(
     path: string,

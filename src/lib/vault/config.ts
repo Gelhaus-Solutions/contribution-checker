@@ -12,11 +12,16 @@ import { z } from "zod";
 const baseSchema = z.object({
   VAULT_ADDR: z.string().url(),
   VAULT_NAMESPACE: z.string().optional(),
-  VAULT_AUTH_METHOD: z.enum(["token", "approle"]).default("token"),
+  VAULT_AUTH_METHOD: z.enum(["token", "approle", "aws"]).default("token"),
   VAULT_TOKEN: z.string().optional(),
   VAULT_APPROLE_ROLE_ID: z.string().optional(),
   VAULT_APPROLE_SECRET_ID: z.string().optional(),
   VAULT_APPROLE_MOUNT: z.string().default("approle"),
+  // AWS IAM login (the ECS task role): the Vault role, the auth mount, and the
+  // optional X-Vault-AWS-IAM-Server-ID value the mount may demand.
+  VAULT_AWS_ROLE: z.string().optional(),
+  VAULT_AWS_MOUNT: z.string().min(1).default("aws"),
+  VAULT_AWS_IAM_SERVER_ID: z.string().optional(),
   // Hard serve ceiling: how long a cached value may be served WITHOUT a
   // successful background revalidation. The resolver revalidates silently on
   // every access (subject to the throttle below), so this only bites during a
@@ -47,6 +52,12 @@ export type VaultAuthConfig =
       roleId: string;
       secretId: string;
       mountPath: string;
+    }
+  | {
+      method: "aws";
+      role: string;
+      mountPath: string;
+      iamServerId?: string;
     };
 
 export type VaultConfig = {
@@ -96,6 +107,16 @@ export function getVaultConfig(): VaultConfig {
       );
     }
     auth = { method: "token", token: raw.VAULT_TOKEN };
+  } else if (raw.VAULT_AUTH_METHOD === "aws") {
+    if (!raw.VAULT_AWS_ROLE) {
+      throw new Error("VAULT_AUTH_METHOD=aws requires VAULT_AWS_ROLE to be set.");
+    }
+    auth = {
+      method: "aws",
+      role: raw.VAULT_AWS_ROLE,
+      mountPath: raw.VAULT_AWS_MOUNT.replace(/^\/+|\/+$/g, ""),
+      iamServerId: raw.VAULT_AWS_IAM_SERVER_ID || undefined,
+    };
   } else {
     if (!raw.VAULT_APPROLE_ROLE_ID || !raw.VAULT_APPROLE_SECRET_ID) {
       throw new Error(
