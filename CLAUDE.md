@@ -308,8 +308,8 @@ QA on the staging batch (`src/lib/qa/`, App mode only):
   branch is outside every batch and nothing would ever report it: where
   `contribution-checker / qa` is required on that branch, it waits on a status
   that is never coming. Same rule as `publishAggregatePrChecks` on the release
-  PR, skipping the thing must not skip the check. `stagingQaExemptLabel` is the
-  pure rule and `applyStagingRouting` returns it as `qaExemptLabel`, re-asked
+  PR, skipping the thing must not skip the check. `stagingQaExemption` is the
+  pure rule and `applyStagingRouting` returns it as `qaExempt`, re-asked
   against the base a repoint just moved the PR onto rather than the one it
   arrived with. **Base, not label, settles it**: the labels govern routing and
   not membership, so a PR already on staging ships in the batch and its real
@@ -319,6 +319,14 @@ QA on the staging batch (`src/lib/qa/`, App mode only):
   `StagingBatch`, and possibly no `PrCheck` row yet), so it reads the run
   standing on the commit with `findCheckRunIdByName` rather than stacking a
   duplicate on every event.
+- **The bypass list exempts from the QA check as the labels do** (operator,
+  2026-11-10). Routing never moves a PR whose author is on the bypass list, so
+  the bots a project bypasses (dependabot, its own agents) stay on the default
+  branch, outside every batch, and waited on a `qa` status nothing would send:
+  postiz-app #1385, #1386, #1536 and #1627. `stagingQaExemption` reports the
+  label first, then `{ kind: "bypass" }`, and only while the project retargets:
+  where nothing is moved, the bypass list is not why a PR is on the default
+  branch.
 - **A merge queue needs its own answer, on both protected branches.** GitHub
   builds a throwaway `gh-readonly-queue/...` commit and requires every check to
   report against *that* SHA, so a queue on the default branch holds a fully
@@ -439,6 +447,18 @@ Path guard (`src/lib/guard/`, App mode only):
   review says nothing about whether the author has an application, and the
   unlock label is a maintainer's opinion about files. Both are routing-free and
   gate-free, the same argument the staging labels already make.
+- **A re-gate publishes every check an event would.** `reGatePr` is how a
+  re-evaluation, a changed setting and the catching up after an outage reach a
+  PR that has no event of its own coming, so for an open PR it runs the guard
+  and the QA exemption beside routing and the gate, and for the aggregate PR its
+  checks and the guard. It ran routing and the gate alone: postiz-app#2402,
+  gated while GMint was down, stayed without `guard` and `qa` on a branch that
+  requires both however often it was re-evaluated, and a guard rule saved in
+  the console re-gated every PR without the guard hearing of it. The guard is
+  not told `diffUnchanged` there, because applying a changed rule is the point.
+  A read that may work later (the broker not answering, a limit, a 5xx) is
+  thrown so the activity retries; only a PR or an installation that is gone
+  ends the re-gate quietly.
 - **Events that cannot change the diff cost nothing once the guard has settled.**
   A review, a label and ready-for-review are passed `diffUnchanged`, and
   `runGuardForPr` returns before any GitHub call when `PrCheck.guardCheckSha`
@@ -624,6 +644,14 @@ Audit, notifications, jobs:
 - **Side effects on PRs** (close/reopen/label/comment/check) should be
   idempotent. The existing pattern is to do them inline with try/catch and
   log warnings on failure. Failures must not crash the webhook handler.
+- **A stored check-run id is only as good as the commit GitHub says it is
+  on.** `upsertCheckRun` compares the `head_sha` of the run it just updated
+  with the head it was asked to publish on and creates a new run when they
+  differ. The callers compare the SHA they stored, which is not enough: a
+  `PrCheck` row from before `headSha` was recorded took the next head as its
+  own and kept the id of a run on an older commit, so every publish updated
+  that run, GitHub answered 200, and the head never got its check (postiz-app
+  #1448, #1450, #1501 and #1628 had no decision or CLA check for months).
 - **Audit every admin-visible state change** via `recordAudit`. Add the
   matching string literal to `AuditKind` in `src/lib/audit.ts` first.
 - **No network calls inside a heuristic.** `Heuristic.run()` stays a pure
