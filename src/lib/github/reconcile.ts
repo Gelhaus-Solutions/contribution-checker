@@ -2,6 +2,7 @@ import { prisma } from "@/lib/db";
 import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
 import { isBudgetError } from "@/lib/github/budget";
+import { isGmintOutage } from "@/lib/github/gmint-tokens";
 import {
   decideForRepo,
   decisionRepoInclude,
@@ -51,7 +52,7 @@ export async function reconcileProjectClosedPrs(
   let reopened = 0;
   let evaluated = 0;
 
-  for (const repo of repos) {
+  sweep: for (const repo of repos) {
     if (repo.installationId == null) continue;
     const closed = await prisma.prCheck.findMany({
       where: {
@@ -96,6 +97,17 @@ export async function reconcileProjectClosedPrs(
         // Out of bulk budget: every remaining PR would be refused the same way,
         // so stop and let the activity retry once the window has moved.
         if (isBudgetError(e)) throw e;
+        // GMint not answering refuses every remaining PR too, and each refusal
+        // can take a transport timeout: a sweep that carried on ran into its
+        // activity's start-to-close timeout on every interval of the outage of
+        // 2026-11-09. The next interval sweeps again.
+        if (isGmintOutage(e)) {
+          logger.warn(
+            { projectId, evaluated, err: e },
+            "reconcile stopped: GMint is not answering"
+          );
+          break sweep;
+        }
         logger.warn(
           { err: e, prCheckId: check.id, prNumber: check.prNumber },
           "reconcile: reopen failed"
