@@ -1,6 +1,4 @@
 import {
-  ActivityFailure,
-  ApplicationFailure,
   condition,
   continueAsNew,
   defineQuery,
@@ -8,12 +6,12 @@ import {
   getExternalWorkflowHandle,
   patched,
   setHandler,
-  sleep,
   upsertSearchAttributes,
   workflowInfo,
 } from "@temporalio/workflow";
 import { acts } from "./proxies";
-import { FAILURE, PATCHES, QRY, SIG } from "../../lib/temporal/contracts";
+import { convergeWhenGmintAnswers } from "./gmint-wait";
+import { PATCHES, QRY, SIG } from "../../lib/temporal/contracts";
 import { SA, type GateStatusValue } from "../../lib/temporal/search-attributes";
 import type {
   GithubEventEnvelope,
@@ -70,39 +68,6 @@ function shouldContinueAsNew(processed: number): boolean {
 function setGateStatus(status: GateStatusValue): void {
   if (!patched(PATCHES.prGateSearchAttrs)) return;
   upsertSearchAttributes([{ key: SA.GateStatus, value: status }]);
-}
-
-/** How long to wait before converging again while GMint is not answering:
- * short at first, because most outages are a restart, then every fifteen
- * minutes for as long as it takes. A sealed vault waits for a person, and the
- * outage of 2026-11-09 lasted 23 hours. */
-const GMINT_WAITS = ["1 minute", "2 minutes", "5 minutes", "15 minutes"] as const;
-
-function gmintUnavailable(e: unknown): boolean {
-  return (
-    e instanceof ActivityFailure &&
-    e.cause instanceof ApplicationFailure &&
-    e.cause.type === FAILURE.gmintUnavailable
-  );
-}
-
-/**
- * Converge, and while GMint is not answering wait and converge again. The
- * activity refuses to report a converge done whose GitHub writes failed for
- * that reason (`untilGmintAnswered`), so the event stays at the head of the
- * queue until its checks, labels and comment have really been written; later
- * events queue behind it. The patch check sits in the failure path only, which
- * a history from before it never reached with this failure type.
- */
-async function convergeWhenGmintAnswers<T>(converge: () => Promise<T>): Promise<T> {
-  for (let attempt = 0; ; attempt++) {
-    try {
-      return await converge();
-    } catch (e) {
-      if (!gmintUnavailable(e) || !patched(PATCHES.prGateGmintWait)) throw e;
-      await sleep(GMINT_WAITS[Math.min(attempt, GMINT_WAITS.length - 1)]);
-    }
-  }
 }
 
 /** How long to wait for the next event once the queue is drained before the
@@ -188,9 +153,13 @@ export async function prGate(input: PrGateInput): Promise<void> {
     // terminal. Keep the event in the queue until the activity succeeds so a
     // Continue-As-New (or crash) never drops it.
     if (queue.length > 0) {
+      // While GMint is not answering the event stays at the head of the queue
+      // until its checks, labels and comment have really been written; later
+      // events queue behind it.
       const head = queue[0];
-      const res = await convergeWhenGmintAnswers(() =>
-        acts.convergePrEvent(head),
+      const res = await convergeWhenGmintAnswers(
+        () => acts.convergePrEvent(head),
+        PATCHES.prGateGmintWait,
       );
       queue.shift();
       processed += 1;
@@ -206,12 +175,14 @@ export async function prGate(input: PrGateInput): Promise<void> {
     pendingReGate = null;
     // Coalesce: a repeat re-gate with a nonce we already applied is a no-op.
     if (req.nonce && req.nonce === lastNonce) continue;
-    await convergeWhenGmintAnswers(() =>
-      acts.convergePrReGate({
-        repoId: input.repoId,
-        prNumber: input.prNumber,
-        reason: req.reason,
-      }),
+    await convergeWhenGmintAnswers(
+      () =>
+        acts.convergePrReGate({
+          repoId: input.repoId,
+          prNumber: input.prNumber,
+          reason: req.reason,
+        }),
+      PATCHES.prGateGmintWait,
     );
     if (req.nonce) lastNonce = req.nonce;
     processed += 1;
