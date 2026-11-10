@@ -654,9 +654,11 @@ Audit, notifications, jobs:
   then throws a non-retryable `GmintUnavailable` (`FAILURE` in
   `src/lib/temporal/contracts.ts`), and prGate waits (1, 2, 5, then every 15
   minutes) and converges the same event again, keeping it at the head of the
-  queue. A sweep stops on `isGmintOutage` as it does on `isBudgetError`. A new
-  activity that writes to GitHub for a PR goes through `untilGmintAnswered`;
-  push, merge group and staging batch work does not yet.
+  queue. A sweep stops on `isGmintOutage` as it does on `isBudgetError`. Push,
+  merge group and staging batch work waits the same way
+  (`convergeWhenGmintAnswers`, `src/worker/workflows/gmint-wait.ts`); a merge
+  group gives up after six hours, when its queue entry is gone. A new activity
+  that writes to GitHub goes through `untilGmintAnswered`.
 - **A stored check-run id is only as good as the commit GitHub says it is
   on.** `upsertCheckRun` compares the `head_sha` of the run it just updated
   with the head it was asked to publish on and creates a new run when they
