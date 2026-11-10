@@ -9,7 +9,8 @@
 #
 # Images go to ghcr.io/gelhaus-solutions/contribution-checker as
 # <sha12>-<arch>, which the edge stack in aws-configs runs; latest-<arch>
-# follows main.
+# follows main. Once both images of a commit on main are pushed, the deploy
+# job has aws-configs run it on the edge (its deploy-cc workflow, D45 there).
 name: ci
 
 on:
@@ -113,3 +114,30 @@ jobs:
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
           build-args: |
             BUILD_ID=${{ github.sha }}
+
+  # aws-configs pins this commit and applies the edge only when the plan
+  # changes nothing but this image; anything else waits for a person there.
+  # The token may run that repository's workflows and nothing else
+  # (fine-grained, Actions read and write on aws-configs alone). Without it
+  # nothing is deployed, and the job says so by failing.
+  deploy:
+    needs: image
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: dispatch aws-configs' deploy-cc
+        env:
+          TOKEN: ${{ secrets.AWS_CONFIGS_DEPLOY_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "::error::AWS_CONFIGS_DEPLOY_TOKEN is not set: ${GITHUB_SHA::12} was not deployed"
+            exit 1
+          fi
+          curl -fsS -X POST \
+            -H "Authorization: Bearer $TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/Gelhaus-Solutions/aws-configs/actions/workflows/deploy-cc.yml/dispatches \
+            -d "{\"ref\":\"main\",\"inputs\":{\"version\":\"${GITHUB_SHA::12}\"}}"
+          echo "${GITHUB_SHA::12} handed to aws-configs: https://github.com/Gelhaus-Solutions/aws-configs/actions/workflows/deploy-cc.yml" >> "$GITHUB_STEP_SUMMARY"
