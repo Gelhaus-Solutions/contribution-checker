@@ -4,8 +4,10 @@ import {
   repointRequestsRevert,
   stagingIgnored,
   stagingQaExemptLabel,
+  stagingQaExemption,
   stagingRetargetSkipReason,
 } from "@/lib/github/staging";
+import { buildQaNotApplicablePayload } from "@/lib/qa/render";
 
 const BASE_REPO = "postiz/postiz";
 
@@ -300,5 +302,85 @@ describe("stagingQaExemptLabel", () => {
         qaArgs({ stagingBranch: "main", defaultBranch: "main" }),
       ),
     ).toBeNull();
+  });
+});
+
+// Routing never moves a PR whose author is on the bypass list, so the bots a
+// project bypasses stay on the default branch, outside every batch, and waited
+// on a QA status nothing was ever going to send.
+describe("stagingQaExemption", () => {
+  function exemptArgs(
+    overrides: Partial<Parameters<typeof stagingQaExemption>[0]> = {},
+  ) {
+    return {
+      prLabels: [] as string[],
+      baseRef: "main",
+      defaultBranch: "main",
+      stagingBranch: "staging",
+      ignoreLabel: "staging:ignore",
+      repointLabel: "staging:repoint",
+      authorGhLogin: "dependabot[bot]",
+      bypassHandles: ["*[bot]"],
+      retargetEnabled: true,
+      ...overrides,
+    };
+  }
+
+  it("exempts a bypassed author's PR sitting on the default branch", () => {
+    expect(stagingQaExemption(exemptArgs())).toEqual({ kind: "bypass" });
+  });
+
+  // The label is the explicit statement, and its summary tells a maintainer how
+  // to undo it.
+  it("reports a staging label before the bypass list", () => {
+    expect(
+      stagingQaExemption(exemptArgs({ prLabels: ["staging:ignore"] })),
+    ).toEqual({ kind: "label", label: "staging:ignore" });
+  });
+
+  it("exempts nobody the bypass list does not name", () => {
+    expect(
+      stagingQaExemption(exemptArgs({ authorGhLogin: "octocat" })),
+    ).toBeNull();
+    expect(stagingQaExemption(exemptArgs({ bypassHandles: [] }))).toBeNull();
+  });
+
+  // Base, not author, settles it: a bypassed author's PR opened against staging
+  // ships in the batch, and the batch's verdict is the one that speaks.
+  it("exempts nothing once the PR is on staging, or on any other base", () => {
+    expect(stagingQaExemption(exemptArgs({ baseRef: "staging" }))).toBeNull();
+    expect(
+      stagingQaExemption(exemptArgs({ baseRef: "release/2.0" })),
+    ).toBeNull();
+  });
+
+  // Where nothing is moved, the bypass list is not why a PR is on the default
+  // branch, and a label still is.
+  it("leaves the bypass list out where the project does not retarget", () => {
+    expect(
+      stagingQaExemption(exemptArgs({ retargetEnabled: false })),
+    ).toBeNull();
+    expect(
+      stagingQaExemption(
+        exemptArgs({ retargetEnabled: false, prLabels: ["staging:repoint"] }),
+      ),
+    ).toEqual({ kind: "label", label: "staging:repoint" });
+  });
+
+  it("exempts nothing when staging IS the default branch", () => {
+    expect(
+      stagingQaExemption(
+        exemptArgs({ stagingBranch: "main", defaultBranch: "main" }),
+      ),
+    ).toBeNull();
+  });
+
+  // A green required check with no explanation is one people stop trusting.
+  it("says why in the check", () => {
+    const payload = buildQaNotApplicablePayload({ reason: { kind: "bypass" } });
+    expect(payload.conclusion).toBe("success");
+    expect(payload.title).toBe("QA does not apply");
+    expect(payload.summary).toContain("bypass list");
+    expect(payload.summary).toContain("does not ship in a staging batch");
   });
 });

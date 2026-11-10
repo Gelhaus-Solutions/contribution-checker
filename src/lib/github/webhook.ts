@@ -40,6 +40,7 @@ import {
   resolveStagingConfig,
   stagingProjectSelect,
   stagingRepoSelect,
+  type StagingQaExemption,
   type StagingRoutingResult,
   type StagingRoutingOutcome,
 } from "@/lib/github/staging";
@@ -376,8 +377,8 @@ async function publishStagingQaExemption(args: {
   repoFullName: string;
   installationId: number;
   headSha: string | null;
-  /** The escape-hatch label that earned the exemption. */
-  label: string;
+  /** What earned the exemption: a staging label, or the bypass list. */
+  reason: StagingQaExemption;
 }): Promise<void> {
   if (!args.repoId || !args.headSha) return;
   const repo = await prisma.repo.findUnique({
@@ -395,7 +396,7 @@ async function publishStagingQaExemption(args: {
     repoFullName: args.repoFullName,
     headSha: args.headSha,
     project: repo.project,
-    reason: { kind: "label", label: args.label },
+    reason: args.reason,
   }).catch((e) =>
     logger.warn({ err: e, repoId: args.repoId }, "staging QA exemption check failed"),
   );
@@ -734,18 +735,18 @@ export async function handlePullRequestEvent(
     return notTerminal(staging);
   }
 
-  // A PR carrying one of the staging escape hatches while based on the default
+  // A PR that a staging escape hatch or the bypass list keeps on the default
   // branch is outside every batch, so the QA check that reports on batches will
   // never report on it. Publish it as a pass rather than leave a required check
   // hanging: the exemption is decided in `applyStagingRouting`, which knows the
-  // labels, the base and whether this repo runs QA at all.
-  if (staging.qaExemptLabel) {
+  // labels, the bypass list, the base and whether this repo runs QA at all.
+  if (staging.qaExempt) {
     await publishStagingQaExemption({
       repoId: staging.repoId,
       repoFullName: payload.repository.full_name,
       installationId: payload.installation.id,
       headSha: payload.pull_request.head?.sha ?? null,
-      label: staging.qaExemptLabel,
+      reason: staging.qaExempt,
     });
   }
 
@@ -884,7 +885,7 @@ const NO_STAGING_ROUTING: StagingRoutingResult = {
   isAggregatePr: false,
   touchesStaging: false,
   outcome: "not_managed",
-  qaExemptLabel: null,
+  qaExempt: null,
 };
 
 async function runStagingRouting(args: {
@@ -1086,13 +1087,13 @@ export async function reGatePr(args: {
     return;
   }
   if (isOpen) {
-    if (staging.qaExemptLabel) {
+    if (staging.qaExempt) {
       await publishStagingQaExemption({
         repoId: staging.repoId,
         repoFullName: repo.fullName,
         installationId: repo.installationId,
         headSha,
-        label: staging.qaExemptLabel,
+        reason: staging.qaExempt,
       });
     }
     await guard();

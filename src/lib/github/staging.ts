@@ -540,6 +540,44 @@ export function stagingQaExemptLabel(args: {
   return null;
 }
 
+/** Why staging QA has nothing to say about a PR sitting on the default branch. */
+export type StagingQaExemption =
+  | { kind: "label"; label: string }
+  | { kind: "bypass" };
+
+/**
+ * Is this PR outside every batch, so that the QA check is published for it as
+ * "does not apply"? Two things keep a PR on the default branch for good: one of
+ * the staging labels (`stagingQaExemptLabel`), and an author on the bypass
+ * list, whom routing never moves. The second was missing: the bots a project
+ * bypasses (dependabot, its own agents) open their PRs against the default
+ * branch and stay there, so where `contribution-checker / qa` is required on
+ * that branch they waited on a status nothing was ever going to send.
+ *
+ * The bypass list only keeps anyone anywhere while the project retargets:
+ * where nothing is moved, it is not the reason a PR is on the default branch.
+ * A label is the explicit statement and is reported first.
+ */
+export function stagingQaExemption(
+  args: Parameters<typeof stagingQaExemptLabel>[0] & {
+    authorGhLogin: string;
+    bypassHandles: string[];
+    retargetEnabled: boolean;
+  },
+): StagingQaExemption | null {
+  const label = stagingQaExemptLabel(args);
+  if (label) return { kind: "label", label };
+  if (
+    args.retargetEnabled &&
+    args.stagingBranch !== args.defaultBranch &&
+    args.baseRef === args.defaultBranch &&
+    matchesAnyPattern(args.authorGhLogin, args.bypassHandles)
+  ) {
+    return { kind: "bypass" };
+  }
+  return null;
+}
+
 /**
  * Take a PR carrying the repoint label off the staging branch. Returns the
  * outcome and the base the PR now sits on, or null when there is nothing to
@@ -890,12 +928,12 @@ export type StagingRoutingResult = {
   /** Why routing ended the way it did. Surfaced into Temporal history. */
   outcome: StagingRoutingOutcome;
   /**
-   * The escape-hatch label that puts this PR outside every batch, when one
-   * does. Null when staging QA still has something to say about it, which
-   * includes every repo that does not run QA at all. See
-   * `stagingQaExemptLabel`.
+   * What puts this PR outside every batch, when something does: a staging
+   * label, or its author being on the bypass list. Null when staging QA still
+   * has something to say about it, which includes every repo that does not run
+   * QA at all. See `stagingQaExemption`.
    */
-  qaExemptLabel: string | null;
+  qaExempt: StagingQaExemption | null;
 };
 
 const NO_ROUTING: StagingRoutingResult = {
@@ -904,7 +942,7 @@ const NO_ROUTING: StagingRoutingResult = {
   isAggregatePr: false,
   touchesStaging: false,
   outcome: "not_managed",
-  qaExemptLabel: null,
+  qaExempt: null,
 };
 
 /**
@@ -957,7 +995,7 @@ export async function applyStagingRouting(ctx: {
         outcome: "pr_closed",
         // A closed PR has no head anyone is waiting on a check for, and a
         // merged one is in whichever batch already took it.
-        qaExemptLabel: null,
+        qaExempt: null,
       };
     }
 
@@ -995,15 +1033,19 @@ export async function applyStagingRouting(ctx: {
     // PR is excluded on the raw `isAggregate`, not the config-gated one: a
     // stray label on the release PR must never turn its real QA verdict into a
     // pass.
-    const qaExemptFor = (baseRef: string): string | null =>
+    const bypassHandles = parseBypassHandles(project.bypassHandles);
+    const qaExemptFor = (baseRef: string): StagingQaExemption | null =>
       cfg.qaEnabled && !isAggregate
-        ? stagingQaExemptLabel({
+        ? stagingQaExemption({
             prLabels: ctx.prLabels,
             baseRef,
             defaultBranch,
             stagingBranch: cfg.stagingBranch,
             ignoreLabel: project.labelStagingIgnore,
             repointLabel: project.labelStagingRepoint,
+            authorGhLogin: ctx.authorGhLogin,
+            bypassHandles,
+            retargetEnabled: cfg.retargetEnabled,
           })
         : null;
 
@@ -1011,7 +1053,7 @@ export async function applyStagingRouting(ctx: {
       repoId: repo.id,
       isAggregatePr: isAggregate && cfg.batchPrEnabled,
       touchesStaging: ctx.baseRef === cfg.stagingBranch,
-      qaExemptLabel: qaExemptFor(ctx.baseRef),
+      qaExempt: qaExemptFor(ctx.baseRef),
     };
     // "Leave this PR alone", and the earliest possible exit so that it means
     // it: before the repoint branch below, which would move the PR, and before
@@ -1070,7 +1112,7 @@ export async function applyStagingRouting(ctx: {
           ...base,
           retargeted: false,
           outcome: reverted.outcome,
-          qaExemptLabel: qaExemptFor(reverted.baseRef),
+          qaExempt: qaExemptFor(reverted.baseRef),
         };
       }
     }
@@ -1091,7 +1133,7 @@ export async function applyStagingRouting(ctx: {
       ignoreLabel: project.labelStagingIgnore,
       repointLabel: project.labelStagingRepoint,
       authorGhLogin: ctx.authorGhLogin,
-      bypassHandles: parseBypassHandles(project.bypassHandles),
+      bypassHandles,
     });
     if (skip) {
       // Info, not debug: this is the line that answers "why is this PR still

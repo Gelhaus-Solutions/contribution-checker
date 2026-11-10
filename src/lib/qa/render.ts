@@ -250,6 +250,8 @@ export function buildQaCheckPayload(args: {
  *
  *  - `label`: a PR held on the default branch by one of the escape hatches. It
  *    is outside every batch, so no batch will ever report on it.
+ *  - `bypass`: a PR whose author is on the bypass list. Routing never moves it
+ *    off the default branch, so it is outside every batch for the same reason.
  *  - `merge_into_staging`: a merge queue on the staging branch. Work is being
  *    collected here; it is verified later, on the release PR that ships the
  *    assembled batch.
@@ -258,6 +260,7 @@ export function buildQaCheckPayload(args: {
  */
 export type QaNotApplicableReason =
   | { kind: "label"; label: string }
+  | { kind: "bypass" }
   | { kind: "merge_into_staging"; stagingBranch: string }
   | { kind: "no_batch" };
 
@@ -285,6 +288,13 @@ export function buildQaNotApplicablePayload(args: {
           `default branch, so it does not ship in a staging batch and there is ` +
           `nothing for staging QA to verify. Remove the label to route it into ` +
           `the batch and have it verified with the rest of the release.`
+        );
+      case "bypass":
+        return (
+          `This PR's author is on the project's bypass list, so it is not ` +
+          `routed onto the staging branch. It targets the default branch, does ` +
+          `not ship in a staging batch, and there is nothing for staging QA to ` +
+          `verify.`
         );
       case "merge_into_staging":
         return (

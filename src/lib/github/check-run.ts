@@ -499,9 +499,9 @@ async function publishStandaloneQaCheck(args: {
  * Publish the QA check as a pass on a commit staging QA has no say over.
  *
  * The counterpart to `publishAggregatePrChecks` in `webhook.ts`, and the same
- * bargain: skipping the thing must not skip the check. A PR carrying
- * `staging:ignore` or `staging:repoint` while based on the default branch will
- * never ship inside a batch, and a merge group that carries no batch is not a
+ * bargain: skipping the thing must not skip the check. A PR that
+ * `staging:ignore`, `staging:repoint` or the bypass list keeps on the default
+ * branch will never ship inside a batch, and a merge group that carries no batch is not a
  * release, so `publishQaCheck` (which only ever runs against the aggregate PR's
  * head) will never report on either. Where the check is required on that
  * branch, the PR is blocked on a status nobody is going to send and a merge

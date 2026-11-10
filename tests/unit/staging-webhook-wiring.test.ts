@@ -771,6 +771,23 @@ describe("QA check on PRs the staging labels keep off the batch", () => {
     expect(publishQaNotApplicableCheck).not.toHaveBeenCalled();
   });
 
+  // Routing leaves a bypassed author's PR on the default branch for good, so
+  // it is outside every batch exactly as a labelled one is.
+  it("passes the QA check for a bypassed author's PR on the default branch", async () => {
+    repoFindUnique.mockResolvedValue({
+      ...QA_REPO,
+      project: { ...QA_REPO.project, bypassHandles: '["octocat"]' },
+    });
+    await handlePullRequestEvent(prNumbered(67) as never);
+    expect(setPullRequestBase).not.toHaveBeenCalled();
+    expect(publishQaNotApplicableCheck).toHaveBeenCalledWith(
+      expect.objectContaining({
+        headSha: "abc",
+        reason: { kind: "bypass" },
+      }),
+    );
+  });
+
   // A repo that records no QA publishes no QA check, so there is nothing for
   // an exemption to unblock and a brand-new context on ordinary PRs would be
   // the only effect.
