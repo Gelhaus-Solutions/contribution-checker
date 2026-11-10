@@ -890,7 +890,9 @@ report, all over the app's own pinned TLS identity.
 - **The stage is the strictest of three sources, and none can lower another**:
   `CC_LOCKDOWN` (an env floor), the agent's file
   (`/run/glockdown/apps/contribution-checker.json`, mounted read-only) and the
-  edge (`GLOCKDOWN_EDGE_URL`, `GLOCKDOWN_EDGE_PINS`, `tls.crt`/`tls.key` in
+  edge (`GLOCKDOWN_EDGE_URL`, `GLOCKDOWN_EDGE_PINS`, and the identity:
+  `GLOCKDOWN_IDENTITY_CERT`/`_KEY` when either is set, which is how ECS on AWS
+  hands it over without a key on disk, otherwise `tls.crt`/`tls.key` in
   `GLOCKDOWN_IDENTITY_DIR`). The file and the edge each hold their last good
   answer while silent. The identity is read **once per process**: rebuilding
   the stage source to pick up a late mount would forget the stage it holds,

@@ -462,6 +462,39 @@ describe("the console's view of the edge and the identity", () => {
     rmSync(join(identity, "tls.key"));
     expect(l.inspectIdentity().certificate?.key).toBe("missing");
   });
+
+  it.skipIf(!hasOpenssl())("takes the identity from the environment over the directory, and both halves or none", async () => {
+    const at = join(dir, "env-identity");
+    mkdirSync(at, { recursive: true });
+    execFileSync("openssl", [
+      "req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:P-256", "-nodes",
+      "-keyout", join(at, "key.pem"), "-out", join(at, "cert.pem"),
+      "-days", "2", "-subj", "/CN=contribution-checker-aws",
+    ], { stdio: "ignore" });
+    const { readFileSync } = await import("node:fs");
+    const cert = readFileSync(join(at, "cert.pem"), "utf8");
+    const key = readFileSync(join(at, "key.pem"), "utf8");
+    const { spkiPin } = await import("@ghub/glockdown-sdk");
+
+    vi.stubEnv("GLOCKDOWN_IDENTITY_CERT", cert);
+    vi.stubEnv("GLOCKDOWN_IDENTITY_KEY", key);
+    let l = await load(undefined, { edge: true });
+    expect(l.inspectIdentity()).toMatchObject({
+      from: "the environment",
+      problem: null,
+      certificate: { subject: "CN=contribution-checker-aws", key: "matches", pin: spkiPin(cert) },
+    });
+    expect(l.lockdownStatus().edge).toMatchObject({ asked: true, problem: null });
+
+    vi.stubEnv("GLOCKDOWN_IDENTITY_KEY", "");
+    l = await load(undefined, { edge: true });
+    expect(l.inspectIdentity().certificate?.key).toBe("missing");
+    expect(l.lockdownStatus().edge).toEqual({
+      url: "https://127.0.0.1:9",
+      asked: false,
+      problem: "no GLOCKDOWN_IDENTITY_CERT and GLOCKDOWN_IDENTITY_KEY in the environment",
+    });
+  });
 });
 
 function hasOpenssl(): boolean {

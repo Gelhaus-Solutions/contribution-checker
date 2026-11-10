@@ -56,12 +56,14 @@ describe.skipIf(!hasOpenssl())("GLockdown's edge, over real pinned TLS", () => {
   let url = "";
   let edgePin = "";
   let appPin = "";
+  let appIdentity = { cert: "", key: "" };
   let stage = { v: 1, app: APP, rung: "admins", stage: "admins", at: 1_791_900_000 };
   const received: { path: string; body: unknown; clientPin: string | null }[] = [];
 
   beforeAll(async () => {
     const edge = selfSigned("edge");
     const app = selfSigned("app");
+    appIdentity = app;
     edgePin = pinOf(edge.cert);
     appPin = pinOf(app.cert);
     server = createServer(
@@ -101,14 +103,14 @@ describe.skipIf(!hasOpenssl())("GLockdown's edge, over real pinned TLS", () => {
     vi.unstubAllEnvs();
   });
 
-  async function load(pins = edgePin, decoys = "") {
+  async function load(pins = edgePin, decoys = "", identityDir = join(dir, "app")) {
     vi.resetModules();
     // No stage file: the agent is not installed, so the edge is the stricter.
     vi.stubEnv("GLOCKDOWN_STAGE_DIR", join(dir, "no-agent"));
     vi.stubEnv("CC_LOCKDOWN", "off");
     vi.stubEnv("GLOCKDOWN_EDGE_URL", url);
     vi.stubEnv("GLOCKDOWN_EDGE_PINS", pins);
-    vi.stubEnv("GLOCKDOWN_IDENTITY_DIR", join(dir, "app"));
+    vi.stubEnv("GLOCKDOWN_IDENTITY_DIR", identityDir);
     vi.stubEnv("GLOCKDOWN_DECOY_LOGIN", decoys);
     vi.stubEnv("GLOCKDOWN_DECOY_KEY_SHA256", "");
     return import("@/lib/lockdown");
@@ -121,6 +123,15 @@ describe.skipIf(!hasOpenssl())("GLockdown's edge, over real pinned TLS", () => {
     expect(l.lockdownStatus().reading.source).toBe("edge");
     expect(received.at(-1)).toEqual({ path: "/v1/stage", body: null, clientPin: appPin });
     expect(await l.askEdgeNow()).toMatchObject({ asked: true, ok: true, rung: "admins" });
+  });
+
+  it("asks with the identity from the environment, with no file on disk", async () => {
+    vi.stubEnv("GLOCKDOWN_IDENTITY_CERT", appIdentity.cert);
+    vi.stubEnv("GLOCKDOWN_IDENTITY_KEY", appIdentity.key);
+    const l = await load(edgePin, "", join(dir, "no-identity"));
+    await l.refreshFromEdge();
+    expect(l.lockdown()).toMatchObject({ stage: "admins", rung: "admins" });
+    expect(received.at(-1)).toEqual({ path: "/v1/stage", body: null, clientPin: appPin });
   });
 
   it("raises one rung, and the stage in force follows at once", async () => {

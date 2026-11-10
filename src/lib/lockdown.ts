@@ -110,9 +110,42 @@ interface Edge {
 
 let edgeState: Edge | null = null;
 
+interface IdentitySource {
+  /** As the console shows it: the directory, or the environment. */
+  from: string;
+  /** What each half is called there. */
+  names: { cert: string; key: string };
+  /** One half, PEM. Throws when it is not there. */
+  read(part: "cert" | "key"): string;
+}
+
+/**
+ * Where this app's identity is read from. GLOCKDOWN_IDENTITY_CERT and
+ * GLOCKDOWN_IDENTITY_KEY when either is set, so a platform that hands secrets
+ * over as variables (ECS on AWS) never puts the key on a disk; otherwise
+ * tls.crt and tls.key in GLOCKDOWN_IDENTITY_DIR, as mounted.
+ */
+function identitySource(): IdentitySource {
+  if (env.GLOCKDOWN_IDENTITY_CERT || env.GLOCKDOWN_IDENTITY_KEY) {
+    const names = { cert: "GLOCKDOWN_IDENTITY_CERT", key: "GLOCKDOWN_IDENTITY_KEY" } as const;
+    return {
+      from: "the environment",
+      names,
+      read: (part) => {
+        const pem = env[names[part]];
+        if (!pem) throw new Error(`${names[part]} is not set`);
+        return pem;
+      },
+    };
+  }
+  const dir = env.GLOCKDOWN_IDENTITY_DIR;
+  const names = { cert: "tls.crt", key: "tls.key" };
+  return { from: dir, names, read: (part) => readFileSync(join(dir, names[part]), "utf8") };
+}
+
 /**
  * Where GLockdown's edge is and who this app is, read once per process. The
- * identity is mounted before the app starts: a stage source rebuilt later to
+ * identity is there before the app starts: a stage source rebuilt later to
  * pick it up would forget the last good answer it holds, which is the one
  * thing it must never do, so a late mount takes effect on the next restart.
  */
@@ -125,18 +158,19 @@ function edge(): Edge {
     };
     return edgeState;
   }
+  const identity = identitySource();
   try {
     edgeState = {
       connection: {
         url: env.GLOCKDOWN_EDGE_URL,
         edgePins: env.glockdownEdgePins,
-        cert: readFileSync(join(env.GLOCKDOWN_IDENTITY_DIR, "tls.crt"), "utf8"),
-        key: readFileSync(join(env.GLOCKDOWN_IDENTITY_DIR, "tls.key"), "utf8"),
+        cert: identity.read("cert"),
+        key: identity.read("key"),
       },
       problem: null,
     };
   } catch (e) {
-    // The file still counts; the edge is asked once the identity is mounted
+    // The file still counts; the edge is asked once the identity is there
     // and the app restarted.
     logger.warn(
       { err: e },
@@ -144,7 +178,7 @@ function edge(): Edge {
     );
     edgeState = {
       connection: null,
-      problem: `no tls.crt and tls.key in ${env.GLOCKDOWN_IDENTITY_DIR}`,
+      problem: `no ${identity.names.cert} and ${identity.names.key} in ${identity.from}`,
     };
   }
   return edgeState;
@@ -364,7 +398,8 @@ export async function askEdgeNow(timeoutMs = 4000): Promise<EdgeAnswer> {
 }
 
 export interface IdentityReport {
-  dir: string;
+  /** The directory it is read from, or "the environment". */
+  from: string;
   certificate: {
     subject: string;
     issuer: string;
@@ -379,35 +414,39 @@ export interface IdentityReport {
   edgePins: { pin: string; wellFormed: boolean }[];
 }
 
-/** This app's TLS identity as the trust document sees it. Reads the mounted files; never shows the key. */
+/** This app's TLS identity as the trust document sees it. Reads it as `edge()` does; never shows the key. */
 export function inspectIdentity(): IdentityReport {
-  const dir = env.GLOCKDOWN_IDENTITY_DIR;
+  const identity = identitySource();
+  const from = identity.from;
   const edgePins = env.glockdownEdgePins.map((pin) => ({
     pin,
     wellFormed: /^[A-Za-z0-9_-]{43}$/.test(pin),
   }));
   let pem: string;
   try {
-    pem = readFileSync(join(dir, "tls.crt"), "utf8");
+    pem = identity.read("cert");
   } catch {
-    return { dir, certificate: null, problem: `no tls.crt in ${dir}`, edgePins };
+    return { from, certificate: null, problem: `no ${identity.names.cert} in ${from}`, edgePins };
   }
   let cert: X509Certificate;
   try {
     cert = new X509Certificate(pem);
   } catch {
-    return { dir, certificate: null, problem: "tls.crt is not a PEM certificate", edgePins };
+    return {
+      from,
+      certificate: null,
+      problem: `${identity.names.cert} is not a PEM certificate`,
+      edgePins,
+    };
   }
   let key: "matches" | "mismatch" | "missing";
   try {
-    key = cert.checkPrivateKey(createPrivateKey(readFileSync(join(dir, "tls.key"), "utf8")))
-      ? "matches"
-      : "mismatch";
+    key = cert.checkPrivateKey(createPrivateKey(identity.read("key"))) ? "matches" : "mismatch";
   } catch {
     key = "missing";
   }
   return {
-    dir,
+    from,
     certificate: {
       subject: cert.subject,
       issuer: cert.issuer,

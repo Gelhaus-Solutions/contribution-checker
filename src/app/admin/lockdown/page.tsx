@@ -468,8 +468,8 @@ function IdentityCard({ identity, edgeUrl }: { identity: IdentityReport; edgeUrl
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3 text-sm">
-        <Field label="Directory">
-          <code className="text-xs break-all">{identity.dir}</code>
+        <Field label="Read from">
+          <code className="text-xs break-all">{identity.from}</code>
         </Field>
         {cert ? (
           <>
@@ -497,7 +497,7 @@ function IdentityCard({ identity, edgeUrl }: { identity: IdentityReport; edgeUrl
               ) : cert.key === "mismatch" ? (
                 <Badge variant="destructive">Does not pair with the certificate</Badge>
               ) : (
-                <Badge variant="destructive">tls.key missing or unreadable</Badge>
+                <Badge variant="destructive">Missing or unreadable</Badge>
               )}
             </Field>
             <Field label="Pin">
@@ -642,6 +642,9 @@ GLOCKDOWN_EDGE_URL="https://glockdown.example:8444"
 GLOCKDOWN_EDGE_PINS="<pin>,<pin>"
 # This app's identity: tls.crt and tls.key, pinned in the trust document
 GLOCKDOWN_IDENTITY_DIR="/etc/glockdown-app"
+# Or the same PEMs as variables, which win when set
+GLOCKDOWN_IDENTITY_CERT="<tls.crt>"
+GLOCKDOWN_IDENTITY_KEY="<tls.key>"
 # Honeytokens (L97): the decoy admin's sign-in names (email or GitHub login),
 # and the SHA-256 of each decoy API key. The key itself is planted where an
 # intruder would look, never here.

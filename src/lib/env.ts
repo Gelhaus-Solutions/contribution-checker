@@ -254,14 +254,17 @@ const schema = z.object({
   // can lower: off, signups, members, admins or full. The stage file comes from
   // the GLockdown agent on the host, mounted read-only; the edge is the second
   // source, asked over this app's TLS identity (tls.crt and tls.key in
-  // GLOCKDOWN_IDENTITY_DIR) with the edge's key pins (comma-separated). The
-  // stage list and the directory are the SDK's; a test holds them equal, so
-  // this module stays free of the SDK's node:tls imports.
+  // GLOCKDOWN_IDENTITY_DIR, or the same PEMs in GLOCKDOWN_IDENTITY_CERT and
+  // GLOCKDOWN_IDENTITY_KEY, which win when set) with the edge's key pins
+  // (comma-separated). The stage list and the directory are the SDK's; a test
+  // holds them equal, so this module stays free of the SDK's node:tls imports.
   CC_LOCKDOWN: z.enum(["off", "signups", "members", "admins", "full"]).default("off"),
   GLOCKDOWN_STAGE_DIR: z.string().default("/run/glockdown/apps"),
   GLOCKDOWN_EDGE_URL: optionalUrl,
   GLOCKDOWN_EDGE_PINS: z.string().optional(),
   GLOCKDOWN_IDENTITY_DIR: z.string().default("/etc/glockdown-app"),
+  GLOCKDOWN_IDENTITY_CERT: z.string().optional(),
+  GLOCKDOWN_IDENTITY_KEY: z.string().optional(),
   // GLockdown's honeytokens (L97). The decoy admin's sign-in names (email or
   // GitHub login, comma-separated) and the SHA-256 of each decoy API key (hex,
   // comma-separated). The decoy key itself is planted where an intruder would
