@@ -3,6 +3,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const handlePullRequestEvent = vi.fn();
 const handlePullRequestReviewEvent = vi.fn();
 const reGatePr = vi.fn();
+const handleMergeGroupEvent = vi.fn();
+const handlePushEvent = vi.fn();
+const reconcileStagingBatch = vi.fn();
 
 vi.mock("@/lib/github/webhook", () => ({
   handlePullRequestEvent: (...a: unknown[]) => handlePullRequestEvent(...a),
@@ -10,12 +13,14 @@ vi.mock("@/lib/github/webhook", () => ({
     handlePullRequestReviewEvent(...a),
   handleInstallationEvent: vi.fn(),
   handleInstallationReposEvent: vi.fn(),
-  handleMergeGroupEvent: vi.fn(),
-  handlePushEvent: vi.fn(),
+  handleMergeGroupEvent: (...a: unknown[]) => handleMergeGroupEvent(...a),
+  handlePushEvent: (...a: unknown[]) => handlePushEvent(...a),
   reGatePr: (...a: unknown[]) => reGatePr(...a),
 }));
 
-vi.mock("@/lib/github/staging", () => ({ reconcileStagingBatch: vi.fn() }));
+vi.mock("@/lib/github/staging", () => ({
+  reconcileStagingBatch: (...a: unknown[]) => reconcileStagingBatch(...a),
+}));
 
 vi.mock("@/lib/github/budget", () => ({
   inBulkLane: <T>(work: () => Promise<T>) => work(),
@@ -23,7 +28,13 @@ vi.mock("@/lib/github/budget", () => ({
 
 import { ApplicationFailure } from "@temporalio/common";
 import { GmintRefusal, noteGmintOutage } from "@/lib/github/gmint-tokens";
-import { convergePrEvent, convergePrReGate } from "@/worker/activities/github";
+import {
+  convergePrEvent,
+  convergePrReGate,
+  convergeStagingBatch,
+  processMergeGroupEvent,
+  processPushEvent,
+} from "@/worker/activities/github";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -119,5 +130,46 @@ describe("a converge while GMint is not answering", () => {
     await expect(convergePrEvent(envelope("pull_request"))).resolves.toEqual({
       terminal: false,
     });
+  });
+});
+
+// Push, merge group and staging batch work wrote nothing while GMint was down
+// and reported success all the same: a CLA version never published, a queue
+// commit without checks, a release PR whose manifest stayed stale.
+describe("other GitHub work while GMint is not answering", () => {
+  const swallowed = async () => {
+    try {
+      throw new GmintRefusal("transport", 503, true, "GMint is not answering");
+    } catch (e) {
+      noteGmintOutage(e);
+    }
+  };
+
+  it("refuses a push as GmintUnavailable", async () => {
+    handlePushEvent.mockImplementation(swallowed);
+    const failure = await processPushEvent({}).catch((e) => e);
+    expect(failure).toBeInstanceOf(ApplicationFailure);
+    expect(failure.type).toBe("GmintUnavailable");
+  });
+
+  it("refuses a merge group as GmintUnavailable", async () => {
+    handleMergeGroupEvent.mockImplementation(swallowed);
+    const failure = await processMergeGroupEvent({}).catch((e) => e);
+    expect(failure).toBeInstanceOf(ApplicationFailure);
+    expect(failure.type).toBe("GmintUnavailable");
+  });
+
+  it("refuses a staging reconcile that could not read GitHub", async () => {
+    reconcileStagingBatch.mockRejectedValue(
+      new GmintRefusal("transport", 503, true, "GMint is not answering"),
+    );
+    const failure = await convergeStagingBatch({ repoId: "r1" }).catch((e) => e);
+    expect(failure).toBeInstanceOf(ApplicationFailure);
+    expect(failure.type).toBe("GmintUnavailable");
+  });
+
+  it("lets the same work through once GMint answers", async () => {
+    handlePushEvent.mockResolvedValue(undefined);
+    await expect(processPushEvent({})).resolves.toBeUndefined();
   });
 });

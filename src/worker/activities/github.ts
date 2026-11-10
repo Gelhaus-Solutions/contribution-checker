@@ -68,8 +68,9 @@ export async function convergePrEvent(
  * during it. Each GitHub write catches and logs its own failure, so without
  * this a PR gated while GMint was down completed with no check, no label and no
  * comment, and nothing ever asked again. Non-retryable on purpose: eight quick
- * attempts cannot outlast a broker that needs a person to unseal it, so prGate
- * waits on a timer instead and converges again, keeping the event queued.
+ * attempts cannot outlast a broker that needs a person to unseal it, so the
+ * workflow waits on a timer instead and converges again
+ * (`convergeWhenGmintAnswers`).
  */
 async function untilGmintAnswered<T>(work: () => Promise<T>): Promise<T> {
   let outage: GmintRefusal;
@@ -119,8 +120,8 @@ export async function convergeStagingBatch(args: {
   repoId: string;
 }): Promise<StagingReconcileResult> {
   try {
-    return await inBulkLane(() =>
-      reconcileStagingBatch({ repoId: args.repoId })
+    return await untilGmintAnswered(() =>
+      inBulkLane(() => reconcileStagingBatch({ repoId: args.repoId }))
     );
   } catch (e) {
     throw classifyGithubError(e);
@@ -129,7 +130,7 @@ export async function convergeStagingBatch(args: {
 
 export async function processMergeGroupEvent(payload: unknown): Promise<void> {
   try {
-    await handleMergeGroupEvent(payload as never);
+    await untilGmintAnswered(() => handleMergeGroupEvent(payload as never));
   } catch (e) {
     throw classifyGithubError(e);
   }
@@ -137,7 +138,7 @@ export async function processMergeGroupEvent(payload: unknown): Promise<void> {
 
 export async function processPushEvent(payload: unknown): Promise<void> {
   try {
-    await handlePushEvent(payload as never);
+    await untilGmintAnswered(() => handlePushEvent(payload as never));
   } catch (e) {
     throw classifyGithubError(e);
   }

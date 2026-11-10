@@ -9,7 +9,9 @@ import {
   workflowInfo,
 } from "@temporalio/workflow";
 import { acts } from "./proxies";
+import { convergeWhenGmintAnswers } from "./gmint-wait";
 import {
+  PATCHES,
   QRY,
   SIG,
   STAGING_RECONCILE_DEBOUNCE,
@@ -118,7 +120,10 @@ export async function stagingBatch(input: StagingBatchInput): Promise<void> {
     // absorbed by the flag we are about to clear, so nothing is lost.
     await sleep(STAGING_RECONCILE_DEBOUNCE);
     dirty = false;
-    const res = await acts.convergeStagingBatch({ repoId: input.repoId });
+    const res = await convergeWhenGmintAnswers(
+      () => acts.convergeStagingBatch({ repoId: input.repoId }),
+      PATCHES.gmintWait,
+    );
     reconciles += 1;
     syncDeferred = res.syncDeferred;
     syncEligibleAtMs = res.syncEligibleAtMs;

@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { fileURLToPath } from "node:url";
 import { TestWorkflowEnvironment } from "@temporalio/testing";
 import { Worker } from "@temporalio/worker";
+import { ApplicationFailure } from "@temporalio/common";
 import { registerTestSearchAttributes } from "./helpers/search-attributes";
 import {
   WF,
@@ -75,6 +76,26 @@ function start(client: TestWorkflowEnvironment["client"], id: string, repoId: st
 }
 
 describe("stagingBatch", () => {
+  it("reconciles again once GMint answers", async () => {
+    // A reconcile while GMint was down wrote nothing; the entity waits and
+    // runs it again rather than settle on a stale release PR.
+    const { reconciles } = await runBatch(
+      "staging:gmint",
+      async (id, client) => {
+        await start(client, id, "repo-gmint");
+      },
+      async (calls) => {
+        if (calls <= 2) {
+          throw ApplicationFailure.nonRetryable(
+            "GMint is not answering",
+            "GmintUnavailable",
+          );
+        }
+      },
+    );
+    expect(reconciles).toHaveLength(3);
+  });
+
   it("collapses a burst of signals into a single reconcile", async () => {
     const { reconciles } = await runBatch(
       "staging:repo1",
