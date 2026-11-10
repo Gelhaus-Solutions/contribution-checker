@@ -12,6 +12,8 @@ const publishClaCheck = vi.fn();
 const publishQaNotApplicableCheck = vi.fn();
 const publishStandaloneGuardCheck = vi.fn();
 const signalStagingBatch = vi.fn();
+const removeLabelIfPresent = vi.fn();
+const octokitRequest = vi.fn();
 
 vi.mock("@/lib/db", () => ({
   prisma: {
@@ -51,10 +53,17 @@ vi.mock("@/lib/github/pr-actions", () => ({
   addLabel: vi.fn(),
   closePullRequest: vi.fn(),
   reopenPullRequest: vi.fn(),
-  removeLabelIfPresent: vi.fn(),
+  removeLabelIfPresent: (...a: unknown[]) => removeLabelIfPresent(...a),
+  isRateLimitError: () => false,
   setLabels: vi.fn(),
   commentOnPr: vi.fn(),
   prHasCommentContaining: vi.fn(async () => false),
+}));
+
+vi.mock("@/lib/github/app", () => ({
+  getInstallationOctokit: async () => ({
+    request: (...a: unknown[]) => octokitRequest(...a),
+  }),
 }));
 
 vi.mock("@/lib/temporal/start", () => ({
@@ -80,7 +89,9 @@ vi.mock("@/lib/applications/decide-pr", async () => {
 import {
   handlePullRequestEvent,
   handlePullRequestReviewEvent,
+  reGatePr,
 } from "@/lib/github/webhook";
+import { GmintRefusal } from "@/lib/github/gmint-tokens";
 
 const PROJECT = {
   id: "proj1",
@@ -299,6 +310,165 @@ describe("the aggregate staging PR", () => {
     expect(publishDecisionCheck).toHaveBeenCalledTimes(1);
     expect(decideForPR).not.toHaveBeenCalled();
     expect(runGuardForPr).toHaveBeenCalledTimes(1);
+  });
+
+  // The gate takes the evaluate label off after a re-evaluation, and this PR
+  // never reaches the gate: the label stayed on the release PR.
+  it("loses the evaluate label that asked for a re-evaluation", async () => {
+    repoFindUnique.mockResolvedValue({
+      ...REPO,
+      stagingBatchPrNumber: 42,
+      project: { ...PROJECT, stagingBatchPrEnabled: true },
+    });
+    await handlePullRequestEvent(
+      payload({
+        action: "labeled",
+        label: { name: "contribution:evaluate" },
+        pull_request: {
+          ...payload().pull_request,
+          head: { sha: "abc", ref: "staging", repo: { full_name: "acme/app" } },
+          base: { ref: "main", repo: { default_branch: "main" } },
+        },
+      }) as never,
+    );
+    expect(removeLabelIfPresent).toHaveBeenCalledWith(
+      expect.objectContaining({ owner: "acme", repo: "app" }),
+      42,
+      "contribution:evaluate",
+    );
+    expect(decideForPR).not.toHaveBeenCalled();
+  });
+});
+
+// A re-gate is how a re-evaluation, a changed guard rule and the catching up
+// after an outage reach a PR that has no event of its own coming. It ran routing
+// and the gate alone, so a guard or QA check that was never published stayed
+// missing however often the PR was re-evaluated.
+describe("a re-gate", () => {
+  const fetched = (overrides: Record<string, unknown> = {}) => ({
+    data: { ...payload().pull_request, ...overrides },
+  });
+
+  beforeEach(() => {
+    repoFindUnique.mockResolvedValue({ ...REPO, projectId: "proj1" });
+    octokitRequest.mockResolvedValue(fetched());
+  });
+
+  it("runs the guard on an open PR, against its head and base", async () => {
+    await reGatePr({ ghRepoId: 1, prNumber: 42 });
+    expect(runGuardForPr).toHaveBeenCalledTimes(1);
+    expect(runGuardForPr.mock.calls[0][0]).toMatchObject({
+      ghRepoId: 1,
+      repoFullName: "acme/app",
+      installationId: 99,
+      prNumber: 42,
+      headSha: "abc",
+      baseRef: "main",
+      labelJustAppliedBy: null,
+      labelJustRemoved: false,
+      // A changed guard rule is applied by a re-gate, so the guard may not
+      // answer from what it holds.
+      diffUnchanged: false,
+    });
+    expect(decideForPR).toHaveBeenCalledTimes(1);
+  });
+
+  it("passes the QA check for an ignored PR on the default branch", async () => {
+    repoFindUnique.mockResolvedValue({
+      ...REPO,
+      projectId: "proj1",
+      project: {
+        ...PROJECT,
+        stagingRetargetEnabled: true,
+        stagingBatchPrEnabled: true,
+        stagingQaEnabled: true,
+        qaCheckEnabled: true,
+      },
+    });
+    octokitRequest.mockResolvedValue(
+      fetched({ labels: [{ name: "staging:ignore" }] }),
+    );
+    await reGatePr({ ghRepoId: 1, prNumber: 42 });
+    expect(publishQaNotApplicableCheck).toHaveBeenCalledWith(
+      expect.objectContaining({
+        headSha: "abc",
+        reason: { kind: "label", label: "staging:ignore" },
+      }),
+    );
+  });
+
+  // A closed PR is re-gated so that one the bot closed can reopen, which is the
+  // gate's business. No check is published on a PR nobody can merge.
+  it("leaves the guard and the QA check of a closed PR alone", async () => {
+    octokitRequest.mockResolvedValue(fetched({ state: "closed" }));
+    await reGatePr({ ghRepoId: 1, prNumber: 42 });
+    expect(runGuardForPr).not.toHaveBeenCalled();
+    expect(publishQaNotApplicableCheck).not.toHaveBeenCalled();
+    expect(decideForPR).toHaveBeenCalledTimes(1);
+  });
+
+  it("publishes the aggregate PR's checks and guards it, without the gate", async () => {
+    repoFindUnique.mockResolvedValue({
+      ...REPO,
+      projectId: "proj1",
+      stagingBatchPrNumber: 42,
+      project: { ...PROJECT, stagingBatchPrEnabled: true },
+    });
+    octokitRequest.mockResolvedValue(
+      fetched({
+        head: { sha: "abc", ref: "staging", repo: { full_name: "acme/app" } },
+      }),
+    );
+    await reGatePr({ ghRepoId: 1, prNumber: 42 });
+    expect(publishDecisionCheck).toHaveBeenCalledWith(
+      expect.objectContaining({
+        headSha: "abc",
+        decision: { status: "APPROVED", bypassReason: "staging_batch" },
+      }),
+    );
+    expect(runGuardForPr).toHaveBeenCalledTimes(1);
+    expect(decideForPR).not.toHaveBeenCalled();
+  });
+
+  // Logged and reported done, this is how a PR re-gated while the token broker
+  // was down was never heard of again. Thrown, the activity tries again.
+  it("throws a read that may work later", async () => {
+    octokitRequest.mockRejectedValue(
+      new GmintRefusal("transport", 503, true, "GMint is not answering"),
+    );
+    await expect(reGatePr({ ghRepoId: 1, prNumber: 42 })).rejects.toThrow(
+      "GMint is not answering",
+    );
+    octokitRequest.mockRejectedValue(
+      Object.assign(new Error("Bad Gateway"), { status: 502 }),
+    );
+    await expect(reGatePr({ ghRepoId: 1, prNumber: 42 })).rejects.toThrow(
+      "Bad Gateway",
+    );
+    octokitRequest.mockRejectedValue(
+      Object.assign(new Error("budget"), { status: 429 }),
+    );
+    await expect(reGatePr({ ghRepoId: 1, prNumber: 42 })).rejects.toThrow(
+      "budget",
+    );
+    expect(runGuardForPr).not.toHaveBeenCalled();
+  });
+
+  it("ends quietly for a PR that is gone, or a token GMint refuses for good", async () => {
+    octokitRequest.mockRejectedValue(
+      Object.assign(new Error("Not Found"), { status: 404 }),
+    );
+    await expect(
+      reGatePr({ ghRepoId: 1, prNumber: 42 }),
+    ).resolves.toBeUndefined();
+    octokitRequest.mockRejectedValue(
+      new GmintRefusal("denied", 403, false, "GMint does not allow this"),
+    );
+    await expect(
+      reGatePr({ ghRepoId: 1, prNumber: 42 }),
+    ).resolves.toBeUndefined();
+    expect(runGuardForPr).not.toHaveBeenCalled();
+    expect(decideForPR).not.toHaveBeenCalled();
   });
 });
 

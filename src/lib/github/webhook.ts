@@ -14,12 +14,13 @@ import {
   closePullRequest,
   commentOnPr,
   ensureLabel,
+  isRateLimitError,
   removeLabelIfPresent,
   reopenPullRequest,
   setLabels,
   repoRef,
 } from "@/lib/github/pr-actions";
-import { projectTenant } from "@/lib/github/gmint-tokens";
+import { GmintRefusal, projectTenant } from "@/lib/github/gmint-tokens";
 import {
   publishDecisionCheck,
   publishClaCheck,
@@ -604,6 +605,9 @@ export async function handlePullRequestEvent(
   let guardLabelAppliedBy: string | null = null;
   let guardLabelRemoved = false;
   let guardLabelOnly = false;
+  // Set on the event that carried the evaluate label, for the one PR the gate
+  // never reaches and so never takes the label off again.
+  let evaluateAsked: { label: string; projectId: string } | null = null;
   if (isReEvalLabel || isUnlabeled) {
     const labelName = payload.label?.name;
     if (!labelName) return NOT_TERMINAL;
@@ -612,6 +616,7 @@ export async function handlePullRequestEvent(
       select: {
         project: {
           select: {
+            id: true,
             labelEvaluate: true,
             labelStagingIgnore: true,
             labelStagingRepoint: true,
@@ -645,6 +650,11 @@ export async function handlePullRequestEvent(
       } else {
         stagingLabelOnly = true;
       }
+    } else {
+      evaluateAsked = {
+        label: labelName,
+        projectId: repoForLabelGate.project.id,
+      };
     }
   }
 
@@ -700,6 +710,27 @@ export async function handlePullRequestEvent(
     // default branch. That is precisely where a human sign-off is worth having,
     // so it is guarded like anything else aimed there.
     await runGuard(payload, ghRepoId, { labelAppliedBy: null, labelRemoved: false });
+    // The gate takes the evaluate label off after a re-evaluation. This PR
+    // never reaches the gate, so the label that asked for one stayed on the
+    // release PR for good.
+    if (evaluateAsked) {
+      try {
+        await removeLabelIfPresent(
+          repoRef(
+            payload.repository.full_name,
+            payload.installation.id,
+            evaluateAsked.projectId,
+          ),
+          prNumber,
+          evaluateAsked.label,
+        );
+      } catch (e) {
+        logger.warn(
+          { err: e, ghRepoId, prNumber, label: evaluateAsked.label },
+          "could not take the evaluate label off the aggregate PR",
+        );
+      }
+    }
     return notTerminal(staging);
   }
 
@@ -999,6 +1030,11 @@ export async function reGatePr(args: {
     );
     pr = res.data as typeof pr;
   } catch (e) {
+    // A read that may work later is thrown, so the activity tries again. It
+    // used to be logged and the re-gate reported done, which is how a PR
+    // re-gated while the token broker was down was never heard of again. A PR
+    // or an installation that is gone has nothing left to re-gate.
+    if (mayWorkLater(e)) throw e;
     logger.warn(
       { err: e, ghRepoId: args.ghRepoId, prNumber: args.prNumber },
       "reGatePr: PR fetch failed",
@@ -1006,6 +1042,8 @@ export async function reGatePr(args: {
     return;
   }
   if (!pr.user) return;
+  const isOpen = pr.state !== "closed";
+  const headSha = pr.head?.sha ?? null;
   // A re-gate is also how the settings toggle reaches existing open PRs, so
   // staging routing must re-assert itself here too.
   const staging = await runStagingRouting({
@@ -1016,7 +1054,49 @@ export async function reGatePr(args: {
     } as WebhookPayload,
     authorGhLogin: pr.user.login,
   });
-  if (staging.isAggregatePr) return;
+
+  // A re-gate is how a re-evaluation, a changed setting and the catching up
+  // after an outage reach a PR that has no event of its own coming, so it
+  // leaves an open PR with every check an event would have. It used to run
+  // routing and the gate alone: a guard or QA check that was never published
+  // stayed missing however often the PR was re-evaluated, and a guard rule
+  // changed in the console re-gated every PR without the guard hearing of it.
+  const guard = () =>
+    runGuardForPr({
+      ghRepoId: args.ghRepoId,
+      repoFullName: repo.fullName,
+      installationId: repo.installationId as number,
+      prNumber: args.prNumber,
+      headSha,
+      baseRef: pr.base?.ref ?? null,
+      labelJustAppliedBy: null,
+      labelJustRemoved: false,
+      diffUnchanged: false,
+    });
+
+  if (staging.isAggregatePr) {
+    if (!isOpen) return;
+    await publishAggregatePrChecks({
+      repoId: staging.repoId,
+      repoFullName: repo.fullName,
+      installationId: repo.installationId,
+      headSha,
+    });
+    await guard();
+    return;
+  }
+  if (isOpen) {
+    if (staging.qaExemptLabel) {
+      await publishStagingQaExemption({
+        repoId: staging.repoId,
+        repoFullName: repo.fullName,
+        installationId: repo.installationId,
+        headSha,
+        label: staging.qaExemptLabel,
+      });
+    }
+    await guard();
+  }
   await convergePr({
     ghRepoId: args.ghRepoId,
     repoFullName: repo.fullName,
@@ -1025,10 +1105,22 @@ export async function reGatePr(args: {
     prNodeId: pr.node_id,
     authorGhLogin: pr.user.login,
     authorGhId: pr.user.id,
-    headSha: pr.head?.sha ?? null,
-    prIsClosed: pr.state === "closed",
+    headSha,
+    prIsClosed: !isOpen,
     isReEval: true,
   });
+}
+
+/**
+ * Whether a failed GitHub read may work later: the token broker or GitHub not
+ * answering, or a limit, as opposed to a PR or an installation that is gone.
+ */
+function mayWorkLater(e: unknown): boolean {
+  if (e instanceof GmintRefusal) return e.retryable;
+  const status = (e as { status?: unknown } | null)?.status;
+  if (typeof status !== "number") return true;
+  if (status >= 500 || status === 429) return true;
+  return status === 403 && isRateLimitError(e);
 }
 
 /**
