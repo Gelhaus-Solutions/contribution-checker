@@ -1023,14 +1023,18 @@ export async function upsertCheckRun(
       ...(input.text ? { text: input.text } : {}),
     },
   };
+  // The id still being updated. Cleared once the run turns out to sit on
+  // another commit, so a failure of the create that follows is not taken for a
+  // failed update.
+  let updating = existingId;
   try {
-    if (existingId) {
+    if (updating) {
       const res = await octokit.request(
         "PATCH /repos/{owner}/{repo}/check-runs/{check_run_id}",
         {
           owner: ref.owner,
           repo: ref.repo,
-          check_run_id: Number(existingId),
+          check_run_id: Number(updating),
           ...body,
         },
       );
@@ -1043,7 +1047,21 @@ export async function upsertCheckRun(
           mode: "update",
         },
       });
-      return String((res.data as { id: number | string }).id);
+      const updated = res.data as { id: number | string; head_sha?: string };
+      // A run belongs to the commit it was created on, and an update cannot
+      // move it. The callers compare the SHA they stored, but a row from before
+      // that SHA was recorded took the next head as its own and kept the id of
+      // a run on an older commit: every publish then updated that run, GitHub
+      // answered 200, and the head never got its check. GitHub says which
+      // commit the run is on, so believe that and publish on the head.
+      if (!updated.head_sha || updated.head_sha === input.headSha) {
+        return String(updated.id);
+      }
+      logger.warn(
+        { ref, existingId, headSha: input.headSha, runSha: updated.head_sha },
+        "check-run id is of another commit: publishing on the head",
+      );
+      updating = null;
     }
     const res = await octokit.request("POST /repos/{owner}/{repo}/check-runs", {
       owner: ref.owner,
@@ -1068,7 +1086,7 @@ export async function upsertCheckRun(
     // it then 404s. Recreate the run instead of silently dropping the check,
     // otherwise the check disappears from the PR permanently while a sibling
     // check with no stored id (e.g. a newly-added one) keeps showing.
-    if (existingId && status === 404) {
+    if (updating && status === 404) {
       logger.warn(
         { ref, existingId, headSha: input.headSha },
         "check-run update 404 (stale id): recreating",
@@ -1103,7 +1121,7 @@ export async function upsertCheckRun(
     }
 
     recordGithubMetric(
-      existingId ? "check_run.update" : "check_run.create",
+      updating ? "check_run.update" : "check_run.create",
       "error",
       ref,
       status,
