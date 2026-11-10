@@ -49,6 +49,8 @@ import { GmintError } from "@ghub/gmint-sdk";
 import {
   GmintTokens,
   REUSE_MARGIN_MS,
+  isGmintOutage,
+  watchGmint,
   type GmintSettings,
   type TokenNeed,
 } from "@/lib/github/gmint-tokens";
@@ -279,5 +281,60 @@ describe("classifyGithubError on a GMint refusal", () => {
       expect((failure as ApplicationFailure).type).toBe("GmintRefused");
     }
     expect(unavailable).toBe(refusals[3]);
+  });
+});
+
+// Every GitHub write catches its own failure, so the outage has to be noted
+// where each caller receives it, before anybody can swallow it.
+describe("watchGmint", () => {
+  const swallow = (p: Promise<unknown>) => p.catch(() => undefined);
+
+  it("hears of GMint not answering even when the work swallowed it", async () => {
+    getToken.mockRejectedValueOnce(new GmintError("transport", "down"));
+    const t = tokens();
+    const watched = await watchGmint(async () => {
+      await swallow(t.token(INSTALLATION, NEED, "project:p1"));
+      return "done";
+    });
+    expect(watched.value).toBe("done");
+    expect(watched.outage).toMatchObject({ code: "transport", retryable: true });
+  });
+
+  // Concurrent asks share one mint; each caller's work must hear of it.
+  it("tells every work that shared the failed mint", async () => {
+    let fail!: (e: unknown) => void;
+    getToken.mockImplementationOnce(() => new Promise((_, reject) => (fail = reject)));
+    const t = tokens();
+    const both = Promise.all(
+      [1, 2].map(() => watchGmint(() => swallow(t.token(INSTALLATION, NEED, "project:p1")))),
+    );
+    await new Promise((r) => setTimeout(r, 0));
+    fail(new GmintError("unavailable", "sealed"));
+    const [a, b] = await both;
+    expect(a.outage?.code).toBe("unavailable");
+    expect(b.outage?.code).toBe("unavailable");
+    expect(getToken).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not take a lockdown, a refusal or an unverified answer for an outage", async () => {
+    const t = tokens();
+    for (const code of ["locked_down", "denied", "untrusted"]) {
+      getToken.mockRejectedValueOnce(new GmintError(code as "denied", "x"));
+      const watched = await watchGmint(() => swallow(t.token(INSTALLATION, NEED, "project:p1")));
+      expect(watched.outage).toBeNull();
+    }
+    expect(isGmintOutage(new Error("GMint is not answering"))).toBe(false);
+  });
+
+  it("keeps each work's outage to itself", async () => {
+    const t = tokens();
+    getToken.mockRejectedValueOnce(new GmintError("transport", "down"));
+    const first = await watchGmint(() => swallow(t.token(INSTALLATION, NEED, "project:p1")));
+    const second = await watchGmint(() => t.token(INSTALLATION, NEED, "project:p1"));
+    expect(first.outage).not.toBeNull();
+    expect(second.outage).toBeNull();
+    // Outside any watch a refusal is only thrown, as before.
+    getToken.mockRejectedValueOnce(new GmintError("transport", "down"));
+    await expect(tokens().token(INSTALLATION, NEED, "project:p1")).rejects.toMatchObject({ code: "transport" });
   });
 });

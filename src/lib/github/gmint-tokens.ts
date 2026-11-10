@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import {
   GmintClient,
   GmintError,
@@ -94,6 +95,46 @@ export class GmintRefusal extends Error {
   }
 }
 
+/**
+ * GMint not answering, as opposed to refusing: asking again later can help. A
+ * lockdown is deliberate and is not an outage.
+ */
+export function isGmintOutage(e: unknown): e is GmintRefusal {
+  return (
+    e instanceof GmintRefusal &&
+    e.retryable &&
+    e.status === 503 &&
+    e.code !== "locked_down"
+  );
+}
+
+const outageWatch = new AsyncLocalStorage<{ outage: GmintRefusal | null }>();
+
+/**
+ * Runs `work` and says whether GMint stopped answering during it.
+ *
+ * Every GitHub side effect catches its own failure and logs it, so a piece of
+ * work that ran while GMint was down completes as if nothing happened: no
+ * check, no label, no comment, and nobody asks again. That is how PRs gated
+ * during the vps1 outage of 2026-11-09 were left without checks. The refusal is
+ * noted here where each caller receives it, before anybody can swallow it, so
+ * the activity can refuse to report the work done.
+ */
+export async function watchGmint<T>(
+  work: () => Promise<T>,
+): Promise<{ value: T; outage: GmintRefusal | null }> {
+  const seen: { outage: GmintRefusal | null } = { outage: null };
+  const value = await outageWatch.run(seen, work);
+  return { value, outage: seen.outage };
+}
+
+/** Notes an outage for the `watchGmint` around the current work, if any. */
+export function noteGmintOutage(e: unknown): void {
+  if (!isGmintOutage(e)) return;
+  const seen = outageWatch.getStore();
+  if (seen && !seen.outage) seen.outage = e;
+}
+
 type Cached = { token: GmintToken; installationId: number };
 
 export class GmintTokens {
@@ -176,7 +217,14 @@ export class GmintTokens {
         .finally(() => this.inflight.delete(key));
       this.inflight.set(key, pending);
     }
-    return (await pending).reveal();
+    try {
+      return (await pending).reveal();
+    } catch (e) {
+      // Here, not where the refusal is built: concurrent asks share one mint,
+      // and each caller's work has to hear of the outage, not only the first.
+      noteGmintOutage(e);
+      throw e;
+    }
   }
 
   /** Forgets every token of an installation, after GitHub refused one. */
