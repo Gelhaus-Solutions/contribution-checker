@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { fileURLToPath } from "node:url";
 import { TestWorkflowEnvironment } from "@temporalio/testing";
 import { Worker } from "@temporalio/worker";
+import { ApplicationFailure } from "@temporalio/common";
 import { registerTestSearchAttributes } from "./helpers/search-attributes";
 import { WF, SIG } from "@/lib/temporal/contracts";
 import type {
@@ -32,6 +33,8 @@ function ev(action: string): GithubEventEnvelope {
 async function runGate(
   workflowId: string,
   seed: (handleId: string, client: TestWorkflowEnvironment["client"]) => Promise<void>,
+  /** How many converges fail as GMint not answering before one goes through. */
+  gmintDown = 0,
 ) {
   const env = await TestWorkflowEnvironment.createTimeSkipping();
   const events: GithubEventEnvelope[] = [];
@@ -53,10 +56,18 @@ async function runGate(
       activities: {
         async convergePrEvent(e: GithubEventEnvelope) {
           events.push(e);
+          if (gmintDown > 0) {
+            gmintDown -= 1;
+            throw ApplicationFailure.nonRetryable("GMint is not answering", "GmintUnavailable");
+          }
           return { terminal: (e.payload as { action: string }).action === TERMINAL_ACTION };
         },
         async convergePrReGate(args: ReGatePayload) {
           reGates.push(args);
+          if (gmintDown > 0) {
+            gmintDown -= 1;
+            throw ApplicationFailure.nonRetryable("GMint is not answering", "GmintUnavailable");
+          }
         },
       },
     });
@@ -102,6 +113,50 @@ describe("prGate", () => {
     expect(events.map((e) => (e.payload as { action: string }).action)).toEqual([
       TERMINAL_ACTION,
     ]);
+  }, 60_000);
+
+  // A converge whose GitHub writes failed because GMint was down is not done:
+  // the event stays at the head of the queue and is converged again after a
+  // wait, and the event behind it waits its turn.
+  it("waits while GMint is not answering and converges the same event again", async () => {
+    const { events } = await runGate(
+      "pr:4:4",
+      async (id, client) => {
+        await client.workflow.signalWithStart(WF.prGate, {
+          workflowId: id,
+          taskQueue: TASK_QUEUE,
+          signal: SIG.githubEvent,
+          signalArgs: [ev("opened")],
+          args: [{ repoId: "4", prNumber: 4 }],
+        });
+        await client.workflow.getHandle(id).signal(SIG.githubEvent, ev("synchronize"));
+      },
+      3,
+    );
+    expect(events.map((e) => (e.payload as { action: string }).action)).toEqual([
+      "opened",
+      "opened",
+      "opened",
+      "opened",
+      "synchronize",
+    ]);
+  }, 60_000);
+
+  it("waits the same way on a re-gate", async () => {
+    const { reGates } = await runGate(
+      "pr:5:5",
+      async (id, client) => {
+        await client.workflow.signalWithStart(WF.prGate, {
+          workflowId: id,
+          taskQueue: TASK_QUEUE,
+          signal: SIG.reGate,
+          signalArgs: [{ reason: "admin_reevaluate", nonce: "n5" }],
+          args: [{ repoId: "5", prNumber: 5 }],
+        });
+      },
+      2,
+    );
+    expect(reGates).toHaveLength(3);
   }, 60_000);
 
   it("re-evaluates on a reGate request", async () => {

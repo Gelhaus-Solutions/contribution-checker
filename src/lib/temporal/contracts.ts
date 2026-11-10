@@ -86,6 +86,17 @@ export const PATCHES = {
   contributorGateCooldownLocal: "contributor-gate-cooldown-local-activity-202607",
   prGateSearchAttrs: "pr-gate-search-attrs-202607",
   contributorGateSearchAttrs: "contributor-gate-search-attrs-202607",
+  prGateGmintWait: "pr-gate-gmint-wait-202611",
+} as const;
+
+/**
+ * `ApplicationFailure` types an activity throws for the workflow to act on.
+ * `gmintUnavailable`: GMint stopped answering during a converge, so its GitHub
+ * writes did not happen; prGate waits and converges again rather than report
+ * the PR handled.
+ */
+export const FAILURE = {
+  gmintUnavailable: "GmintUnavailable",
 } as const;
 
 /** A GitHub PR event routed to the contributor entity, which forwards it to (or

@@ -13,8 +13,17 @@ import {
   reconcileStagingBatch,
   type StagingReconcileResult,
 } from "@/lib/github/staging";
+import { ApplicationFailure } from "@temporalio/common";
 import { classifyGithubError } from "@/lib/github/errors";
-import type { GithubEventEnvelope } from "@/lib/temporal/contracts";
+import {
+  isGmintOutage,
+  watchGmint,
+  type GmintRefusal,
+} from "@/lib/github/gmint-tokens";
+import {
+  FAILURE,
+  type GithubEventEnvelope,
+} from "@/lib/temporal/contracts";
 
 /**
  * Activity wrappers around the existing GitHub webhook handlers. The heavy,
@@ -38,18 +47,46 @@ export async function convergePrEvent(
   env: GithubEventEnvelope
 ): Promise<PrEventResult> {
   try {
-    // A review arrives on the same entity as the PR's own events, so it is
-    // handled here rather than through a workflow of its own. It is never
-    // terminal: approving a PR does not close it, and reporting otherwise would
-    // complete the entity while the PR is still open.
-    if (env.eventName === "pull_request_review") {
-      await handlePullRequestReviewEvent(env.payload as never);
-      return { terminal: false };
-    }
-    return await handlePullRequestEvent(env.payload as never);
+    return await untilGmintAnswered(async () => {
+      // A review arrives on the same entity as the PR's own events, so it is
+      // handled here rather than through a workflow of its own. It is never
+      // terminal: approving a PR does not close it, and reporting otherwise
+      // would complete the entity while the PR is still open.
+      if (env.eventName === "pull_request_review") {
+        await handlePullRequestReviewEvent(env.payload as never);
+        return { terminal: false };
+      }
+      return await handlePullRequestEvent(env.payload as never);
+    });
   } catch (e) {
     throw classifyGithubError(e);
   }
+}
+
+/**
+ * Runs one converge and refuses to report it done when GMint stopped answering
+ * during it. Each GitHub write catches and logs its own failure, so without
+ * this a PR gated while GMint was down completed with no check, no label and no
+ * comment, and nothing ever asked again. Non-retryable on purpose: eight quick
+ * attempts cannot outlast a broker that needs a person to unseal it, so prGate
+ * waits on a timer instead and converges again, keeping the event queued.
+ */
+async function untilGmintAnswered<T>(work: () => Promise<T>): Promise<T> {
+  let outage: GmintRefusal;
+  try {
+    const watched = await watchGmint(work);
+    if (!watched.outage) return watched.value;
+    outage = watched.outage;
+  } catch (e) {
+    // A read the converge cannot go on without (reGatePr's PR fetch) throws
+    // the refusal itself rather than swallowing it.
+    if (!isGmintOutage(e)) throw e;
+    outage = e;
+  }
+  throw ApplicationFailure.nonRetryable(
+    `GMint is not answering (${outage.code}): the GitHub writes of this converge did not happen`,
+    FAILURE.gmintUnavailable
+  );
 }
 
 /**
@@ -63,8 +100,10 @@ export async function convergePrReGate(args: {
 }): Promise<void> {
   try {
     // Re-gates arrive in project-wide fan-outs, so they spend the bulk share.
-    await inBulkLane(() =>
-      reGatePr({ ghRepoId: Number(args.repoId), prNumber: args.prNumber })
+    await untilGmintAnswered(() =>
+      inBulkLane(() =>
+        reGatePr({ ghRepoId: Number(args.repoId), prNumber: args.prNumber })
+      )
     );
   } catch (e) {
     throw classifyGithubError(e);
