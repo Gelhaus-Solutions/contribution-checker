@@ -644,6 +644,19 @@ Audit, notifications, jobs:
 - **Side effects on PRs** (close/reopen/label/comment/check) should be
   idempotent. The existing pattern is to do them inline with try/catch and
   log warnings on failure. Failures must not crash the webhook handler.
+- **GMint not answering is the exception: the converge is not done.** While
+  vps1's vaults were sealed (2026-11-09, 23 hours) every write failed with a
+  logged warning, the activity completed, and the PRs gated in that window had
+  no checks until someone re-gated them by hand. `GmintTokens.token` notes an
+  outage (`isGmintOutage`: retryable, 503, not a lockdown) for the
+  `watchGmint` around the current work where each caller receives it, so a
+  swallowed refusal still counts. `untilGmintAnswered` in the prGate activities
+  then throws a non-retryable `GmintUnavailable` (`FAILURE` in
+  `src/lib/temporal/contracts.ts`), and prGate waits (1, 2, 5, then every 15
+  minutes) and converges the same event again, keeping it at the head of the
+  queue. A sweep stops on `isGmintOutage` as it does on `isBudgetError`. A new
+  activity that writes to GitHub for a PR goes through `untilGmintAnswered`;
+  push, merge group and staging batch work does not yet.
 - **A stored check-run id is only as good as the commit GitHub says it is
   on.** `upsertCheckRun` compares the `head_sha` of the run it just updated
   with the head it was asked to publish on and creates a new run when they
