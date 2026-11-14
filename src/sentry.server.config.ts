@@ -1,5 +1,6 @@
 import * as Sentry from "@sentry/nextjs";
 import { nodeProfilingIntegration } from "@sentry/profiling-node";
+import { dataCollection } from "@/lib/observability/data-collection";
 import { scrubSensitive } from "@/lib/observability/scrub";
 
 const environment =
@@ -19,15 +20,11 @@ Sentry.init({
     }),
   ],
   tracesSampleRate: 1.0,
-  profilesSampleRate: 1.0,
+  // Profile every sampled trace (SDK 11 has no per-transaction rate).
+  profileSessionSampleRate: 1.0,
+  profileLifecycle: "trace",
   // No IP address, cookies or request bodies (GDPR Art. 5(1)(c)).
-  sendDefaultPii: false,
-  enableLogs: true,
-  // Ship console.log/info/warn/error as Sentry log entries too, so structured
-  // logs and framework console output share one timeline.
-  _experiments: {
-    enableLogs: true,
-  },
+  dataCollection,
   beforeSend(event) {
     return scrubSensitive(event);
   },

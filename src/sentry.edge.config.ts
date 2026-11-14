@@ -1,4 +1,5 @@
 import * as Sentry from "@sentry/nextjs";
+import { dataCollection } from "@/lib/observability/data-collection";
 import { scrubSensitive } from "@/lib/observability/scrub";
 
 const environment =
@@ -14,11 +15,7 @@ Sentry.init({
   ],
   tracesSampleRate: 1.0,
   // No IP address, cookies or request bodies (GDPR Art. 5(1)(c)).
-  sendDefaultPii: false,
-  enableLogs: true,
-  _experiments: {
-    enableLogs: true,
-  },
+  dataCollection,
   beforeSend(event) {
     return scrubSensitive(event);
   },
