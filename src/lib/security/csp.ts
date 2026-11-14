@@ -1,5 +1,5 @@
 /**
- * Content-Security-Policy built at RUNTIME (in middleware), not baked into the
+ * Content-Security-Policy built at RUNTIME (in src/proxy.ts), not baked into the
  * build manifest by next.config's headers(). Its runtime inputs (GPID_URL,
  * CSP_EXTRA_DOMAINS, the Sentry report endpoint) are only known at container
  * runtime in our generic CI-built image, so it can't be set at `next build`.
@@ -20,9 +20,8 @@ function originOf(url: string | undefined): string | null {
  * Operator-configurable EXTRA domains, appended to the existing CSP's resource
  * directives. One env var, `CSP_EXTRA_DOMAINS`, space- or comma-separated;
  * supports wildcard hosts (e.g. `https://*.example.com`), plain domains, and
- * scheme tokens (`data:`, `blob:`). Read from process.env directly so this stays
- * edge-safe (middleware runs on the edge runtime and can't import the Node env
- * module).
+ * scheme tokens (`data:`, `blob:`). Read from process.env directly, so this stays
+ * free of the env module and its Vault imports.
  */
 function extraDomains(): string[] {
   const raw = process.env.CSP_EXTRA_DOMAINS;
