@@ -7,11 +7,11 @@ import { buildCsp, reportToHeader } from "@/lib/security/csp";
  * the directives can carry what is only known at container runtime in our
  * generic CI image (GPID_URL, CSP_EXTRA_DOMAINS, the Sentry report endpoint).
  *
- * This middleware does NOT gate auth (an earlier cookie-name edge check caused a
+ * This proxy (Next 16's name for middleware) does NOT gate auth (an earlier cookie-name edge check caused a
  * redirect loop). Protection is server-side in requireSession()/auth()
  * (src/lib/authz.ts, src/auth.ts), which resolve the GPID session.
  */
-export function middleware(_request: NextRequest): NextResponse {
+export function proxy(_request: NextRequest): NextResponse {
   const res = NextResponse.next();
   res.headers.set("Content-Security-Policy", buildCsp());
   const reportTo = reportToHeader();

@@ -549,7 +549,7 @@ const KIND: Record<string, { label: string; tone: NonNullable<BadgeProps["varian
   "lockdown.decoys_report_failed": { label: "Report failed", tone: "warning" },
 };
 
-const payloadSchema = z.record(z.unknown());
+const payloadSchema = z.record(z.string(), z.unknown());
 
 function parsePayload(raw: string): Record<string, unknown> {
   try {

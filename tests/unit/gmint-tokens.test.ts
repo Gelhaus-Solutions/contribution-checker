@@ -118,14 +118,18 @@ describe("GmintTokens", () => {
     await expect(
       tokens().token(INSTALLATION, NEED, "project:p1"),
     ).resolves.toBe("ghs_gmint1");
-    expect(getToken).toHaveBeenCalledWith({
-      grant: `check-run-${INSTALLATION}`,
-      installationId: INSTALLATION,
-      repositories: ["postiz-app"],
-      permissions: { metadata: "read", checks: "write" },
-      tenant: "project:p1",
-      purpose: "check-run",
-    });
+    expect(getToken).toHaveBeenCalledWith(
+      {
+        grant: `check-run-${INSTALLATION}`,
+        installationId: INSTALLATION,
+        repositories: ["postiz-app"],
+        permissions: { metadata: "read", checks: "write" },
+        tenant: "project:p1",
+        purpose: "check-run",
+      },
+      // An approval is refused at once rather than waited for (SDK 0.3).
+      { approvalTimeoutMs: 0 },
+    );
   });
 
   it("builds the client only when the first token is asked for, with GMint's settings", async () => {

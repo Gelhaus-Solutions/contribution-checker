@@ -36,7 +36,7 @@ The bot runs in two modes per repo:
 
 ## Tech stack
 
-- Next.js 15 App Router + React 19
+- Next.js 16 App Router + React 19
 - Prisma + PostgreSQL
 - GPlatform Identity (GPID, `@ghub/gpsso-sdk`) for human login: GitHub only,
   through GPID's provider flow, with GPID's session token in an httpOnly
@@ -654,9 +654,11 @@ Audit, notifications, jobs:
   then throws a non-retryable `GmintUnavailable` (`FAILURE` in
   `src/lib/temporal/contracts.ts`), and prGate waits (1, 2, 5, then every 15
   minutes) and converges the same event again, keeping it at the head of the
-  queue. A sweep stops on `isGmintOutage` as it does on `isBudgetError`. A new
-  activity that writes to GitHub for a PR goes through `untilGmintAnswered`;
-  push, merge group and staging batch work does not yet.
+  queue. A sweep stops on `isGmintOutage` as it does on `isBudgetError`. Push,
+  merge group and staging batch work waits the same way
+  (`convergeWhenGmintAnswers`, `src/worker/workflows/gmint-wait.ts`); a merge
+  group gives up after six hours, when its queue entry is gone. A new activity
+  that writes to GitHub goes through `untilGmintAnswered`.
 - **A stored check-run id is only as good as the commit GitHub says it is
   on.** `upsertCheckRun` compares the `head_sha` of the run it just updated
   with the head it was asked to publish on and creates a new run when they
@@ -812,8 +814,10 @@ off): a masked or error-only replay cannot be debugged (decisions of
 2026-10-02). Never add `replayIntegration` to `Sentry.init` directly: that
 records before anyone has answered.
 The privacy notice says so, so any change here changes the notice too.
-`sendDefaultPii` is false everywhere and `Sentry.setUser` carries the internal
-id only.
+Every `Sentry.init` takes `dataCollection` from
+`src/lib/observability/data-collection.ts` (no IP, cookies or bodies; SDK 11
+collects all of them when it is left out), and `Sentry.setUser` carries the
+internal id only.
 
 ## Auth & roles
 

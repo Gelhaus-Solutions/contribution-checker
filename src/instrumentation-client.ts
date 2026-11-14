@@ -1,5 +1,6 @@
 import * as Sentry from "@sentry/nextjs";
 import { readReplayChoice, startReplay } from "@/lib/observability/replay-consent";
+import { dataCollection } from "@/lib/observability/data-collection";
 import { scrubSensitive } from "@/lib/observability/scrub";
 
 // Read from the runtime-injected window.__ENV__ first (set by the
@@ -36,14 +37,12 @@ Sentry.init({
   // decisions, 2026-10-02 and 2026-10-04).
   replaysSessionSampleRate: 1.0,
   replaysOnErrorSampleRate: 1.0,
-  profilesSampleRate: 1.0,
+  // Profile every sampled trace (SDK 11 has no per-transaction rate).
+  profileSessionSampleRate: 1.0,
+  profileLifecycle: "trace",
   // No IP address, cookies or request bodies: the internal user id set in
   // sentry-user-client.tsx is enough to find an affected account.
-  sendDefaultPii: false,
-  enableLogs: true,
-  _experiments: {
-    enableLogs: true,
-  },
+  dataCollection,
   beforeSend(event) {
     return scrubSensitive(event);
   },

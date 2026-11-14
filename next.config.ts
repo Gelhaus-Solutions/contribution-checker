@@ -1,6 +1,6 @@
 import type { NextConfig } from "next";
 import { createHash } from "node:crypto";
-import { withSentryConfig } from "@sentry/nextjs";
+import { withSentryConfig } from "@sentry/nextjs/config";
 
 // Pin the Server Actions encryption key to a deterministic value derived from
 // AUTH_SECRET. Without this, every restart/rebuild rotates action IDs and any
@@ -39,7 +39,7 @@ const config: NextConfig = {
     // rules are baked into routes-manifest.json at `next build`, but the CSP
     // carries values only known at container runtime in our generic CI image
     // (GPID_URL, CSP_EXTRA_DOMAINS, the Sentry report endpoint). The CSP
-    // (and its Report-To) is therefore set per-request in src/middleware.ts
+    // (and its Report-To) is therefore set per-request in src/proxy.ts
     // (see src/lib/security/csp.ts). The static headers below are constant and
     // safe to bake.
     return [

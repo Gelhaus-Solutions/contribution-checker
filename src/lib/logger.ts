@@ -87,8 +87,8 @@ function captureToSentry(
   const issueLevel = ISSUE_SEVERITY[logLevel];
 
   // Sentry logs product: every log line above debug becomes a structured log
-  // event with the same attributes as the metric/issue. `enableLogs: true` in
-  // sentry.server.config.ts gates whether these get shipped.
+  // event with the same attributes as the metric/issue, shipped whenever
+  // Sentry is initialised (SDK 11 has no `enableLogs` switch).
   try {
     const logFn = Sentry.logger[logLevel as keyof typeof Sentry.logger];
     if (typeof logFn === "function") {

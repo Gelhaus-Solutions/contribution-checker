@@ -1,6 +1,6 @@
-# Typecheck and tests on every push to main and every pull request; on main
-# and on tags, the image for linux/amd64 and linux/arm64, each built natively
-# in its own job (D26), so neither waits for the other.
+# Typecheck, lint, tests and the build on every push to main and every pull
+# request; on main and on tags, the image for linux/amd64 and linux/arm64,
+# each built natively in its own job (D26), so neither waits for the other.
 #
 # GitHub-hosted, never the home runners: this repository is public, and a
 # pull request, a fork's included, runs whatever it likes in the job it
@@ -53,9 +53,11 @@ jobs:
       # prisma generate first: typecheck reads the generated client.
       - run: pnpm run db:generate
       - run: pnpm run typecheck
-      # `pnpm run lint` is not here: no ESLint config exists, so `next lint`
-      # opens its interactive setup and exits 1.
+      - run: pnpm run lint
       - run: pnpm run test
+      # The image is built on main only, so a pull request proves here that
+      # the app still builds.
+      - run: pnpm run build
 
   image:
     needs: verify
