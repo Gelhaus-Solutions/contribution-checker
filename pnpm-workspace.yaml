@@ -3,9 +3,13 @@
 # Only these two run their install scripts, as before. The others arrive prebuilt
 # or fetch on demand (the Prisma CLI downloads its engine when it is missing).
 allowBuilds:
-  "@sentry-internal/node-cpu-profiler": true
+  "@sentry/node-cpu-profiler": true
   "@sentry/cli": true
+  "@prisma/client": false
   "@prisma/engines": false
+  prisma: false
+  protobufjs: false
+  unrs-resolver: false
   "@parcel/watcher": false
   "@swc/core": false
   core-js: false
