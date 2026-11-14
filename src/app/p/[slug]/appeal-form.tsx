@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useRef, useState } from "react";
+import { useActionState, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -46,14 +46,14 @@ export function AppealForm({
 
   // Re-populate from the echoed values after a server validation error so the
   // applicant does not lose their edits (mirrors ApplyForm).
-  const lastEchoedRef = useRef<AppealState | null>(null);
-  useEffect(() => {
-    if (state === lastEchoedRef.current) return;
-    lastEchoedRef.current = state;
+  const [echoed, setEchoed] = useState(state);
+  if (echoed !== state) {
+    setEchoed(state);
     if (state.status === "error" && state.values) {
-      setValues((prev) => ({ ...prev, ...state.values }));
+      const echoedValues = state.values;
+      setValues((prev) => ({ ...prev, ...echoedValues }));
     }
-  }, [state]);
+  }
 
   if (state.status === "ok") {
     return (

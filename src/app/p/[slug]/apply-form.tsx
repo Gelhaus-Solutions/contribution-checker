@@ -68,24 +68,25 @@ export function ApplyForm({
   const storageKey = `${STORAGE_PREFIX}${projectId}`;
   const [values, setValues] = useState<FormValues>({});
   const hydratedRef = useRef(false);
-  const lastEchoedRef = useRef<ApplyState | null>(null);
 
   // Hydrate the draft from localStorage so values survive reloads / new tabs.
   useEffect(() => {
     const stored = readDraft(storageKey);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- localStorage exists only in the browser, so the draft is read after hydration; reading it while rendering would differ from the server's HTML.
     if (stored) setValues(stored);
     hydratedRef.current = true;
   }, [storageKey]);
 
   // After a server validation error, re-populate the form from the echoed
   // values so the user does not lose their input on a regex mismatch.
-  useEffect(() => {
-    if (state === lastEchoedRef.current) return;
-    lastEchoedRef.current = state;
+  const [echoed, setEchoed] = useState(state);
+  if (echoed !== state) {
+    setEchoed(state);
     if (state.status === "error" && state.values) {
-      setValues((prev) => ({ ...prev, ...state.values }));
+      const echoedValues = state.values;
+      setValues((prev) => ({ ...prev, ...echoedValues }));
     }
-  }, [state]);
+  }
 
   // Persist on every change.
   useEffect(() => {
