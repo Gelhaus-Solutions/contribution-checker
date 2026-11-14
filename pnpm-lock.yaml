@@ -14,7 +14,7 @@ overrides:
   js-yaml: ^4.3.2
   nanoid: ^3.3.18
   postcss: ^8.5.18
-  protobufjs: ^7.6.1
+  protobufjs@<7.6.1: ^7.6.1
   sharp: ^0.35.4
   shell-quote: ^1.9.0
   minimatch@3>brace-expansion: ^1.1.16
@@ -86,22 +86,22 @@ importers:
         version: 11.12.0(rollup@4.68.3)(webpack@5.112.2(@swc/core@1.15.43(@swc/helpers@0.5.23))(esbuild@0.28.2)(lightningcss@1.33.0)(postcss@8.5.28)(sharp@0.35.5(@types/node@24.19.2)))
       '@temporalio/activity':
         specifier: ^1.25.0
-        version: 1.25.0(long@5.3.2)(protobufjs@7.6.4)
+        version: 1.25.0(long@5.3.2)(protobufjs@8.8.1)
       '@temporalio/client':
         specifier: ^1.25.0
-        version: 1.25.0(long@5.3.2)(protobufjs@7.6.4)
+        version: 1.25.0(long@5.3.2)(protobufjs@8.8.1)
       '@temporalio/common':
         specifier: ^1.25.0
-        version: 1.25.0(long@5.3.2)(protobufjs@7.6.4)
+        version: 1.25.0(long@5.3.2)(protobufjs@8.8.1)
       '@temporalio/interceptors-opentelemetry':
         specifier: ^1.25.0
-        version: 1.25.0(@temporalio/common@1.25.0(long@5.3.2)(protobufjs@7.6.4))(@temporalio/workflow@1.25.0(long@5.3.2)(protobufjs@7.6.4))
+        version: 1.25.0(@temporalio/common@1.25.0(long@5.3.2)(protobufjs@8.8.1))(@temporalio/workflow@1.25.0(long@5.3.2)(protobufjs@8.8.1))
       '@temporalio/worker':
         specifier: ^1.25.0
-        version: 1.25.0(@swc/helpers@0.5.23)(esbuild@0.28.2)(lightningcss@1.33.0)(long@5.3.2)(postcss@8.5.28)(protobufjs@7.6.4)(sharp@0.35.5(@types/node@24.19.2))(tslib@2.8.1)
+        version: 1.25.0(@swc/helpers@0.5.23)(esbuild@0.28.2)(lightningcss@1.33.0)(long@5.3.2)(postcss@8.5.28)(protobufjs@8.8.1)(sharp@0.35.5(@types/node@24.19.2))(tslib@2.8.1)
       '@temporalio/workflow':
         specifier: ^1.25.0
-        version: 1.25.0(long@5.3.2)(protobufjs@7.6.4)
+        version: 1.25.0(long@5.3.2)(protobufjs@8.8.1)
       class-variance-authority:
         specifier: ^0.7.1
         version: 0.7.1
@@ -180,7 +180,7 @@ importers:
         version: 4.3.5
       '@temporalio/testing':
         specifier: ^1.25.0
-        version: 1.25.0(@swc/helpers@0.5.23)(esbuild@0.28.2)(lightningcss@1.33.0)(long@5.3.2)(postcss@8.5.28)(protobufjs@7.6.4)(sharp@0.35.5(@types/node@24.19.2))(tslib@2.8.1)
+        version: 1.25.0(@swc/helpers@0.5.23)(esbuild@0.28.2)(lightningcss@1.33.0)(long@5.3.2)(postcss@8.5.28)(protobufjs@8.8.1)(sharp@0.35.5(@types/node@24.19.2))(tslib@2.8.1)
       '@types/node':
         specifier: ^24.19.2
         version: 24.19.2
@@ -2386,28 +2386,28 @@ packages:
     engines: {node: '>= 20.3.0'}
     peerDependencies:
       long: ^5.3.2
-      protobufjs: ^7.6.1
+      protobufjs: ^8.7.1
 
   '@temporalio/client@1.25.0':
     resolution: {integrity: sha512-IbWlxzQiQg2fuIum+d2PkQWOGPVPyeN294sKdBCylKxVsGc1IoixXjWjEZ0dxVuYNFZq+16Vn9Fh2UNVDfXePA==}
     engines: {node: '>= 20.3.0'}
     peerDependencies:
       long: ^5.3.2
-      protobufjs: ^7.6.1
+      protobufjs: ^8.7.1
 
   '@temporalio/common@1.25.0':
     resolution: {integrity: sha512-R9q/5wJZLi47kktJ3GfGh+eMO2HleRxKQGDysCvoObdVjK7Q+F+Vq0M1EeMu4EMHQZdT9A4vgN5rQ9L8cTgU8w==}
     engines: {node: '>= 20.3.0'}
     peerDependencies:
       long: ^5.3.2
-      protobufjs: ^7.6.1
+      protobufjs: ^8.7.1
 
   '@temporalio/core-bridge@1.25.0':
     resolution: {integrity: sha512-4C7lOpBXo9nTTwuEZwlPWGEZy3dchSbEgp+HeX87EbovC4QlPf1Th9iWz7jcce0C9l/O3kaXfA34uPMGRu15DA==}
     engines: {node: '>= 20.3.0'}
     peerDependencies:
       long: ^5.3.2
-      protobufjs: ^7.6.1
+      protobufjs: ^8.7.1
 
   '@temporalio/interceptors-opentelemetry@1.25.0':
     resolution: {integrity: sha512-6nROrw3uOJvGi5njtjlA/szZBCEGKQHSpWg/kJ5NqGjNmAM6KLWe7XQcJGH5s8aIGtUlq0k6sAQFAH38ATKTEg==}
@@ -2424,7 +2424,7 @@ packages:
     engines: {node: '>= 20.3.0'}
     peerDependencies:
       long: ^5.3.2
-      protobufjs: ^7.6.1
+      protobufjs: ^8.7.1
 
   '@temporalio/plugin@1.25.0':
     resolution: {integrity: sha512-Lx4lS/WTOiRcWsz4uUmployyvcbFjxhZm2JukgqEdNsbuP6OGsYPPmEEfmv+OELfjeyaT6bdoYp0vUvyYph2Yg==}
@@ -2439,21 +2439,21 @@ packages:
     engines: {node: '>= 20.3.0'}
     peerDependencies:
       long: ^5.3.2
-      protobufjs: ^7.6.1
+      protobufjs: ^8.7.1
 
   '@temporalio/worker@1.25.0':
     resolution: {integrity: sha512-I4b/OwhDb/UhyoHLJDCnuKqROSlT95xHACRxOsg0UjH6qgcYCusch+9mLol1IN7ml2cNkSbnm+5hvzpVuywP3Q==}
     engines: {node: '>= 20.3.0'}
     peerDependencies:
       long: ^5.3.2
-      protobufjs: ^7.6.1
+      protobufjs: ^8.7.1
 
   '@temporalio/workflow@1.25.0':
     resolution: {integrity: sha512-2Z5BvOtsfOHL3Dy+4cewXEHDu9NeseEn4FeaaitNwn704POgEfshz0zxyZB8ofxbna2P0wsC5l3rnYHkOvtX9A==}
     engines: {node: '>= 20.3.0'}
     peerDependencies:
       long: ^5.3.2
-      protobufjs: ^7.6.1
+      protobufjs: ^8.7.1
 
   '@tybys/wasm-util@0.10.1':
     resolution: {integrity: sha512-9tTaPJLSiejZKx+Bmog4uSubteqTvFrVrURwkmHixBo0G4seD0zUxp98E1DzUBJxLQ3NPwXrGKDiVjwx/DpPsg==}
@@ -4585,8 +4585,12 @@ packages:
   property-information@7.1.0:
     resolution: {integrity: sha512-TwEZ+X+yCJmYfL7TPUOcvBZ4QfoT5YenQiJuX//0th53DE6w0xxLEtfK3iyryQFddXuvkIk51EEgrJQ0WJkOmQ==}
 
-  protobufjs@7.6.4:
-    resolution: {integrity: sha512-RJJPTTpvFfHcWLkIa2JFWK4XvtSzS0yEWDmunqHXli1h3JlkbcQZXDZdcWxv+JK3Xsl5/UFDPZ0iGm7DAengYw==}
+  protobufjs@7.6.6:
+    resolution: {integrity: sha512-dYDWdjSl5RNb7SgPxGQcRU+GtvP7s2fpkrY0r432PcOIaZ0/rBcxEZnQN67iJhFuQiVw754JDoPruPCNdGsbjg==}
+    engines: {node: '>=12.0.0'}
+
+  protobufjs@8.8.1:
+    resolution: {integrity: sha512-d9e9179bjXSJdpJ3+R9fP8hzXsnKLyxTjHLG1dUzje8a27pPyXCe6PrcRtgx2rjoM3IZzHd2vAs+6J/BsO1k7Q==}
     engines: {node: '>=12.0.0'}
 
   pump@3.0.4:
@@ -5736,7 +5740,7 @@ snapshots:
     dependencies:
       lodash.camelcase: 4.3.0
       long: 5.3.2
-      protobufjs: 7.6.4
+      protobufjs: 7.6.6
       yargs: 17.7.3
 
   '@humanfs/core@0.19.2':
@@ -7128,76 +7132,76 @@ snapshots:
       postcss: 8.5.28
       tailwindcss: 4.3.5
 
-  '@temporalio/activity@1.25.0(long@5.3.2)(protobufjs@7.6.4)':
+  '@temporalio/activity@1.25.0(long@5.3.2)(protobufjs@8.8.1)':
     dependencies:
-      '@temporalio/client': 1.25.0(long@5.3.2)(protobufjs@7.6.4)
-      '@temporalio/common': 1.25.0(long@5.3.2)(protobufjs@7.6.4)
+      '@temporalio/client': 1.25.0(long@5.3.2)(protobufjs@8.8.1)
+      '@temporalio/common': 1.25.0(long@5.3.2)(protobufjs@8.8.1)
       long: 5.3.2
-      protobufjs: 7.6.4
+      protobufjs: 8.8.1
 
-  '@temporalio/client@1.25.0(long@5.3.2)(protobufjs@7.6.4)':
+  '@temporalio/client@1.25.0(long@5.3.2)(protobufjs@8.8.1)':
     dependencies:
       '@grpc/grpc-js': 1.14.5
-      '@temporalio/common': 1.25.0(long@5.3.2)(protobufjs@7.6.4)
+      '@temporalio/common': 1.25.0(long@5.3.2)(protobufjs@8.8.1)
       '@temporalio/proto': 1.25.0
       long: 5.3.2
       nexus-rpc: 0.0.3
-      protobufjs: 7.6.4
+      protobufjs: 8.8.1
       uuid: 11.1.1
 
-  '@temporalio/common@1.25.0(long@5.3.2)(protobufjs@7.6.4)':
+  '@temporalio/common@1.25.0(long@5.3.2)(protobufjs@8.8.1)':
     dependencies:
       '@temporalio/proto': 1.25.0
       long: 5.3.2
       ms: 3.0.0-canary.202508261828
       nexus-rpc: 0.0.3
-      protobufjs: 7.6.4
+      protobufjs: 8.8.1
 
-  '@temporalio/core-bridge@1.25.0(long@5.3.2)(protobufjs@7.6.4)':
+  '@temporalio/core-bridge@1.25.0(long@5.3.2)(protobufjs@8.8.1)':
     dependencies:
       '@grpc/grpc-js': 1.14.5
-      '@temporalio/common': 1.25.0(long@5.3.2)(protobufjs@7.6.4)
+      '@temporalio/common': 1.25.0(long@5.3.2)(protobufjs@8.8.1)
       long: 5.3.2
-      protobufjs: 7.6.4
+      protobufjs: 8.8.1
 
-  '@temporalio/interceptors-opentelemetry@1.25.0(@temporalio/common@1.25.0(long@5.3.2)(protobufjs@7.6.4))(@temporalio/workflow@1.25.0(long@5.3.2)(protobufjs@7.6.4))':
+  '@temporalio/interceptors-opentelemetry@1.25.0(@temporalio/common@1.25.0(long@5.3.2)(protobufjs@8.8.1))(@temporalio/workflow@1.25.0(long@5.3.2)(protobufjs@8.8.1))':
     dependencies:
       '@opentelemetry/api': 1.9.1
       '@opentelemetry/core': 1.30.1(@opentelemetry/api@1.9.1)
       '@opentelemetry/resources': 1.30.1(@opentelemetry/api@1.9.1)
       '@opentelemetry/sdk-trace-base': 1.30.1(@opentelemetry/api@1.9.1)
-      '@temporalio/common': 1.25.0(long@5.3.2)(protobufjs@7.6.4)
+      '@temporalio/common': 1.25.0(long@5.3.2)(protobufjs@8.8.1)
       '@temporalio/plugin': 1.25.0
     optionalDependencies:
-      '@temporalio/workflow': 1.25.0(long@5.3.2)(protobufjs@7.6.4)
+      '@temporalio/workflow': 1.25.0(long@5.3.2)(protobufjs@8.8.1)
 
-  '@temporalio/nexus@1.25.0(long@5.3.2)(protobufjs@7.6.4)':
+  '@temporalio/nexus@1.25.0(long@5.3.2)(protobufjs@8.8.1)':
     dependencies:
-      '@temporalio/client': 1.25.0(long@5.3.2)(protobufjs@7.6.4)
-      '@temporalio/common': 1.25.0(long@5.3.2)(protobufjs@7.6.4)
+      '@temporalio/client': 1.25.0(long@5.3.2)(protobufjs@8.8.1)
+      '@temporalio/common': 1.25.0(long@5.3.2)(protobufjs@8.8.1)
       '@temporalio/proto': 1.25.0
       long: 5.3.2
       nexus-rpc: 0.0.3
-      protobufjs: 7.6.4
+      protobufjs: 8.8.1
 
   '@temporalio/plugin@1.25.0': {}
 
   '@temporalio/proto@1.25.0':
     dependencies:
       long: 5.3.2
-      protobufjs: 7.6.4
+      protobufjs: 8.8.1
 
-  '@temporalio/testing@1.25.0(@swc/helpers@0.5.23)(esbuild@0.28.2)(lightningcss@1.33.0)(long@5.3.2)(postcss@8.5.28)(protobufjs@7.6.4)(sharp@0.35.5(@types/node@24.19.2))(tslib@2.8.1)':
+  '@temporalio/testing@1.25.0(@swc/helpers@0.5.23)(esbuild@0.28.2)(lightningcss@1.33.0)(long@5.3.2)(postcss@8.5.28)(protobufjs@8.8.1)(sharp@0.35.5(@types/node@24.19.2))(tslib@2.8.1)':
     dependencies:
-      '@temporalio/activity': 1.25.0(long@5.3.2)(protobufjs@7.6.4)
-      '@temporalio/client': 1.25.0(long@5.3.2)(protobufjs@7.6.4)
-      '@temporalio/common': 1.25.0(long@5.3.2)(protobufjs@7.6.4)
-      '@temporalio/core-bridge': 1.25.0(long@5.3.2)(protobufjs@7.6.4)
+      '@temporalio/activity': 1.25.0(long@5.3.2)(protobufjs@8.8.1)
+      '@temporalio/client': 1.25.0(long@5.3.2)(protobufjs@8.8.1)
+      '@temporalio/common': 1.25.0(long@5.3.2)(protobufjs@8.8.1)
+      '@temporalio/core-bridge': 1.25.0(long@5.3.2)(protobufjs@8.8.1)
       '@temporalio/proto': 1.25.0
-      '@temporalio/worker': 1.25.0(@swc/helpers@0.5.23)(esbuild@0.28.2)(lightningcss@1.33.0)(long@5.3.2)(postcss@8.5.28)(protobufjs@7.6.4)(sharp@0.35.5(@types/node@24.19.2))(tslib@2.8.1)
-      '@temporalio/workflow': 1.25.0(long@5.3.2)(protobufjs@7.6.4)
+      '@temporalio/worker': 1.25.0(@swc/helpers@0.5.23)(esbuild@0.28.2)(lightningcss@1.33.0)(long@5.3.2)(postcss@8.5.28)(protobufjs@8.8.1)(sharp@0.35.5(@types/node@24.19.2))(tslib@2.8.1)
+      '@temporalio/workflow': 1.25.0(long@5.3.2)(protobufjs@8.8.1)
       long: 5.3.2
-      protobufjs: 7.6.4
+      protobufjs: 8.8.1
     transitivePeerDependencies:
       - '@minify-html/node'
       - '@napi-rs/image'
@@ -7218,22 +7222,22 @@ snapshots:
       - uglify-js
       - webpack-cli
 
-  '@temporalio/worker@1.25.0(@swc/helpers@0.5.23)(esbuild@0.28.2)(lightningcss@1.33.0)(long@5.3.2)(postcss@8.5.28)(protobufjs@7.6.4)(sharp@0.35.5(@types/node@24.19.2))(tslib@2.8.1)':
+  '@temporalio/worker@1.25.0(@swc/helpers@0.5.23)(esbuild@0.28.2)(lightningcss@1.33.0)(long@5.3.2)(postcss@8.5.28)(protobufjs@8.8.1)(sharp@0.35.5(@types/node@24.19.2))(tslib@2.8.1)':
     dependencies:
       '@grpc/grpc-js': 1.14.5
       '@swc/core': 1.15.43(@swc/helpers@0.5.23)
-      '@temporalio/activity': 1.25.0(long@5.3.2)(protobufjs@7.6.4)
-      '@temporalio/client': 1.25.0(long@5.3.2)(protobufjs@7.6.4)
-      '@temporalio/common': 1.25.0(long@5.3.2)(protobufjs@7.6.4)
-      '@temporalio/core-bridge': 1.25.0(long@5.3.2)(protobufjs@7.6.4)
-      '@temporalio/nexus': 1.25.0(long@5.3.2)(protobufjs@7.6.4)
+      '@temporalio/activity': 1.25.0(long@5.3.2)(protobufjs@8.8.1)
+      '@temporalio/client': 1.25.0(long@5.3.2)(protobufjs@8.8.1)
+      '@temporalio/common': 1.25.0(long@5.3.2)(protobufjs@8.8.1)
+      '@temporalio/core-bridge': 1.25.0(long@5.3.2)(protobufjs@8.8.1)
+      '@temporalio/nexus': 1.25.0(long@5.3.2)(protobufjs@8.8.1)
       '@temporalio/proto': 1.25.0
-      '@temporalio/workflow': 1.25.0(long@5.3.2)(protobufjs@7.6.4)
+      '@temporalio/workflow': 1.25.0(long@5.3.2)(protobufjs@8.8.1)
       heap-js: 2.7.1
       long: 5.3.2
       memfs: 4.57.8(tslib@2.8.1)
       nexus-rpc: 0.0.3
-      protobufjs: 7.6.4
+      protobufjs: 8.8.1
       rxjs: 7.8.2
       source-map: 0.7.6
       source-map-loader: 5.0.0(webpack@5.112.2(@swc/core@1.15.43(@swc/helpers@0.5.23))(esbuild@0.28.2)(lightningcss@1.33.0)(postcss@8.5.28)(sharp@0.35.5(@types/node@24.19.2)))
@@ -7261,13 +7265,13 @@ snapshots:
       - uglify-js
       - webpack-cli
 
-  '@temporalio/workflow@1.25.0(long@5.3.2)(protobufjs@7.6.4)':
+  '@temporalio/workflow@1.25.0(long@5.3.2)(protobufjs@8.8.1)':
     dependencies:
-      '@temporalio/common': 1.25.0(long@5.3.2)(protobufjs@7.6.4)
+      '@temporalio/common': 1.25.0(long@5.3.2)(protobufjs@8.8.1)
       '@temporalio/proto': 1.25.0
       long: 5.3.2
       nexus-rpc: 0.0.3
-      protobufjs: 7.6.4
+      protobufjs: 8.8.1
 
   '@tybys/wasm-util@0.10.1':
     dependencies:
@@ -9663,7 +9667,7 @@ snapshots:
 
   property-information@7.1.0: {}
 
-  protobufjs@7.6.4:
+  protobufjs@7.6.6:
     dependencies:
       '@protobufjs/aspromise': 1.1.2
       '@protobufjs/base64': 1.1.2
@@ -9674,7 +9678,11 @@ snapshots:
       '@protobufjs/path': 1.1.2
       '@protobufjs/pool': 1.1.0
       '@protobufjs/utf8': 1.1.1
-      '@types/node': 22.20.0
+      '@types/node': 24.19.2
+      long: 5.3.2
+
+  protobufjs@8.8.1:
+    dependencies:
       long: 5.3.2
 
   pump@3.0.4:
