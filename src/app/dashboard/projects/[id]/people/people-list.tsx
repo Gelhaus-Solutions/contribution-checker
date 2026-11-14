@@ -76,6 +76,13 @@ export function PeopleList({
   const [source, setSource] = useState<"ALL" | "manual" | "application">("ALL");
   const [openLogin, setOpenLogin] = useState<string | null>(null);
   const [page, setPage] = useState(1);
+  // Back to the first page whenever the filters change.
+  const filterKey = JSON.stringify([query, searchField, filter, source]);
+  const [pageFilterKey, setPageFilterKey] = useState(filterKey);
+  if (pageFilterKey !== filterKey) {
+    setPageFilterKey(filterKey);
+    setPage(1);
+  }
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -108,10 +115,6 @@ export function PeopleList({
     () => filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE),
     [filtered, currentPage]
   );
-
-  useEffect(() => {
-    setPage(1);
-  }, [query, searchField, filter, source]);
 
   const counts = useMemo(() => {
     return {
@@ -361,10 +364,17 @@ function UserOverviewDialog({
       );
   };
 
-  useEffect(() => {
-    let cancelled = false;
+  // Another person starts from nothing while their overview loads.
+  const overviewKey = JSON.stringify([projectId, ghLogin]);
+  const [overviewFor, setOverviewFor] = useState(overviewKey);
+  if (overviewFor !== overviewKey) {
+    setOverviewFor(overviewKey);
     setData(null);
     setError(null);
+  }
+
+  useEffect(() => {
+    let cancelled = false;
     getUserOverview({ projectId, ghLogin })
       .then((d) => {
         if (!cancelled) setData(d);

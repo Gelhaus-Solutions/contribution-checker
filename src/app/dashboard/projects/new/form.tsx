@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useState } from "react";
+import { useActionState, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -22,12 +22,9 @@ export function CreateProjectForm({
     {}
   );
   const [name, setName] = useState(state.values?.name ?? "");
-  const [slug, setSlug] = useState(state.values?.slug ?? "");
-  const [slugTouched, setSlugTouched] = useState(false);
-
-  useEffect(() => {
-    if (!slugTouched) setSlug(slugify(name));
-  }, [name, slugTouched]);
+  // The slug follows the name until somebody types one of their own.
+  const [typedSlug, setTypedSlug] = useState<string | null>(null);
+  const slug = typedSlug ?? slugify(name);
 
   return (
     <form action={dispatch} className="space-y-4">
@@ -49,10 +46,7 @@ export function CreateProjectForm({
           name="slug"
           required
           value={slug}
-          onChange={(e) => {
-            setSlugTouched(true);
-            setSlug(e.target.value);
-          }}
+          onChange={(e) => setTypedSlug(e.target.value)}
           placeholder="my-awesome-project"
         />
         <p className="text-xs text-muted-foreground">

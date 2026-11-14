@@ -76,6 +76,12 @@ export function PrsList({
 }) {
   const [filters, setFilters] = useState<Filters>(initialFilters);
   const [page, setPage] = useState(1);
+  // Back to the first page whenever the filters change.
+  const [pageFilters, setPageFilters] = useState(filters);
+  if (pageFilters !== filters) {
+    setPageFilters(filters);
+    setPage(1);
+  }
   const [openId, setOpenId] = useState<string | null>(initialOpenId ?? null);
 
   const filtered = useMemo(() => {
@@ -107,10 +113,6 @@ export function PrsList({
     () => filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE),
     [filtered, currentPage]
   );
-
-  useEffect(() => {
-    setPage(1);
-  }, [filters]);
 
   const counts = useMemo(
     () => ({
@@ -402,10 +404,17 @@ function PrOverviewDialog({
       );
   };
 
-  useEffect(() => {
-    let cancelled = false;
+  // Another pull request starts from nothing while its overview loads.
+  const overviewKey = JSON.stringify([projectId, prCheckId]);
+  const [overviewFor, setOverviewFor] = useState(overviewKey);
+  if (overviewFor !== overviewKey) {
+    setOverviewFor(overviewKey);
     setData(null);
     setError(null);
+  }
+
+  useEffect(() => {
+    let cancelled = false;
     getPrOverview({ projectId, prCheckId })
       .then((d) => {
         if (!cancelled) setData(d);
