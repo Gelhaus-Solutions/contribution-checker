@@ -4,7 +4,7 @@ Self-hosted Node.js app that gates pull requests behind a contributor applicatio
 
 ## Stack
 
-- Next.js 15 (App Router) + Prisma + SQLite
+- Next.js 16 (App Router) + Prisma + SQLite
 - GPlatform Identity (GPID) for sign-in: GitHub only, through GPID's provider flow (`@ghub/gpsso-sdk`)
 - GitHub App for repo automation (PR close/reopen/comment/label)
 - Tailwind v4 + shadcn-style UI primitives

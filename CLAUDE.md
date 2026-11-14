@@ -36,7 +36,7 @@ The bot runs in two modes per repo:
 
 ## Tech stack
 
-- Next.js 15 App Router + React 19
+- Next.js 16 App Router + React 19
 - Prisma + PostgreSQL
 - GPlatform Identity (GPID, `@ghub/gpsso-sdk`) for human login: GitHub only,
   through GPID's provider flow, with GPID's session token in an httpOnly
@@ -814,8 +814,10 @@ off): a masked or error-only replay cannot be debugged (decisions of
 2026-10-02). Never add `replayIntegration` to `Sentry.init` directly: that
 records before anyone has answered.
 The privacy notice says so, so any change here changes the notice too.
-`sendDefaultPii` is false everywhere and `Sentry.setUser` carries the internal
-id only.
+Every `Sentry.init` takes `dataCollection` from
+`src/lib/observability/data-collection.ts` (no IP, cookies or bodies; SDK 11
+collects all of them when it is left out), and `Sentry.setUser` carries the
+internal id only.
 
 ## Auth & roles
 
