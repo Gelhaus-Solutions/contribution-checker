@@ -79,7 +79,8 @@ export default async function LinkRepos({
               </li>
             )}
             {data.repositories.map((r) => {
-              const already = existingIds.has(r.id);
+              // Octokit types repository ids as number | bigint; GitHub's ids fit a number.
+              const already = existingIds.has(Number(r.id));
               return (
                 <li
                   key={r.id}

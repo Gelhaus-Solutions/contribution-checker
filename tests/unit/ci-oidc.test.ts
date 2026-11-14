@@ -4,7 +4,6 @@ import {
   generateKeyPair,
   exportJWK,
   createLocalJWKSet,
-  type KeyLike,
 } from "jose";
 import {
   __setJwksForTesting,
@@ -15,7 +14,8 @@ import {
 
 const ISSUER = "https://token.actions.githubusercontent.com";
 
-let privateKey: KeyLike | Uint8Array;
+// jose 6 dropped KeyLike; the key generateKeyPair hands back is the type to hold.
+let privateKey: Awaited<ReturnType<typeof generateKeyPair>>["privateKey"] | Uint8Array;
 let signKid: string;
 
 async function mintToken(args: {

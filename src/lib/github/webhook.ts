@@ -1911,7 +1911,7 @@ export async function handleMergeGroupEvent(payload: MergeGroupPayload) {
             { owner, repo: name, pull_number: prNumber },
           );
           login = res.data.user?.login ?? null;
-          id = res.data.user?.id ?? null;
+          id = res.data.user ? Number(res.data.user.id) : null;
         }
       } catch (e) {
         logger.warn(
