@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -673,11 +673,15 @@ function QaSteps({
   const progress = useMemo(() => taskProgress(shown), [shown]);
 
   // Held in a ref as well as state so the flush can run from a timer or from
-  // unmount, neither of which sees the latest render's closure.
+  // unmount, neither of which sees the latest render's closure. Written after
+  // each commit: a ref written during render could hold a render React threw
+  // away.
   const pendingRef = useRef(pending);
-  pendingRef.current = pending;
   const tasksRef = useRef(tasks);
-  tasksRef.current = tasks;
+  useLayoutEffect(() => {
+    pendingRef.current = pending;
+    tasksRef.current = tasks;
+  });
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const flush = useCallback(async () => {
@@ -713,7 +717,9 @@ function QaSteps({
   // button, Escape and clicking away. Flushing here is what makes "save on
   // close" cover all three rather than just the one with a handler on it.
   const flushRef = useRef(flush);
-  flushRef.current = flush;
+  useLayoutEffect(() => {
+    flushRef.current = flush;
+  });
   useEffect(() => {
     return () => {
       void flushRef.current();
@@ -943,7 +949,9 @@ function AiStepChecklist({
   }, [key, ticked]);
 
   const localRef = useRef(local);
-  localRef.current = local;
+  useLayoutEffect(() => {
+    localRef.current = local;
+  });
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const flush = useCallback(async () => {
@@ -967,7 +975,9 @@ function AiStepChecklist({
 
   // Closing the dialog unmounts this, which is every way out of it.
   const flushRef = useRef(flush);
-  flushRef.current = flush;
+  useLayoutEffect(() => {
+    flushRef.current = flush;
+  });
   useEffect(() => () => void flushRef.current(), []);
 
   function toggle(index: number, checked: boolean) {
