@@ -26,8 +26,12 @@ export function ReplayConsent({ privacyUrl }: { privacyUrl: string | null }) {
     const dsn = window.__ENV__?.SENTRY_DSN ?? process.env.NEXT_PUBLIC_SENTRY_DSN;
     if (!dsn) return;
     const stored = readReplayChoice();
+    // The choice lives in localStorage, which exists only in the browser: it is
+    // read after hydration so the first render matches the server's.
+    /* eslint-disable react-hooks/set-state-in-effect */
     setCurrent(stored);
     if (stored === null) setOpen(true);
+    /* eslint-enable react-hooks/set-state-in-effect */
     const reopen = () => {
       setCurrent(readReplayChoice());
       setOpen(true);

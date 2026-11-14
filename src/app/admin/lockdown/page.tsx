@@ -456,6 +456,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 function IdentityCard({ identity, edgeUrl }: { identity: IdentityReport; edgeUrl: string | null }) {
   const cert = identity.certificate;
+  // eslint-disable-next-line react-hooks/purity -- a server component, rendered once per request: the clock is read once, not on every client re-render.
   const daysLeft = cert ? Math.floor((cert.validTo.getTime() - Date.now()) / DAY_MS) : 0;
   return (
     <Card>

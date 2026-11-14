@@ -29,6 +29,13 @@ function prefersDark() {
   return window.matchMedia("(prefers-color-scheme: dark)").matches;
 }
 
+/** Writes the cookie and flips the class: the browser side of a theme change. */
+function persistTheme(next: Theme) {
+  document.cookie = `${THEME_COOKIE}=${next}; path=/; max-age=31536000; samesite=lax`;
+  const dark = next === "dark" || (next === "system" && prefersDark());
+  document.documentElement.classList.toggle("dark", dark);
+}
+
 /**
  * Theme switcher. Writes the cc-theme cookie and flips the class immediately,
  * so switching costs no server round trip and no re-render. The cookie is what
@@ -41,6 +48,7 @@ export function ThemeToggle() {
   const [theme, setTheme] = React.useState<Theme>("system");
 
   React.useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- the cookie is read in the browser after hydration, so the first render matches the server's neutral icon.
     setTheme(readCookie());
   }, []);
 
@@ -56,9 +64,7 @@ export function ThemeToggle() {
   }, [theme]);
 
   function apply(next: Theme) {
-    document.cookie = `${THEME_COOKIE}=${next}; path=/; max-age=31536000; samesite=lax`;
-    const dark = next === "dark" || (next === "system" && prefersDark());
-    document.documentElement.classList.toggle("dark", dark);
+    persistTheme(next);
     setTheme(next);
   }
 
