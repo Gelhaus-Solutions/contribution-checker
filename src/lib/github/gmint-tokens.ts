@@ -197,14 +197,19 @@ export class GmintTokens {
     if (!pending) {
       const client = this.clientOrThrow();
       pending = client
-        .getToken({
-          grant: `${need.purpose}-${installationId}`,
-          installationId,
-          ...(need.repositories ? { repositories: need.repositories } : {}),
-          permissions,
-          tenant,
-          purpose: need.purpose,
-        })
+        .getToken(
+          {
+            grant: `${need.purpose}-${installationId}`,
+            installationId,
+            ...(need.repositories ? { repositories: need.repositories } : {}),
+            permissions,
+            tenant,
+            purpose: need.purpose,
+          },
+          // A grant that needs an operator's approval is refused at once, as
+          // before SDK 0.3: a webhook cannot hold its request for the wait.
+          { approvalTimeoutMs: 0 },
+        )
         .then(
           (token) => {
             this.store(key, { token, installationId });

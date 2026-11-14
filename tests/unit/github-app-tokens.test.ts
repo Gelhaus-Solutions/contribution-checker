@@ -143,18 +143,21 @@ describe("getInstallationOctokit for an App whose key GMint holds", () => {
     });
 
     expect(getToken).toHaveBeenCalledTimes(1);
-    expect(getToken).toHaveBeenCalledWith({
-      grant: `pr-actions-${INSTALLATION}`,
-      installationId: INSTALLATION,
-      repositories: ["postiz-app"],
-      permissions: {
-        metadata: "read",
-        pull_requests: "write",
-        issues: "write",
+    expect(getToken).toHaveBeenCalledWith(
+      {
+        grant: `pr-actions-${INSTALLATION}`,
+        installationId: INSTALLATION,
+        repositories: ["postiz-app"],
+        permissions: {
+          metadata: "read",
+          pull_requests: "write",
+          issues: "write",
+        },
+        tenant: "project:p1",
+        purpose: "pr-actions",
       },
-      tenant: "project:p1",
-      purpose: "pr-actions",
-    });
+      { approvalTimeoutMs: 0 },
+    );
     expect(gh.seen).toEqual(["token ghs_gmint1"]);
     expect(appOptions).toHaveLength(0);
     expect(keyPathInstallationOctokit).not.toHaveBeenCalled();
