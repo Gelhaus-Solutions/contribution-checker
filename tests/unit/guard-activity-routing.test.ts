@@ -110,9 +110,20 @@ describe("a converge while GMint is not answering", () => {
     expect(failure.type).toBe("GmintUnavailable");
   });
 
-  it("is not refused for a lockdown or a refusal, which waiting does not cure", async () => {
+  it("waits out a lockdown like an outage: the lift and GMint's unsuspend end it", async () => {
     handlePullRequestEvent.mockImplementation(async () => {
       noteGmintOutage(new GmintRefusal("locked_down", 503, false, "locked"));
+      return { terminal: false };
+    });
+    const failure = await convergePrEvent(envelope("pull_request")).catch(
+      (e) => e,
+    );
+    expect(failure).toBeInstanceOf(ApplicationFailure);
+    expect(failure.type).toBe("GmintUnavailable");
+  });
+
+  it("is not refused for a refusal, which waiting does not cure", async () => {
+    handlePullRequestEvent.mockImplementation(async () => {
       noteGmintOutage(new GmintRefusal("denied", 403, false, "no"));
       return { terminal: false };
     });
