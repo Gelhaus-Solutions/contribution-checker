@@ -69,7 +69,9 @@ import {
   invalidateGitHubAppCache,
 } from "@/lib/github/app";
 import {
+  isGmintOutage,
   resetGmintTokensForTests,
+  watchGmint,
   type TokenNeed,
 } from "@/lib/github/gmint-tokens";
 import { budgetSnapshot, resetBudgetForTests } from "@/lib/github/budget";
@@ -84,9 +86,9 @@ const NEED: TokenNeed = {
 let issued = 0;
 
 /** A GitHub that answers every request with `status` and records the auth. */
-function github(status = 200) {
+function github(status = 200, message = "Bad credentials") {
   const seen: string[] = [];
-  const body = status === 200 ? { id: 1 } : { message: "Bad credentials" };
+  const body = status === 200 ? { id: 1 } : { message };
   const fetch = vi.fn(
     async (_url: string, init: { headers: Record<string, string> }) => {
       seen.push(init.headers.authorization);
@@ -205,6 +207,42 @@ describe("getInstallationOctokit for an App whose key GMint holds", () => {
     });
     expect(getToken).toHaveBeenCalledTimes(2);
     expect(gh.seen).toEqual(["token ghs_gmint2"]);
+  });
+
+  it("turns GitHub's answer for a suspended installation into an outage the work waits out", async () => {
+    const octokit = await getInstallationOctokit(
+      INSTALLATION,
+      NEED,
+      "project:p1",
+    );
+    const suspended = github(403, "This installation has been suspended");
+    const watched = await watchGmint(() =>
+      octokit
+        .request("GET /repos/{owner}/{repo}", {
+          owner: "gitroomhq",
+          repo: "postiz-app",
+          request: { fetch: suspended.fetch },
+        })
+        .catch((e: unknown) => e),
+    );
+    expect(watched.value).toMatchObject({
+      name: "GmintRefusal",
+      code: "installation_suspended",
+    });
+    expect(isGmintOutage(watched.outage)).toBe(true);
+    // Its tokens are forgotten: the next request mints afresh.
+    await getInstallationOctokit(INSTALLATION, NEED, "project:p1");
+    expect(getToken).toHaveBeenCalledTimes(2);
+
+    // Any other 403 stays GitHub's own answer.
+    const forbidden = github(403, "Resource not accessible by integration");
+    await expect(
+      octokit.request("GET /repos/{owner}/{repo}", {
+        owner: "gitroomhq",
+        repo: "postiz-app",
+        request: { fetch: forbidden.fetch },
+      }),
+    ).rejects.toMatchObject({ status: 403 });
   });
 
   it("forgets every GMint token when the App cache is invalidated", async () => {
