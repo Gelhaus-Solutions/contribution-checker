@@ -2083,7 +2083,7 @@ async function relinkAfterUnsuspend(
           per_page: 100,
           page,
         });
-        repos.push(...data.repositories.map((r) => ({ id: r.id, full_name: r.full_name })));
+        repos.push(...data.repositories.map((r) => ({ id: Number(r.id), full_name: r.full_name })));
         if (data.repositories.length < 100) break;
       }
     }
