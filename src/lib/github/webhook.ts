@@ -45,7 +45,7 @@ import {
   type StagingRoutingOutcome,
 } from "@/lib/github/staging";
 import { runGuardForPr } from "@/lib/guard/run";
-import { signalStagingBatch } from "@/lib/temporal/start";
+import { reGateProjectPrs, signalStagingBatch } from "@/lib/temporal/start";
 import { runQualityForPrCheck } from "@/lib/quality/run";
 import { getInstallationOctokit } from "@/lib/github/app";
 import { verifyDco } from "@/lib/cla/dco";
@@ -55,7 +55,7 @@ import { contributorInfoUrl } from "@/lib/notifications/email";
 
 type WebhookPayload = {
   action?: string;
-  installation?: { id: number };
+  installation?: { id: number; account?: { login: string } | null };
   repository?: {
     id: number;
     full_name: string;
@@ -2017,8 +2017,7 @@ export async function handleInstallationEvent(payload: WebhookPayload) {
   // PR webhook can find them by ghRepoId.
   if (
     (payload.action === "created" ||
-      payload.action === "new_permissions_accepted" ||
-      payload.action === "unsuspend") &&
+      payload.action === "new_permissions_accepted") &&
     payload.repositories
   ) {
     await attachInstallationToManualRepos({
@@ -2028,14 +2027,76 @@ export async function handleInstallationEvent(payload: WebhookPayload) {
     return;
   }
 
-  // Detach repos from the installation when the App is uninstalled or
-  // suspended. The Repo row stays so the project still lists the repo; it
-  // just falls back to the "App not installed" state and can be re-linked.
-  if (payload.action === "deleted" || payload.action === "suspend") {
+  // A suspension is GMint's lockdown (or an owner's pause), never an
+  // uninstall: the repos keep their installation, and the work GitHub refuses
+  // meanwhile waits for it (`isGmintOutage`). Detaching them here left every
+  // repo "App not installed" after the lockdown of 2026-11-14.
+  if (payload.action === "suspend") {
+    logger.warn({ installationId }, "installation suspended; repos stay linked");
+    return;
+  }
+
+  if (payload.action === "unsuspend") {
+    await relinkAfterUnsuspend(payload, installationId);
+    return;
+  }
+
+  // Detach repos from the installation when the App is uninstalled. The Repo
+  // row stays so the project still lists the repo; it just falls back to the
+  // "App not installed" state and can be re-linked.
+  if (payload.action === "deleted") {
     await prisma.repo.updateMany({
       where: { installationId },
       data: { installationId: null, ghRepoId: null },
     });
+  }
+}
+
+/**
+ * After an unsuspend: links again the repos an older suspend detached (GitHub's
+ * unsuspend event names none, so the installation is asked), then re-gates the
+ * open PRs of every project on the installation, because GitHub delivers no
+ * events while an installation is suspended.
+ */
+async function relinkAfterUnsuspend(
+  payload: WebhookPayload,
+  installationId: number,
+): Promise<void> {
+  let repos = payload.repositories ?? null;
+  if (!repos) {
+    const owner = payload.installation?.account?.login;
+    const detached = owner
+      ? await prisma.repo.findFirst({
+          where: { installationId: null, fullName: { startsWith: `${owner}/` } },
+          select: { projectId: true },
+        })
+      : null;
+    if (detached) {
+      const octokit = await getInstallationOctokit(
+        installationId,
+        { purpose: "repo-link", permissions: {} },
+        projectTenant(detached.projectId),
+      );
+      repos = [];
+      for (let page = 1; ; page++) {
+        const { data } = await octokit.request("GET /installation/repositories", {
+          per_page: 100,
+          page,
+        });
+        repos.push(...data.repositories.map((r) => ({ id: r.id, full_name: r.full_name })));
+        if (data.repositories.length < 100) break;
+      }
+    }
+  }
+  if (repos) await attachInstallationToManualRepos({ installationId, repos });
+
+  const projects = await prisma.repo.findMany({
+    where: { installationId, active: true },
+    select: { projectId: true },
+    distinct: ["projectId"],
+  });
+  for (const { projectId } of projects) {
+    await reGateProjectPrs({ projectId, reason: "installation unsuspended" });
   }
 }
 
