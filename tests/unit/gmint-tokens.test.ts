@@ -320,14 +320,22 @@ describe("watchGmint", () => {
     expect(getToken).toHaveBeenCalledTimes(1);
   });
 
-  it("does not take a lockdown, a refusal or an unverified answer for an outage", async () => {
+  it("does not take a refusal or an unverified answer for an outage", async () => {
     const t = tokens();
-    for (const code of ["locked_down", "denied", "untrusted"]) {
+    for (const code of ["denied", "untrusted"]) {
       getToken.mockRejectedValueOnce(new GmintError(code as "denied", "x"));
       const watched = await watchGmint(() => swallow(t.token(INSTALLATION, NEED, "project:p1")));
       expect(watched.outage).toBeNull();
     }
     expect(isGmintOutage(new Error("GMint is not answering"))).toBe(false);
+  });
+
+  // A lockdown ends with a person's lift; the work waits for it instead of
+  // finishing without its GitHub writes (the lockdown of 2026-11-14).
+  it("waits out a lockdown like an outage", async () => {
+    getToken.mockRejectedValueOnce(new GmintError("locked_down", "x"));
+    const watched = await watchGmint(() => swallow(tokens().token(INSTALLATION, NEED, "project:p1")));
+    expect(watched.outage).toMatchObject({ code: "locked_down", status: 503 });
   });
 
   it("keeps each work's outage to itself", async () => {

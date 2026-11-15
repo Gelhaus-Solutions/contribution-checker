@@ -96,15 +96,22 @@ export class GmintRefusal extends Error {
 }
 
 /**
- * GMint not answering, as opposed to refusing: asking again later can help. A
- * lockdown is deliberate and is not an outage.
+ * Refusals that end on their own, though asking again at once does not help:
+ * GMint's lockdown (lifted by a person, then GMint unsuspends the Apps) and
+ * GitHub's suspension of the installation that lockdown made.
+ */
+const WAITED_OUT = new Set(["locked_down", "installation_suspended"]);
+
+/**
+ * GMint or GitHub access not there for now, as opposed to refused: the work
+ * waits and runs again later (`convergeWhenGmintAnswers`) instead of
+ * completing without its GitHub writes.
  */
 export function isGmintOutage(e: unknown): e is GmintRefusal {
   return (
     e instanceof GmintRefusal &&
-    e.retryable &&
     e.status === 503 &&
-    e.code !== "locked_down"
+    (e.retryable || WAITED_OUT.has(e.code))
   );
 }
 

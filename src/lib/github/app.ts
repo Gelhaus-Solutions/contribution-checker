@@ -3,10 +3,15 @@ import { Octokit } from "@octokit/core";
 import { getSecret } from "@/lib/vault/resolver";
 import { budgetWrapper } from "@/lib/github/budget";
 import {
+  GmintRefusal,
   gmintTokens,
+  noteGmintOutage,
   type GithubTenant,
   type TokenNeed,
 } from "@/lib/github/gmint-tokens";
+
+/** GitHub's answer to a token of a suspended installation (403). */
+const SUSPENDED = /installation has been suspended/i;
 
 let cached: App | null = null;
 let inflight: Promise<App> | null = null;
@@ -135,8 +140,22 @@ async function gmintInstallationOctokit(
           try {
             return await request(endpoint);
           } catch (e) {
-            if ((e as { status?: unknown })?.status === 401) {
+            const status = (e as { status?: unknown })?.status;
+            if (status === 401) {
               tokens.forget(installationId);
+            }
+            // The lockdown suspended the installation: the work waits for the
+            // unsuspend like for GMint itself, instead of finishing without it.
+            if (status === 403 && SUSPENDED.test(String((e as Error)?.message))) {
+              tokens.forget(installationId);
+              const refusal = new GmintRefusal(
+                "installation_suspended",
+                503,
+                false,
+                "GitHub has this App's installation suspended",
+              );
+              noteGmintOutage(refusal);
+              throw refusal;
             }
             throw e;
           }
