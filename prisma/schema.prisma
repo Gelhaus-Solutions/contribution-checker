@@ -443,6 +443,11 @@ model Repo {
   installationId     Int? // GH App installation id; null = manually entered, App not installed yet
   requireOwnApproval Boolean @default(false)
   active             Boolean @default(true) // false if installation was uninstalled
+  // The installation an App-linked repo was detached from (an uninstall, or the
+  // repo taken off the installation), so the Repos page can offer Relink
+  // instead of Remove, which deletes the row with everything under it. Null
+  // while linked, and for a repo that was only ever entered by hand.
+  detachedFromInstallationId Int?
 
   // Cached default branch name, refreshed opportunistically from PR/push
   // webhook payloads and, as a last resort, from GET /repos/{owner}/{repo}.

@@ -61,6 +61,7 @@ export async function linkRepos(formData: FormData) {
           ghRepoId: sel.ghRepoId,
           installationId: parsed.installationId,
           active: true,
+          detachedFromInstallationId: null,
         },
       });
     } else {

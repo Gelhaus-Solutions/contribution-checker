@@ -33,7 +33,10 @@ vi.mock("@/lib/temporal/start", () => ({
   signalStagingBatch: vi.fn(),
 }));
 
-import { handleInstallationEvent } from "@/lib/github/webhook";
+import {
+  handleInstallationEvent,
+  handleInstallationReposEvent,
+} from "@/lib/github/webhook";
 
 const INSTALLATION = { id: 129356052, account: { login: "gitroomhq" } };
 
@@ -60,7 +63,11 @@ describe("handleInstallationEvent", () => {
     });
     expect(repoUpdateMany).toHaveBeenCalledWith({
       where: { installationId: INSTALLATION.id },
-      data: { installationId: null, ghRepoId: null },
+      data: {
+        installationId: null,
+        ghRepoId: null,
+        detachedFromInstallationId: INSTALLATION.id,
+      },
     });
   });
 
@@ -95,8 +102,31 @@ describe("handleInstallationEvent", () => {
     );
     expect(repoUpdateMany).toHaveBeenCalledWith({
       where: { fullName: "gitroomhq/postiz-app", installationId: null },
-      data: { ghRepoId: 7, installationId: INSTALLATION.id, active: true },
+      data: {
+        ghRepoId: 7,
+        installationId: INSTALLATION.id,
+        active: true,
+        detachedFromInstallationId: null,
+      },
     });
     expect(reGateProjectPrs).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("handleInstallationReposEvent", () => {
+  it("remembers the installation of a repo taken off it, so it can be relinked", async () => {
+    await handleInstallationReposEvent({
+      action: "removed",
+      installation: INSTALLATION,
+      repositories_removed: [{ id: 7, full_name: "gitroomhq/postiz-app" }],
+    });
+    expect(repoUpdateMany).toHaveBeenCalledWith({
+      where: { ghRepoId: { in: [7] }, installationId: INSTALLATION.id },
+      data: {
+        installationId: null,
+        ghRepoId: null,
+        detachedFromInstallationId: INSTALLATION.id,
+      },
+    });
   });
 });
