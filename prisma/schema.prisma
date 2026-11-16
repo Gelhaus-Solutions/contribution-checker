@@ -440,11 +440,12 @@ model Repo {
   projectId          String
   ghRepoId           Int?    @unique // numeric GH id (survives renames); null until App is installed
   fullName           String // "owner/name", cached
-  installationId     Int? // GH App installation id; null = manually entered, App not installed yet
+  installationId     Int? // GH App installation id; null = entered by hand (CI mode), or detached (below)
   requireOwnApproval Boolean @default(false)
-  active             Boolean @default(true) // false if installation was uninstalled
-  // The installation an App-linked repo was detached from (an uninstall, or the
-  // repo taken off the installation), so the Repos page can offer Relink
+  active             Boolean @default(true) // nothing sets it false: a detached repo stays active, and CI mode accepts it
+  // The installation an App-linked repo was detached from (an uninstall, the
+  // repo taken off the installation on GitHub, or unlinked on the Link page),
+  // so the Repos page can offer Relink
   // instead of Remove, which deletes the row with everything under it. Null
   // while linked, and for a repo that was only ever entered by hand.
   detachedFromInstallationId Int?
