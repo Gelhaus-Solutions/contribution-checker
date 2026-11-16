@@ -106,6 +106,7 @@ async function attachInstallationToManualRepos(args: {
           ghRepoId: r.id,
           installationId: args.installationId,
           active: true,
+          detachedFromInstallationId: null,
         },
       })
       .catch((e) =>
@@ -2042,12 +2043,16 @@ export async function handleInstallationEvent(payload: WebhookPayload) {
   }
 
   // Detach repos from the installation when the App is uninstalled. The Repo
-  // row stays so the project still lists the repo; it just falls back to the
-  // "App not installed" state and can be re-linked.
+  // row stays, with its settings, and remembers the installation so the Repos
+  // page offers Relink rather than Remove; installing the App again links it.
   if (payload.action === "deleted") {
     await prisma.repo.updateMany({
       where: { installationId },
-      data: { installationId: null, ghRepoId: null },
+      data: {
+        installationId: null,
+        ghRepoId: null,
+        detachedFromInstallationId: installationId,
+      },
     });
   }
 }
@@ -2114,7 +2119,11 @@ export async function handleInstallationReposEvent(payload: WebhookPayload) {
         ghRepoId: { in: ghRepoIds },
         installationId: payload.installation.id,
       },
-      data: { installationId: null, ghRepoId: null },
+      data: {
+        installationId: null,
+        ghRepoId: null,
+        detachedFromInstallationId: payload.installation.id,
+      },
     });
   }
   // When repos are added to an installation, attach App metadata to any
