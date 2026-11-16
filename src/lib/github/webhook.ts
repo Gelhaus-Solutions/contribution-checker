@@ -94,14 +94,30 @@ type WebhookPayload = {
   repositories_removed?: Array<{ id: number; full_name: string }>;
 };
 
+function notDetachedFrom(installationId: number) {
+  return {
+    OR: [
+      { detachedFromInstallationId: null },
+      { detachedFromInstallationId: { not: installationId } },
+    ],
+  };
+}
+
 async function attachInstallationToManualRepos(args: {
   installationId: number;
   repos: Array<{ id: number; full_name: string }>;
+  // The installation names repos it already had (new permissions, an
+  // unsuspend): a repo taken off it, on the Link page or on GitHub, stays off.
+  leaveDetached?: boolean;
 }) {
   for (const r of args.repos) {
     await prisma.repo
       .updateMany({
-        where: { fullName: r.full_name, installationId: null },
+        where: {
+          fullName: r.full_name,
+          installationId: null,
+          ...(args.leaveDetached ? notDetachedFrom(args.installationId) : {}),
+        },
         data: {
           ghRepoId: r.id,
           installationId: args.installationId,
@@ -2024,6 +2040,7 @@ export async function handleInstallationEvent(payload: WebhookPayload) {
     await attachInstallationToManualRepos({
       installationId,
       repos: payload.repositories,
+      leaveDetached: payload.action === "new_permissions_accepted",
     });
     return;
   }
@@ -2072,7 +2089,11 @@ async function relinkAfterUnsuspend(
     const owner = payload.installation?.account?.login;
     const detached = owner
       ? await prisma.repo.findFirst({
-          where: { installationId: null, fullName: { startsWith: `${owner}/` } },
+          where: {
+            installationId: null,
+            fullName: { startsWith: `${owner}/` },
+            ...notDetachedFrom(installationId),
+          },
           select: { projectId: true },
         })
       : null;
@@ -2093,7 +2114,13 @@ async function relinkAfterUnsuspend(
       }
     }
   }
-  if (repos) await attachInstallationToManualRepos({ installationId, repos });
+  if (repos) {
+    await attachInstallationToManualRepos({
+      installationId,
+      repos,
+      leaveDetached: true,
+    });
+  }
 
   const projects = await prisma.repo.findMany({
     where: { installationId, active: true },
