@@ -9,6 +9,7 @@ export type AuditKind =
   | "member.removed"
   | "repo.linked"
   | "repo.unlinked"
+  | "repo.relinked"
   | "repo.opt_out_changed"
   | "form.updated"
   | "settings.updated"

@@ -19,7 +19,8 @@ import { SearchInput } from "@/components/ui/search-input";
 import { parsePageParams, type SearchParamRecord } from "@/lib/pagination";
 import { CodeBlock } from "@/components/code-block";
 import { EmptyState } from "@/components/empty-state";
-import { addRepoByName, removeRepo } from "./actions";
+import { addRepoByName, relinkRepo } from "./actions";
+import { RemoveRepoButton } from "./remove-repo-button";
 
 function ciGateYaml(baseUrl: string, slug: string): string {
   return `name: Contribution check (gate)
@@ -292,26 +293,34 @@ export default async function ProjectRepos({
                     {r.installationId != null && r.active && (
                       <Badge variant="success">App installed</Badge>
                     )}
-                    {r.installationId == null && r.active && (
-                      <Badge variant="secondary">CI mode</Badge>
-                    )}
+                    {r.installationId == null &&
+                      r.detachedFromInstallationId != null && (
+                        <Badge variant="warning">App detached</Badge>
+                      )}
+                    {r.installationId == null &&
+                      r.detachedFromInstallationId == null &&
+                      r.active && <Badge variant="secondary">CI mode</Badge>}
                     {r.installationId != null && !r.active && (
                       <Badge variant="destructive">uninstalled</Badge>
                     )}
                     {r.requireOwnApproval && (
                       <Badge variant="warning">per-repo approval</Badge>
                     )}
-                    <form action={removeRepo}>
-                      <input type="hidden" name="projectId" value={id} />
-                      <input type="hidden" name="repoId" value={r.id} />
-                      <SubmitButton
-                        size="sm"
-                        variant="ghost"
-                        className="text-destructive hover:bg-destructive/10"
-                      >
-                        Remove
-                      </SubmitButton>
-                    </form>
+                    {r.installationId == null &&
+                      r.detachedFromInstallationId != null && (
+                        <form action={relinkRepo}>
+                          <input type="hidden" name="projectId" value={id} />
+                          <input type="hidden" name="repoId" value={r.id} />
+                          <SubmitButton size="sm" variant="outline">
+                            Relink
+                          </SubmitButton>
+                        </form>
+                      )}
+                    <RemoveRepoButton
+                      projectId={id}
+                      repoId={r.id}
+                      fullName={r.fullName}
+                    />
                   </div>
                 </li>
               ))}
