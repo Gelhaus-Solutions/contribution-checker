@@ -2,7 +2,8 @@
  * The App's installation events. A suspension (GMint's lockdown suspends every
  * installation) must not unlink the repos, and an unsuspend links again what an
  * older suspend unlinked and re-gates the open PRs, because GitHub sends no
- * events while an installation is suspended (the lockdown of 2026-11-14).
+ * events while an installation is suspended (the lockdown of 2026-11-14). A
+ * repo taken off the installation stays off until it is put back or relinked.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -39,6 +40,18 @@ import {
 } from "@/lib/github/webhook";
 
 const INSTALLATION = { id: 129356052, account: { login: "gitroomhq" } };
+const LINKED = {
+  ghRepoId: 7,
+  installationId: INSTALLATION.id,
+  active: true,
+  detachedFromInstallationId: null,
+};
+const NOT_DETACHED_FROM_IT = {
+  OR: [
+    { detachedFromInstallationId: null },
+    { detachedFromInstallationId: { not: INSTALLATION.id } },
+  ],
+};
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -101,19 +114,58 @@ describe("handleInstallationEvent", () => {
       "project:p1",
     );
     expect(repoUpdateMany).toHaveBeenCalledWith({
-      where: { fullName: "gitroomhq/postiz-app", installationId: null },
-      data: {
-        ghRepoId: 7,
-        installationId: INSTALLATION.id,
-        active: true,
-        detachedFromInstallationId: null,
+      where: {
+        fullName: "gitroomhq/postiz-app",
+        installationId: null,
+        ...NOT_DETACHED_FROM_IT,
       },
+      data: LINKED,
     });
     expect(reGateProjectPrs).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves a repo taken off the installation unlinked when new permissions are accepted", async () => {
+    await handleInstallationEvent({
+      action: "new_permissions_accepted",
+      installation: INSTALLATION,
+      repositories: [{ id: 7, full_name: "gitroomhq/postiz-app" }],
+    });
+    expect(repoUpdateMany).toHaveBeenCalledWith({
+      where: {
+        fullName: "gitroomhq/postiz-app",
+        installationId: null,
+        ...NOT_DETACHED_FROM_IT,
+      },
+      data: LINKED,
+    });
+  });
+
+  it("links a detached repo again when the App is installed again", async () => {
+    await handleInstallationEvent({
+      action: "created",
+      installation: INSTALLATION,
+      repositories: [{ id: 7, full_name: "gitroomhq/postiz-app" }],
+    });
+    expect(repoUpdateMany).toHaveBeenCalledWith({
+      where: { fullName: "gitroomhq/postiz-app", installationId: null },
+      data: LINKED,
+    });
   });
 });
 
 describe("handleInstallationReposEvent", () => {
+  it("links a repo again when it is put back on the installation", async () => {
+    await handleInstallationReposEvent({
+      action: "added",
+      installation: INSTALLATION,
+      repositories_added: [{ id: 7, full_name: "gitroomhq/postiz-app" }],
+    });
+    expect(repoUpdateMany).toHaveBeenCalledWith({
+      where: { fullName: "gitroomhq/postiz-app", installationId: null },
+      data: LINKED,
+    });
+  });
+
   it("remembers the installation of a repo taken off it, so it can be relinked", async () => {
     await handleInstallationReposEvent({
       action: "removed",

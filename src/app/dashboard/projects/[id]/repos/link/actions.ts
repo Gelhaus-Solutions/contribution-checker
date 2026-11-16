@@ -41,9 +41,11 @@ export async function linkRepos(formData: FormData) {
   const byFullName = new Map(existing.map((r) => [r.fullName, r]));
 
   const desiredIds = new Set(selections.map((s) => s.ghRepoId));
-  // Only remove repos that were previously linked through this installation
+  // Only unlink repos that were previously linked through this installation
   // and are no longer selected. Manually-added rows (installationId: null)
-  // are preserved.
+  // are preserved. An unlinked repo is detached, as an uninstall detaches it:
+  // the Repos page offers Relink, and the installation does not link it again
+  // by itself.
   const toRemove = existing.filter(
     (r) =>
       r.installationId === parsed.installationId &&
@@ -86,7 +88,11 @@ export async function linkRepos(formData: FormData) {
   for (const r of toRemove) {
     await prisma.repo.update({
       where: { id: r.id },
-      data: { installationId: null, ghRepoId: null },
+      data: {
+        installationId: null,
+        ghRepoId: null,
+        detachedFromInstallationId: parsed.installationId,
+      },
     });
     await recordAudit({
       projectId: parsed.projectId,
