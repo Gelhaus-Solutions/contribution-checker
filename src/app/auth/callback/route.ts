@@ -3,7 +3,7 @@ import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
 import { safeNextPath } from "@/lib/auth/next-path";
 import { recordSignInMetric } from "@/lib/auth/sync-user";
-import { getSso, RETURN_COOKIE, secureCookies, SESSION_COOKIE } from "@/lib/sso";
+import { getSso, isUnverifiedAddressRefusal, RETURN_COOKIE, secureCookies, SESSION_COOKIE } from "@/lib/sso";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,8 +16,9 @@ export const dynamic = "force-dynamic";
  *
  * Every outcome other than a signed-in person lands on the home page with a
  * `signin` notice: `cancelled` (the person or GitHub said no), `confirm` (the
- * address GitHub named belongs to a G Platform account, and GPID mailed it to
- * confirm the link, so nobody is signed in yet) and `failed` for the rest.
+ * address GitHub named belongs to a GPlatform account, and GPID mailed it to
+ * confirm the link, so nobody is signed in yet), `unverified` (GitHub named no
+ * verified address for a new account) and `failed` for the rest.
  * The onboarding and terms gates run on the next page, as for any session.
  */
 export async function GET(request: NextRequest): Promise<NextResponse> {
@@ -50,6 +51,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     response.cookies.delete({ name: RETURN_COOKIE, path: "/auth" });
     return response;
   } catch (e) {
+    if (isUnverifiedAddressRefusal(e)) {
+      logger.warn(
+        { "auth.refusal": "unverified_address" },
+        "auth: GitHub named no verified address for a new account",
+      );
+      return notice("unverified");
+    }
     logger.warn({ err: e }, "auth: completing the GitHub sign-in through GPID failed");
     return notice("failed");
   }

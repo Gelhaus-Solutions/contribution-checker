@@ -1,5 +1,5 @@
 import "server-only";
-import { createSsoClient, type SsoClient } from "@ghub/gpsso-sdk";
+import { createSsoClient, SsoError, type SsoClient } from "@ghub/gpsso-sdk";
 import { env } from "@/lib/env";
 import { getSecret } from "@/lib/vault/resolver";
 
@@ -47,6 +47,18 @@ export function getSso(): Promise<SsoClient> {
 /** The address GPID sends the browser back to; registered for this app at enrolment. */
 export function callbackUrl(): string {
   return new URL("/auth/callback", env.PUBLIC_BASE_URL).toString();
+}
+
+/**
+ * GPID's refusal of a GitHub account no GPID account is linked to yet, when
+ * GitHub named no verified primary address for it: GPID has nothing to find or
+ * create an account by. It is also what every new person gets while the `github`
+ * provider's `trustEmailVerified` is off at GPID, which is how all new
+ * contributors were refused until 2026-11-18. GPID gives the refusal no code of
+ * its own, so its sentence is matched.
+ */
+export function isUnverifiedAddressRefusal(e: unknown): boolean {
+  return e instanceof SsoError && e.status === 400 && /does not confirm an address/i.test(e.message);
 }
 
 /** Cookies are Secure wherever the app is served over HTTPS. */

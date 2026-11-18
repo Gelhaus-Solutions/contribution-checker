@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { Metadata } from "next";
+import type { ReactNode } from "react";
 import { auth, signIn } from "@/auth";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -35,11 +36,21 @@ const EXAMPLE = {
  * What the GitHub sign-in through GPID came back with, when it did not sign
  * anybody in (src/app/auth/callback/route.ts). Shown above the hero's buttons.
  */
-const SIGN_IN_NOTICES: Record<string, { variant: "info" | "warning"; title: string; text: string }> = {
+const SIGN_IN_NOTICES: Record<string, { variant: "info" | "warning"; title: string; text: ReactNode }> = {
   confirm: {
     variant: "info",
     title: "Check your mailbox",
-    text: "Your GitHub address already belongs to a G Platform account. We sent it a link to connect GitHub; open it, then log in again.",
+    text: "Your GitHub address already belongs to a GPlatform account. We sent it a link to connect GitHub; open it, then log in again.",
+  },
+  unverified: {
+    variant: "warning",
+    title: "Verify your email on GitHub",
+    text: (
+      <>
+        GitHub has no verified primary email for your account. Verify one in your{" "}
+        <a href="https://github.com/settings/emails">GitHub email settings</a>, then log in again.
+      </>
+    ),
   },
   cancelled: {
     variant: "info",
